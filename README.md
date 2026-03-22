@@ -6,6 +6,13 @@ The repository does not run the upstream TinyGo CLI in the browser yet. Instead,
 
 Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/seorii/dev/hancomac/wasm-tinygo/COMPATIBILITY.md).
 
+## Documentation
+
+- [Architecture](/home/seorii/dev/hancomac/wasm-tinygo/docs/architecture.md)
+- [Manifest chain](/home/seorii/dev/hancomac/wasm-tinygo/docs/manifests.md)
+- [Development guide](/home/seorii/dev/hancomac/wasm-tinygo/docs/development.md)
+- [Compatibility matrix](/home/seorii/dev/hancomac/wasm-tinygo/COMPATIBILITY.md)
+
 ## Status
 
 - Browser execution path is working end to end.
