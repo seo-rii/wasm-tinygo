@@ -10,6 +10,33 @@ This repository does **not** run the real TinyGo CLI in the browser yet. It now 
 2. run a Go/WASI build driver that writes a request/result contract
 3. execute the returned tool plan with emception in the same browser session
 
+## Quick start
+
+```sh
+npm install
+npm run dev
+```
+
+For a full local verification pass:
+
+```sh
+go test ./...
+npm run test:host
+npm run test:wasi
+npm run check
+npm run build
+npm run test:browser
+```
+
+## Generated outputs
+
+`npm run prepare:assets`, `npm run dev`, and `npm run build` generate two browser-side tool artifacts on demand:
+
+- `public/vendor/emception/emception.worker.js`
+- `public/tools/go-probe.wasm`
+
+Those outputs are intentionally ignored by git. Clone the repository, run the normal npm scripts, and let the assets be regenerated locally instead of committing them.
+
 ## What is working
 
 - `npm run dev` fetches and patches the published emception worker into `public/vendor/emception/emception.worker.js`
