@@ -11,6 +11,7 @@ Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/s
 - [Architecture](/home/seorii/dev/hancomac/wasm-tinygo/docs/architecture.md)
 - [Manifest chain](/home/seorii/dev/hancomac/wasm-tinygo/docs/manifests.md)
 - [Development guide](/home/seorii/dev/hancomac/wasm-tinygo/docs/development.md)
+- [Roadmap](/home/seorii/dev/hancomac/wasm-tinygo/docs/roadmap.md)
 - [Compatibility matrix](/home/seorii/dev/hancomac/wasm-tinygo/COMPATIBILITY.md)
 
 ## Status
@@ -24,7 +25,7 @@ Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/s
 
 ## What this repository demonstrates
 
-1. Download and patch the published emception worker for local browser use.
+1. Download and patch the published emception worker and vendor its runtime assets for local browser use.
 2. Build `cmd/go-probe` into a WASI module that runs in the browser.
 3. Accept a TinyGo-style build request and lower it into normalized planning artifacts.
 4. Regenerate bootstrap and lowered C sources from front-end and backend handoff manifests.
@@ -79,7 +80,7 @@ npm run build
 ## Commands
 
 - `npm run prepare:assets`
-  Fetches the emception worker and rebuilds the Go/WASI probe.
+  Fetches the emception worker, vendors its runtime assets locally, and rebuilds the Go/WASI probe.
 - `npm run dev`
   Prepares assets and starts the Vite dev server.
 - `npm run build`
@@ -100,6 +101,7 @@ npm run build
 These files are generated locally and intentionally ignored by git:
 
 - `public/vendor/emception/emception.worker.js`
+- `public/vendor/emception/`
 - `public/tools/go-probe.wasm`
 - `.cache/`
 

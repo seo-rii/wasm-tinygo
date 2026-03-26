@@ -17,7 +17,7 @@ The dev and build flows prepare browser-side assets automatically before startin
 ## Useful commands
 
 - `npm run prepare:assets`
-  Fetches the emception worker and rebuilds the Go/WASI probe.
+  Fetches the emception worker, vendors its runtime assets locally, and rebuilds the Go/WASI probe.
 - `npm run dev`
   Starts the local app after preparing assets.
 - `npm run build`
@@ -37,7 +37,7 @@ The dev and build flows prepare browser-side assets automatically before startin
 
 These are generated locally and ignored by git:
 
-- `public/vendor/emception/emception.worker.js`
+- `public/vendor/emception/`
 - `public/tools/go-probe.wasm`
 - `.cache/`
 - `dist/`
@@ -70,7 +70,9 @@ In restricted environments the browser smoke test may skip when loopback listen 
   Project entry point.
 - `docs/architecture.md`
   High-level stage layout and ownership.
+- `docs/roadmap.md`
+  Remaining milestones toward the first real TinyGo demo.
 - `docs/manifests.md`
-  Manifest and artifact chain overview.
+  Manifest and artifact chain overview, including the current front-end handoff contract.
 - `COMPATIBILITY.md`
   Compatibility claims and the tests backing them.

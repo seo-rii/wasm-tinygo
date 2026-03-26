@@ -1,4 +1,5 @@
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { Buffer } from 'node:buffer'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { patchEmceptionWorkerSource } from './patch-emception-worker-source.mjs'
@@ -25,18 +26,53 @@ try {
       `Reusing existing emception worker at ${path.relative(rootDir, outputPath)} because download failed: ${error instanceof Error ? error.message : String(error)}`,
     )
     reusedExistingWorker = true
+    sourceText = await readFile(outputPath, 'utf8')
   } catch {
     throw error
   }
 }
 
+const outputDir = path.dirname(outputPath)
+let workerSource = sourceText
 if (!reusedExistingWorker) {
-  const source = patchEmceptionWorkerSource(sourceText)
+  workerSource = patchEmceptionWorkerSource(sourceText)
 
   const banner = `/* Generated from ${emceptionWorkerUrl} by scripts/fetch-emception-worker.mjs. */\n`
 
-  await mkdir(path.dirname(outputPath), { recursive: true })
-  await writeFile(outputPath, `${banner}${source}`)
+  await mkdir(outputDir, { recursive: true })
+  await writeFile(outputPath, `${banner}${workerSource}`)
 
   console.log(`Wrote ${path.relative(rootDir, outputPath)}`)
+}
+
+const assetBaseUrl = new URL('./', emceptionWorkerUrl)
+const assetNames = []
+const seenAssetNames = new Set()
+for (const match of workerSource.matchAll(/e\.exports=t\.p\+"([^"]+)"/g)) {
+  const assetName = match[1]
+  if (seenAssetNames.has(assetName)) {
+    continue
+  }
+  seenAssetNames.add(assetName)
+  assetNames.push(assetName)
+}
+
+for (const assetName of assetNames) {
+  const assetPath = path.join(outputDir, assetName)
+  try {
+    await access(assetPath)
+    continue
+  } catch {}
+  let remoteAssetName = assetName
+  if (assetName.endsWith('.brotli')) {
+    remoteAssetName = `${assetName.slice(0, -'.brotli'.length)}.br`
+  }
+  const response = await fetch(new URL(remoteAssetName, assetBaseUrl))
+  if (!response.ok) {
+    throw new Error(`Failed to download emception asset ${remoteAssetName}: ${response.status} ${response.statusText}`)
+  }
+  const assetBytes = Buffer.from(await response.arrayBuffer())
+  await mkdir(path.dirname(assetPath), { recursive: true })
+  await writeFile(assetPath, assetBytes)
+  console.log(`Wrote ${path.relative(rootDir, assetPath)}`)
 }

@@ -1,4 +1,3 @@
-const emceptionPublicPath = 'https://jprendes.github.io/emception/'
 const automaticPublicPathSnippet =
   'if(!e)throw new Error("Automatic publicPath is not supported in this browser");e=e.replace(/#.*$/,"").replace(/\\?.*$/,"").replace(/\\/[^\\/]+$/,"/"),__webpack_require__.p=e'
 const moduleInitSnippet = 'this.ready=this.#e(e,r,{onrunprocess:t,...a});'
@@ -18,9 +17,10 @@ export const patchEmceptionWorkerSource = (source) => {
   }
 
   return source
+    .replace(/e\.exports=t\.p\+"([^"]+)\.br"/g, 'e.exports=t.p+"$1.brotli"')
     .replace(
       automaticPublicPathSnippet,
-      `__webpack_require__.p=${JSON.stringify(emceptionPublicPath)}`,
+      '__webpack_require__.p=new URL("./",self.location.href).href',
     )
     .replace(moduleInitSnippet, moduleInitPatched)
     .replace(emceptionExposeSnippet, emceptionExposePatched)
