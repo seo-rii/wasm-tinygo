@@ -195,6 +195,38 @@ test('wasi driver writes tinygo metadata for valid source', async () => {
   assert.equal(frontendInput.importedPackageFiles, undefined)
   assert.equal(frontendInput.stdlibPackageFiles, undefined)
   assert.equal(frontendInput.allCompileFiles, undefined)
+  assert.deepEqual(frontendInput.compileUnits, [
+    {
+      kind: 'program',
+      packageDir: '/workspace',
+      files: ['/workspace/main.go'],
+    },
+    {
+      kind: 'stdlib',
+      packageDir: '/working/.tinygo-root/src/errors',
+      files: ['/working/.tinygo-root/src/errors/errors.go'],
+    },
+    {
+      kind: 'stdlib',
+      packageDir: '/working/.tinygo-root/src/fmt',
+      files: ['/working/.tinygo-root/src/fmt/print.go'],
+    },
+    {
+      kind: 'stdlib',
+      packageDir: '/working/.tinygo-root/src/io',
+      files: ['/working/.tinygo-root/src/io/io.go'],
+    },
+    {
+      kind: 'stdlib',
+      packageDir: '/working/.tinygo-root/src/runtime',
+      files: ['/working/.tinygo-root/src/runtime/runtime.go'],
+    },
+    {
+      kind: 'stdlib',
+      packageDir: '/working/.tinygo-root/src/unsafe',
+      files: ['/working/.tinygo-root/src/unsafe/unsafe.go'],
+    },
+  ])
   assert.equal(frontendInput.sourceSelection.targetAssets, undefined)
   assert.equal(frontendInput.sourceSelection.runtimeSupport, undefined)
   assert.equal(frontendInput.sourceSelection.program, undefined)
@@ -552,6 +584,23 @@ test('wasi frontend consumes bootstrap handoff input', async () => {
           '/workspace/main.go',
         ],
       },
+      compileUnits: [
+        {
+          kind: 'program',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+        },
+        {
+          kind: 'stdlib',
+          packageDir: '/working/.tinygo-root/src/errors',
+          files: ['/working/.tinygo-root/src/errors/errors.go'],
+        },
+        {
+          kind: 'stdlib',
+          packageDir: '/working/.tinygo-root/src/fmt',
+          files: ['/working/.tinygo-root/src/fmt/print.go'],
+        },
+      ],
     },
   })
 

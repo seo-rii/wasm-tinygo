@@ -27,6 +27,7 @@ type Input struct {
 	ObjectOutputPath     string          `json:"objectOutputPath"`
 	ArtifactOutputPath   string          `json:"artifactOutputPath"`
 	SourceSelection      SourceSelection `json:"sourceSelection"`
+	CompileUnits         []IntermediateCompileUnit `json:"compileUnits,omitempty"`
 	TargetAssetFiles     []string        `json:"targetAssetFiles"`
 	RuntimeSupportFiles  []string        `json:"runtimeSupportFiles"`
 	ProgramFiles         []string        `json:"programFiles"`
@@ -190,20 +191,59 @@ func Build(input Input) (Result, error) {
 	if input.SourceSelection.AllCompile == nil {
 		return Result{}, fmt.Errorf("source selection is required")
 	}
+	if len(input.CompileUnits) == 0 {
+		return Result{}, fmt.Errorf("compile units are required")
+	}
+	allCompileFileSet := map[string]struct{}{}
+	for _, path := range input.SourceSelection.AllCompile {
+		allCompileFileSet[path] = struct{}{}
+	}
+	seenCompileFiles := map[string]struct{}{}
 	stdlibFiles := make([]string, 0, len(input.SourceSelection.AllCompile))
 	programFiles := make([]string, 0, len(input.SourceSelection.AllCompile))
 	importedFiles := make([]string, 0, len(input.SourceSelection.AllCompile))
-	entryDir := filepath.Dir(input.EntryFile)
-	for _, path := range input.SourceSelection.AllCompile {
-		if strings.HasPrefix(path, tinygoroot.RootDir+"/src/") {
-			stdlibFiles = append(stdlibFiles, path)
-			continue
+	compileUnits := make([]IntermediateCompileUnit, 0, len(input.CompileUnits))
+	for _, compileUnit := range input.CompileUnits {
+		if compileUnit.Kind == "" {
+			return Result{}, fmt.Errorf("compile unit kind is required")
 		}
-		if filepath.Dir(path) == entryDir {
-			programFiles = append(programFiles, path)
-			continue
+		if compileUnit.PackageDir == "" {
+			return Result{}, fmt.Errorf("compile unit packageDir is required")
 		}
-		importedFiles = append(importedFiles, path)
+		if len(compileUnit.Files) == 0 {
+			return Result{}, fmt.Errorf("compile unit files are required")
+		}
+		unitFiles := append([]string{}, compileUnit.Files...)
+		compileUnits = append(compileUnits, IntermediateCompileUnit{
+			Kind:       compileUnit.Kind,
+			PackageDir: compileUnit.PackageDir,
+			Files:      unitFiles,
+		})
+		for _, path := range unitFiles {
+			if filepath.Dir(path) != compileUnit.PackageDir {
+				return Result{}, fmt.Errorf("compile unit files must stay inside packageDir")
+			}
+			if _, ok := allCompileFileSet[path]; !ok {
+				return Result{}, fmt.Errorf("compile units must only reference allCompile files")
+			}
+			if _, ok := seenCompileFiles[path]; ok {
+				return Result{}, fmt.Errorf("compile units must not repeat files")
+			}
+			seenCompileFiles[path] = struct{}{}
+		}
+		switch compileUnit.Kind {
+		case "program":
+			programFiles = append(programFiles, unitFiles...)
+		case "imported":
+			importedFiles = append(importedFiles, unitFiles...)
+		case "stdlib":
+			stdlibFiles = append(stdlibFiles, unitFiles...)
+		default:
+			return Result{}, fmt.Errorf("unsupported compile unit kind %q", compileUnit.Kind)
+		}
+	}
+	if len(seenCompileFiles) != len(allCompileFileSet) {
+		return Result{}, fmt.Errorf("compile units must cover every allCompile file")
 	}
 	entrySeen := false
 	for _, path := range programFiles {
@@ -416,38 +456,6 @@ func Build(input Input) (Result, error) {
 		}
 		if !present {
 			intermediateLDFlags = append(intermediateLDFlags, flag)
-		}
-	}
-	compileUnits := make([]IntermediateCompileUnit, 0, len(importedFiles)+len(stdlibFiles)+1)
-	if len(programFiles) != 0 {
-		compileUnits = append(compileUnits, IntermediateCompileUnit{
-			Kind:       "program",
-			PackageDir: entryDir,
-			Files:      append([]string{}, programFiles...),
-		})
-	}
-	for _, group := range []struct {
-		kind  string
-		files []string
-	}{
-		{kind: "imported", files: importedFiles},
-		{kind: "stdlib", files: stdlibFiles},
-	} {
-		groupedFiles := map[string][]string{}
-		for _, path := range group.files {
-			groupedFiles[filepath.Dir(path)] = append(groupedFiles[filepath.Dir(path)], path)
-		}
-		packageDirs := make([]string, 0, len(groupedFiles))
-		for packageDir := range groupedFiles {
-			packageDirs = append(packageDirs, packageDir)
-		}
-		sort.Strings(packageDirs)
-		for _, packageDir := range packageDirs {
-			compileUnits = append(compileUnits, IntermediateCompileUnit{
-				Kind:       group.kind,
-				PackageDir: packageDir,
-				Files:      append([]string{}, groupedFiles[packageDir]...),
-			})
 		}
 	}
 	intermediateManifestContents, err := json.Marshal(IntermediateManifest{

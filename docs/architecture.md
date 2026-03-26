@@ -31,6 +31,8 @@ It reads `/workspace/tinygo-request.json`, validates the request, loads package 
 
 The planner owns the first browser-facing contract: which files must be materialized, which target profile applies, and which entry/source set the next stage must consume.
 
+That contract now includes explicit `compileUnits`, so the front-end no longer has to reconstruct package grouping from a flat compile-file list.
+
 ### 4. Front-end stage
 
 `internal/tinygofrontend` consumes `tinygo-frontend-input.json` and emits the front-end-owned manifest chain, including:
@@ -43,6 +45,8 @@ The planner owns the first browser-facing contract: which files must be material
 - `/working/tinygo-backend-input.json`
 
 This stage keeps bootstrap compilation and the next lowering steps explicit and deterministic, even before a real TinyGo compiler front-end is wired in.
+
+At this point the front-end still synthesizes the next manifests, but it consumes planner-owned package grouping directly instead of rediscovering it from file paths alone.
 
 ### 5. Backend stage
 
@@ -95,6 +99,7 @@ If you are new to the repository, read the docs in this order:
 
 1. `README.md`
 2. `docs/architecture.md`
-3. `docs/manifests.md`
-4. `docs/development.md`
-5. `COMPATIBILITY.md`
+3. `docs/roadmap.md`
+4. `docs/manifests.md`
+5. `docs/development.md`
+6. `COMPATIBILITY.md`

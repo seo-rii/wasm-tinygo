@@ -3,6 +3,7 @@ package tinygoplanner
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -197,6 +198,11 @@ func PlanBuild(request Request) (Result, error) {
 		frontendInput := struct {
 			OptimizeFlag string `json:"optimizeFlag"`
 			EntryFile    string `json:"entryFile"`
+			CompileUnits []struct {
+				Kind       string   `json:"kind"`
+				PackageDir string   `json:"packageDir"`
+				Files      []string `json:"files"`
+			} `json:"compileUnits"`
 			Toolchain    struct {
 				Target              string   `json:"target"`
 				LLVMTarget          string   `json:"llvmTarget,omitempty"`
@@ -217,6 +223,11 @@ func PlanBuild(request Request) (Result, error) {
 		}{
 			OptimizeFlag: request.OptimizeFlag,
 			EntryFile:    request.EntryPath,
+			CompileUnits: []struct {
+				Kind       string   `json:"kind"`
+				PackageDir string   `json:"packageDir"`
+				Files      []string `json:"files"`
+			}{},
 			Toolchain: struct {
 				Target              string   `json:"target"`
 				LLVMTarget          string   `json:"llvmTarget,omitempty"`
@@ -239,6 +250,46 @@ func PlanBuild(request Request) (Result, error) {
 			}{
 				AllCompile: allCompileFiles,
 			},
+		}
+		if len(packageFiles) != 0 {
+			frontendInput.CompileUnits = append(frontendInput.CompileUnits, struct {
+				Kind       string   `json:"kind"`
+				PackageDir string   `json:"packageDir"`
+				Files      []string `json:"files"`
+			}{
+				Kind:       "program",
+				PackageDir: filepath.Dir(request.EntryPath),
+				Files:      append([]string{}, packageFiles...),
+			})
+		}
+		for _, group := range []struct {
+			kind  string
+			files []string
+		}{
+			{kind: "imported", files: importedPackageFiles},
+			{kind: "stdlib", files: stdlibPackageFiles},
+		} {
+			groupedFiles := map[string][]string{}
+			for _, path := range group.files {
+				packageDir := filepath.Dir(path)
+				groupedFiles[packageDir] = append(groupedFiles[packageDir], path)
+			}
+			packageDirs := make([]string, 0, len(groupedFiles))
+			for packageDir := range groupedFiles {
+				packageDirs = append(packageDirs, packageDir)
+			}
+			sort.Strings(packageDirs)
+			for _, packageDir := range packageDirs {
+				frontendInput.CompileUnits = append(frontendInput.CompileUnits, struct {
+					Kind       string   `json:"kind"`
+					PackageDir string   `json:"packageDir"`
+					Files      []string `json:"files"`
+				}{
+					Kind:       group.kind,
+					PackageDir: packageDir,
+					Files:      append([]string{}, groupedFiles[packageDir]...),
+				})
+			}
 		}
 		frontendInputSource, err := json.Marshal(frontendInput)
 		if err != nil {

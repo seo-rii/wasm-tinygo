@@ -39,6 +39,11 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 				"/workspace/main.go",
 			},
 		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "imported", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
+			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
@@ -268,6 +273,9 @@ func TestBuildRejectsEntryMissingFromProgramFiles(t *testing.T) {
 				"/workspace/helper.go",
 			},
 		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/helper.go"}},
+		},
 	})
 	if err == nil {
 		t.Fatalf("expected validation error")
@@ -290,6 +298,9 @@ func TestBuildDefaultsBootstrapPaths(t *testing.T) {
 			AllCompile: []string{
 				"/workspace/main.go",
 			},
+		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
 		},
 	})
 	if err != nil {
@@ -330,6 +341,9 @@ func TestExecutePathsWritesFrontendResult(t *testing.T) {
 			AllCompile: []string{
 				"/workspace/main.go",
 			},
+		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
 		},
 	})
 	if err != nil {
@@ -488,6 +502,52 @@ func TestBuildRejectsLegacyTopLevelSourceGroupsEvenWithNestedSourceSelection(t *
 		t.Fatalf("expected validation error")
 	}
 	if !strings.Contains(err.Error(), "legacy top-level source selection fields are not supported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildRejectsMissingCompileUnits(t *testing.T) {
+	_, err := Build(Input{
+		Toolchain: Toolchain{
+			Target:             "wasm",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		EntryFile: "/workspace/main.go",
+		SourceSelection: SourceSelection{
+			AllCompile: []string{
+				"/workspace/main.go",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "compile units are required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildRejectsCompileUnitsMissingAllCompileFile(t *testing.T) {
+	_, err := Build(Input{
+		Toolchain: Toolchain{
+			Target:             "wasm",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		EntryFile: "/workspace/main.go",
+		SourceSelection: SourceSelection{
+			AllCompile: []string{
+				"/workspace/helper.go",
+				"/workspace/main.go",
+			},
+		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "compile units must cover every allCompile file") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

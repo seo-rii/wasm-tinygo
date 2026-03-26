@@ -11,7 +11,7 @@ Each stage owns the artifacts it derives. Later stages consume those artifacts i
 | `/workspace/tinygo-request.json` | browser host / caller | driver | TinyGo-style build request |
 | `/workspace/tinygo-result.json` | driver | browser host | initial plan result plus generated bootstrap/front-end files |
 | `/working/tinygo-bootstrap.json` | planner | browser host | normalized bootstrap manifest and dispatch list |
-| `/working/tinygo-frontend-input.json` | planner | front-end stage | front-end handoff contract |
+| `/working/tinygo-frontend-input.json` | planner | front-end stage | front-end handoff contract, including explicit `compileUnits` package grouping |
 | `/working/tinygo-frontend-result.json` | front-end stage | browser host | front-end execution result envelope |
 | `/working/tinygo-compile-unit.json` | front-end stage | browser host | bootstrap compile-unit source of truth |
 | `/working/tinygo-intermediate.json` | front-end stage | host verifiers | resolved compile graph for the next stages |
@@ -27,6 +27,33 @@ Each stage owns the artifacts it derives. Later stages consume those artifacts i
 | `/working/tinygo-lowered-artifact.json` | backend stage | browser host / verifiers | lowered wasm artifact contract |
 | `/working/tinygo-command-batch.json` | backend stage | browser host | final bitcode command batch |
 | `/working/tinygo-command-artifact.json` | backend stage | browser host / verifiers | final wasm artifact contract |
+
+## Front-end handoff contract
+
+`/working/tinygo-frontend-input.json` is now the planner-owned source of truth for front-end package grouping.
+
+The key nested sections are:
+
+- `toolchain`
+- `sourceSelection`
+- `compileUnits`
+
+`compileUnits` makes package ownership explicit enough for the front-end to stop inferring package grouping from the flat `allCompile` list alone.
+
+Each compile unit currently carries:
+
+- `kind`
+- `packageDir`
+- `files`
+
+The front-end validates that every `allCompile` file is covered exactly once by the compile units, then carries the same grouping into the downstream manifest chain:
+
+- `/working/tinygo-compile-unit.json`
+- `/working/tinygo-intermediate.json`
+- `/working/tinygo-lowering-input.json`
+- `/working/tinygo-work-items.json`
+- `/working/tinygo-lowering-plan.json`
+- `/working/tinygo-backend-input.json`
 
 ## Design rules
 

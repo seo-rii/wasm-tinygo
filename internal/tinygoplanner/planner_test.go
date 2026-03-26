@@ -2,6 +2,7 @@ package tinygoplanner
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -222,6 +223,11 @@ func TestPlanBuildReturnsTinyGoBootstrapPlan(t *testing.T) {
 		OptimizeFlag      string   `json:"optimizeFlag"`
 		EntryFile         string   `json:"entryFile"`
 		MaterializedFiles []string `json:"materializedFiles"`
+		CompileUnits      []struct {
+			Kind       string   `json:"kind"`
+			PackageDir string   `json:"packageDir"`
+			Files      []string `json:"files"`
+		} `json:"compileUnits"`
 		Toolchain         struct {
 			Target              string   `json:"target"`
 			LLVMTarget          string   `json:"llvmTarget"`
@@ -254,6 +260,18 @@ func TestPlanBuildReturnsTinyGoBootstrapPlan(t *testing.T) {
 		frontendInput.Toolchain.Target != "wasm" ||
 		frontendInput.Toolchain.CFlags != nil ||
 		frontendInput.Toolchain.LDFlags != nil ||
+		!reflect.DeepEqual(frontendInput.CompileUnits, []struct {
+			Kind       string   `json:"kind"`
+			PackageDir string   `json:"packageDir"`
+			Files      []string `json:"files"`
+		}{
+			{Kind: "program", PackageDir: "/workspace/cmd/app", Files: []string{"/workspace/cmd/app/helper.go", "/workspace/cmd/app/main.go"}},
+			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/errors", Files: []string{"/working/.tinygo-root/src/errors/errors.go"}},
+			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/io", Files: []string{"/working/.tinygo-root/src/io/io.go"}},
+			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/runtime", Files: []string{"/working/.tinygo-root/src/runtime/runtime.go"}},
+			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/unsafe", Files: []string{"/working/.tinygo-root/src/unsafe/unsafe.go"}},
+		}) ||
 		frontendInput.SourceSelection.Program != nil ||
 		frontendInput.SourceSelection.Imported != nil ||
 		!slices.Equal(frontendInput.SourceSelection.AllCompile, []string{
@@ -276,6 +294,13 @@ func TestPlanBuildReturnsTinyGoBootstrapPlan(t *testing.T) {
 	}
 	if _, ok := frontendInputMap["tinygoRoot"]; ok {
 		t.Fatalf("expected frontend input to omit tinygoRoot, got %#v", frontendInputMap)
+	}
+	compileUnitsAny, ok := frontendInputMap["compileUnits"].([]any)
+	if !ok {
+		t.Fatalf("expected compileUnits in %#v", frontendInputMap)
+	}
+	if len(compileUnitsAny) != 6 {
+		t.Fatalf("expected 6 compile units in %#v", frontendInputMap)
 	}
 	if sourceSelection, ok := frontendInputMap["sourceSelection"].(map[string]any); ok {
 		if _, ok := sourceSelection["targetAssets"]; ok {
@@ -381,6 +406,13 @@ func TestPlanBuildOmitsImportedSelectionFromFrontendInput(t *testing.T) {
 	sourceSelection, ok := frontendInputMap["sourceSelection"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected sourceSelection in %#v", frontendInputMap)
+	}
+	compileUnitsAny, ok := frontendInputMap["compileUnits"].([]any)
+	if !ok {
+		t.Fatalf("expected compileUnits in %#v", frontendInputMap)
+	}
+	if len(compileUnitsAny) != 2 {
+		t.Fatalf("expected 2 compile units in %#v", frontendInputMap)
 	}
 	if _, ok := sourceSelection["imported"]; ok {
 		t.Fatalf("expected frontend input sourceSelection to omit imported, got %#v", frontendInputMap)
