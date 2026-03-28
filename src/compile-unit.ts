@@ -25,6 +25,17 @@ export type TinyGoCompileUnitManifest = {
     stdlib?: string[]
     allCompile?: string[]
   }
+  compileUnits?: Array<{
+    kind?: string
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    depOnly?: boolean
+    packageName?: string
+    packageDir?: string
+    files?: string[]
+    standard?: boolean
+  }>
 }
 
 export type TinyGoCompileRequestContract = {
@@ -45,6 +56,111 @@ export type TinyGoCompileRequestContract = {
   stdlibPackageFiles?: string[]
   allCompileFiles?: string[]
   toolPlan?: CompileUnitToolInvocation[]
+}
+
+export type TinyGoFrontendInputManifest = {
+  buildTags?: string[]
+  buildContext?: {
+    target?: string
+    llvmTarget?: string
+    goos?: string
+    goarch?: string
+    gc?: string
+    scheduler?: string
+    buildTags?: string[]
+    modulePath?: string
+  }
+  modulePath?: string
+  optimizeFlag?: string
+  entryFile?: string
+  toolchain?: {
+    target?: string
+    llvmTarget?: string
+    linker?: string
+    cflags?: string[]
+    ldflags?: string[]
+    translationUnitPath?: string
+    objectOutputPath?: string
+    artifactOutputPath?: string
+  }
+  sourceSelection?: {
+    targetAssets?: string[]
+    runtimeSupport?: string[]
+    program?: string[]
+    imported?: string[]
+    stdlib?: string[]
+    allCompile?: string[]
+  }
+  compileUnits?: Array<{
+    kind?: string
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    depOnly?: boolean
+    packageName?: string
+    packageDir?: string
+    files?: string[]
+    standard?: boolean
+  }>
+  packageGraph?: Array<{
+    depOnly?: boolean
+    dir?: string
+    files?: {
+      goFiles?: string[]
+    }
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    name?: string
+    standard?: boolean
+  }>
+}
+
+export type TinyGoFrontendAnalysisManifest = {
+  buildContext?: {
+    target?: string
+    llvmTarget?: string
+    goos?: string
+    goarch?: string
+    gc?: string
+    scheduler?: string
+    buildTags?: string[]
+    modulePath?: string
+  }
+  entryFile?: string
+  compileUnitManifestPath?: string
+  allCompileFiles?: string[]
+  compileGroups?: Array<{
+    name?: string
+    files?: string[]
+  }>
+  compileUnits?: Array<{
+    kind?: string
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    depOnly?: boolean
+    packageName?: string
+    packageDir?: string
+    files?: string[]
+    standard?: boolean
+  }>
+  toolchain?: {
+    target?: string
+    llvmTarget?: string
+  }
+  packageGraph?: Array<{
+    depOnly?: boolean
+    dir?: string
+    files?: {
+      goFiles?: string[]
+    }
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    name?: string
+    standard?: boolean
+  }>
 }
 
 export type TinyGoIntermediateManifest = {
@@ -70,8 +186,14 @@ export type TinyGoIntermediateManifest = {
   }
   compileUnits?: Array<{
     kind?: string
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    depOnly?: boolean
+    packageName?: string
     packageDir?: string
     files?: string[]
+    standard?: boolean
   }>
 }
 
@@ -94,8 +216,14 @@ export type TinyGoLoweringManifest = {
   }
   compileUnits?: Array<{
     kind?: string
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    depOnly?: boolean
+    packageName?: string
     packageDir?: string
     files?: string[]
+    standard?: boolean
   }>
 }
 
@@ -105,9 +233,15 @@ export type TinyGoWorkItemsManifest = {
   workItems?: Array<{
     id?: string
     kind?: string
+    importPath?: string
+    imports?: string[]
+    depOnly?: boolean
+    modulePath?: string
+    packageName?: string
     packageDir?: string
     files?: string[]
     bitcodeOutputPath?: string
+    standard?: boolean
   }>
 }
 
@@ -117,9 +251,15 @@ export type TinyGoLoweredSourcesManifest = {
   units?: Array<{
     id?: string
     kind?: string
+    importPath?: string
+    imports?: string[]
+    depOnly?: boolean
+    modulePath?: string
+    packageName?: string
     packageDir?: string
     sourceFiles?: string[]
     loweredSourcePath?: string
+    standard?: boolean
   }>
 }
 
@@ -129,6 +269,8 @@ export type TinyGoLoweredIRManifest = {
   units?: Array<{
     id?: string
     kind?: string
+    importPath?: string
+    modulePath?: string
     packageDir?: string
     sourceFiles?: string[]
     loweredSourcePath?: string
@@ -199,12 +341,18 @@ export type TinyGoLoweringPlanManifest = {
   compileJobs?: Array<{
     id?: string
     kind?: string
+    importPath?: string
+    imports?: string[]
+    depOnly?: boolean
+    modulePath?: string
+    packageName?: string
     packageDir?: string
     files?: string[]
     bitcodeOutputPath?: string
     llvmTarget?: string
     cflags?: string[]
     optimizeFlag?: string
+    standard?: boolean
   }>
   linkJob?: {
     linker?: string
@@ -220,12 +368,18 @@ export type TinyGoBackendInputManifest = {
   compileJobs?: Array<{
     id?: string
     kind?: string
+    importPath?: string
+    imports?: string[]
+    depOnly?: boolean
+    modulePath?: string
+    packageName?: string
     packageDir?: string
     files?: string[]
     bitcodeOutputPath?: string
     llvmTarget?: string
     cflags?: string[]
     optimizeFlag?: string
+    standard?: boolean
   }>
   linkJob?: {
     linker?: string
@@ -236,9 +390,15 @@ export type TinyGoBackendInputManifest = {
   loweredUnits?: Array<{
     id?: string
     kind?: string
+    importPath?: string
+    imports?: string[]
+    depOnly?: boolean
+    modulePath?: string
+    packageName?: string
     packageDir?: string
     sourceFiles?: string[]
     loweredSourcePath?: string
+    standard?: boolean
   }>
 }
 
@@ -259,6 +419,660 @@ export type TinyGoCommandBatchManifest = {
   linkCommand?: {
     argv?: string[]
     cwd?: string
+  }
+}
+
+export type TinyGoHostProbeManifest = {
+  artifact?: {
+    path?: string
+    size?: number
+  }
+  command?: string[]
+  runtime?: {
+    executed?: boolean
+    exitCode?: number | null
+    logs?: string[]
+    reason?: string
+  }
+  target?: string
+  targetInfo?: {
+    buildTags?: string[]
+    gc?: string
+    goarch?: string
+    goos?: string
+    llvmTriple?: string
+    scheduler?: string
+  }
+  toolchain?: {
+    binPath?: string
+    rootPath?: string
+    version?: string
+  }
+  workDir?: string
+}
+
+export type TinyGoDriverMetadataContract = {
+  buildTags?: string[]
+  entry?: string
+  gc?: string
+  goarch?: string
+  goos?: string
+  llvmTarget?: string
+  optimize?: string
+  output?: string
+  panicStrategy?: string
+  scheduler?: string
+  target?: string
+}
+
+export type TinyGoDriverBridgeManifest = {
+  artifactOutputPath?: string
+  driverBuildTags?: string[]
+  entryFile?: string
+  entryPackage?: {
+    depOnly?: boolean
+    dir?: string
+    goFiles?: string[]
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    name?: string
+    standard?: boolean
+  }
+  gc?: string
+  goarch?: string
+  goos?: string
+  hostBuildTags?: string[]
+  llvmTriple?: string
+  packageGraph?: Array<{
+    depOnly?: boolean
+    dir?: string
+    goFiles?: string[]
+    importPath?: string
+    imports?: string[]
+    modulePath?: string
+    name?: string
+    standard?: boolean
+  }>
+  frontendAnalysisInput?: TinyGoFrontendInputManifest
+  frontendAnalysis?: TinyGoFrontendAnalysisManifest
+  frontendRealAdapter?: TinyGoFrontendAnalysisManifest
+  realFrontendAnalysis?: TinyGoFrontendAnalysisManifest
+  scheduler?: string
+  target?: string
+  toolchain?: {
+    binPath?: string
+    rootPath?: string
+    version?: string
+  }
+}
+
+export const normalizeTinyGoDriverBridgeManifestForBrowser = (
+  manifest: TinyGoDriverBridgeManifest,
+  options?: {
+    browserArtifactOutputPath?: string
+    browserEntryFile?: string
+    browserTinyGoRoot?: string
+    browserWorkspaceRoot?: string
+    hostTinyGoRoot?: string
+    hostWorkspaceRoot?: string
+  },
+): TinyGoDriverBridgeManifest => {
+  const browserWorkspaceRoot = options?.browserWorkspaceRoot ?? '/workspace'
+  const browserTinyGoRoot = options?.browserTinyGoRoot ?? '/working/.tinygo-root'
+  let hostWorkspaceRoot = options?.hostWorkspaceRoot ?? manifest.entryPackage?.dir ?? ''
+  if (hostWorkspaceRoot === '') {
+    const entryFile = manifest.entryFile ?? ''
+    const entryFileSlashIndex = entryFile.lastIndexOf('/')
+    if (entryFileSlashIndex > 0) {
+      hostWorkspaceRoot = entryFile.slice(0, entryFileSlashIndex)
+    }
+  }
+  const hostTinyGoRoot = options?.hostTinyGoRoot ?? manifest.toolchain?.rootPath ?? ''
+  let browserEntryFile = options?.browserEntryFile ?? ''
+  if (browserEntryFile === '') {
+    const entryFile = manifest.entryFile ?? ''
+    if (
+      entryFile !== '' &&
+      hostWorkspaceRoot !== '' &&
+      (entryFile === hostWorkspaceRoot || entryFile.startsWith(`${hostWorkspaceRoot}/`))
+    ) {
+      browserEntryFile = `${browserWorkspaceRoot}${entryFile.slice(hostWorkspaceRoot.length)}`
+    } else if (entryFile !== '') {
+      const entryFileSlashIndex = entryFile.lastIndexOf('/')
+      browserEntryFile = `${browserWorkspaceRoot}/${entryFileSlashIndex >= 0 ? entryFile.slice(entryFileSlashIndex + 1) : entryFile}`
+    } else {
+      browserEntryFile = `${browserWorkspaceRoot}/main.go`
+    }
+  }
+  let browserArtifactOutputPath = options?.browserArtifactOutputPath ?? ''
+  if (browserArtifactOutputPath === '') {
+    const artifactOutputPath = manifest.artifactOutputPath ?? ''
+    if (artifactOutputPath !== '') {
+      const artifactOutputPathSlashIndex = artifactOutputPath.lastIndexOf('/')
+      browserArtifactOutputPath = `/working/${artifactOutputPathSlashIndex >= 0 ? artifactOutputPath.slice(artifactOutputPathSlashIndex + 1) : artifactOutputPath}`
+    } else {
+      browserArtifactOutputPath = '/working/out.wasm'
+    }
+  }
+  const normalizedPackageGraph = (manifest.packageGraph ?? []).map((packageInfo) => {
+    let packageDir = packageInfo.dir ?? ''
+    if (
+      packageDir !== '' &&
+      hostWorkspaceRoot !== '' &&
+      (packageDir === hostWorkspaceRoot || packageDir.startsWith(`${hostWorkspaceRoot}/`))
+    ) {
+      packageDir = `${browserWorkspaceRoot}${packageDir.slice(hostWorkspaceRoot.length)}`
+    } else if (
+      packageDir !== '' &&
+      hostTinyGoRoot !== '' &&
+      (packageDir === hostTinyGoRoot || packageDir.startsWith(`${hostTinyGoRoot}/`))
+    ) {
+      packageDir = `${browserTinyGoRoot}${packageDir.slice(hostTinyGoRoot.length)}`
+    }
+    return {
+      ...packageInfo,
+      dir: packageDir,
+    }
+  })
+  let normalizedEntryPackage = manifest.entryPackage
+  if (normalizedEntryPackage) {
+    let packageDir = normalizedEntryPackage.dir ?? ''
+    if (
+      packageDir !== '' &&
+      hostWorkspaceRoot !== '' &&
+      (packageDir === hostWorkspaceRoot || packageDir.startsWith(`${hostWorkspaceRoot}/`))
+    ) {
+      packageDir = `${browserWorkspaceRoot}${packageDir.slice(hostWorkspaceRoot.length)}`
+    } else if (
+      packageDir !== '' &&
+      hostTinyGoRoot !== '' &&
+      (packageDir === hostTinyGoRoot || packageDir.startsWith(`${hostTinyGoRoot}/`))
+    ) {
+      packageDir = `${browserTinyGoRoot}${packageDir.slice(hostTinyGoRoot.length)}`
+    }
+    normalizedEntryPackage = {
+      ...normalizedEntryPackage,
+      dir: packageDir,
+    }
+  }
+  let normalizedToolchain = manifest.toolchain
+  if (normalizedToolchain) {
+    let rootPath = normalizedToolchain.rootPath ?? ''
+    if (
+      rootPath !== '' &&
+      hostTinyGoRoot !== '' &&
+      (rootPath === hostTinyGoRoot || rootPath.startsWith(`${hostTinyGoRoot}/`))
+    ) {
+      rootPath = `${browserTinyGoRoot}${rootPath.slice(hostTinyGoRoot.length)}`
+    }
+    normalizedToolchain = {
+      ...normalizedToolchain,
+      rootPath,
+    }
+  }
+  let normalizedFrontendAnalysisInput = manifest.frontendAnalysisInput
+  if (normalizedFrontendAnalysisInput) {
+    let inputEntryFile = normalizedFrontendAnalysisInput.entryFile ?? ''
+    if (
+      inputEntryFile !== '' &&
+      hostWorkspaceRoot !== '' &&
+      (inputEntryFile === hostWorkspaceRoot || inputEntryFile.startsWith(`${hostWorkspaceRoot}/`))
+    ) {
+      inputEntryFile = `${browserWorkspaceRoot}${inputEntryFile.slice(hostWorkspaceRoot.length)}`
+    } else if (inputEntryFile !== '') {
+      const inputEntryFileSlashIndex = inputEntryFile.lastIndexOf('/')
+      inputEntryFile = `${browserWorkspaceRoot}/${inputEntryFileSlashIndex >= 0 ? inputEntryFile.slice(inputEntryFileSlashIndex + 1) : inputEntryFile}`
+    }
+    let inputToolchain = normalizedFrontendAnalysisInput.toolchain
+    if (inputToolchain) {
+      let artifactOutputPath = inputToolchain.artifactOutputPath ?? ''
+      if (inputToolchain.artifactOutputPath !== undefined && artifactOutputPath !== '') {
+        const artifactOutputPathSlashIndex = artifactOutputPath.lastIndexOf('/')
+        artifactOutputPath = `/working/${artifactOutputPathSlashIndex >= 0 ? artifactOutputPath.slice(artifactOutputPathSlashIndex + 1) : artifactOutputPath}`
+      }
+      let translationUnitPath = inputToolchain.translationUnitPath ?? ''
+      if (inputToolchain.translationUnitPath !== undefined && translationUnitPath !== '') {
+        const translationUnitPathSlashIndex = translationUnitPath.lastIndexOf('/')
+        translationUnitPath = `/working/${translationUnitPathSlashIndex >= 0 ? translationUnitPath.slice(translationUnitPathSlashIndex + 1) : translationUnitPath}`
+      }
+      let objectOutputPath = inputToolchain.objectOutputPath ?? ''
+      if (inputToolchain.objectOutputPath !== undefined && objectOutputPath !== '') {
+        const objectOutputPathSlashIndex = objectOutputPath.lastIndexOf('/')
+        objectOutputPath = `/working/${objectOutputPathSlashIndex >= 0 ? objectOutputPath.slice(objectOutputPathSlashIndex + 1) : objectOutputPath}`
+      }
+      inputToolchain = {
+        ...inputToolchain,
+        ...(inputToolchain.artifactOutputPath !== undefined ? { artifactOutputPath } : {}),
+        ...(inputToolchain.objectOutputPath !== undefined ? { objectOutputPath } : {}),
+        ...(inputToolchain.translationUnitPath !== undefined ? { translationUnitPath } : {}),
+      }
+    }
+    let inputSourceSelection = normalizedFrontendAnalysisInput.sourceSelection
+    if (inputSourceSelection) {
+      inputSourceSelection = {
+        ...inputSourceSelection,
+        ...(inputSourceSelection.targetAssets !== undefined ? {
+          targetAssets: inputSourceSelection.targetAssets.map((filePath) => {
+            if (
+              filePath !== '' &&
+              hostWorkspaceRoot !== '' &&
+              (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+            ) {
+              return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+            }
+            if (
+              filePath !== '' &&
+              hostTinyGoRoot !== '' &&
+              (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+            ) {
+              return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+            }
+            return filePath
+          }),
+        } : {}),
+        ...(inputSourceSelection.runtimeSupport !== undefined ? {
+          runtimeSupport: inputSourceSelection.runtimeSupport.map((filePath) => {
+            if (
+              filePath !== '' &&
+              hostWorkspaceRoot !== '' &&
+              (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+            ) {
+              return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+            }
+            if (
+              filePath !== '' &&
+              hostTinyGoRoot !== '' &&
+              (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+            ) {
+              return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+            }
+            return filePath
+          }),
+        } : {}),
+        ...(inputSourceSelection.program !== undefined ? {
+          program: inputSourceSelection.program.map((filePath) => {
+            if (
+              filePath !== '' &&
+              hostWorkspaceRoot !== '' &&
+              (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+            ) {
+              return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+            }
+            if (
+              filePath !== '' &&
+              hostTinyGoRoot !== '' &&
+              (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+            ) {
+              return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+            }
+            return filePath
+          }),
+        } : {}),
+        ...(inputSourceSelection.imported !== undefined ? {
+          imported: inputSourceSelection.imported.map((filePath) => {
+            if (
+              filePath !== '' &&
+              hostWorkspaceRoot !== '' &&
+              (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+            ) {
+              return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+            }
+            if (
+              filePath !== '' &&
+              hostTinyGoRoot !== '' &&
+              (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+            ) {
+              return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+            }
+            return filePath
+          }),
+        } : {}),
+        ...(inputSourceSelection.stdlib !== undefined ? {
+          stdlib: inputSourceSelection.stdlib.map((filePath) => {
+            if (
+              filePath !== '' &&
+              hostWorkspaceRoot !== '' &&
+              (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+            ) {
+              return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+            }
+            if (
+              filePath !== '' &&
+              hostTinyGoRoot !== '' &&
+              (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+            ) {
+              return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+            }
+            return filePath
+          }),
+        } : {}),
+        ...(inputSourceSelection.allCompile !== undefined ? {
+          allCompile: inputSourceSelection.allCompile.map((filePath) => {
+            if (
+              filePath !== '' &&
+              hostWorkspaceRoot !== '' &&
+              (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+            ) {
+              return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+            }
+            if (
+              filePath !== '' &&
+              hostTinyGoRoot !== '' &&
+              (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+            ) {
+              return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+            }
+            return filePath
+          }),
+        } : {}),
+      }
+    }
+    const packageGraph = (normalizedFrontendAnalysisInput.packageGraph ?? []).map((packageInfo) => {
+      let packageDir = packageInfo.dir ?? ''
+      if (
+        packageDir !== '' &&
+        hostWorkspaceRoot !== '' &&
+        (packageDir === hostWorkspaceRoot || packageDir.startsWith(`${hostWorkspaceRoot}/`))
+      ) {
+        packageDir = `${browserWorkspaceRoot}${packageDir.slice(hostWorkspaceRoot.length)}`
+      } else if (
+        packageDir !== '' &&
+        hostTinyGoRoot !== '' &&
+        (packageDir === hostTinyGoRoot || packageDir.startsWith(`${hostTinyGoRoot}/`))
+      ) {
+        packageDir = `${browserTinyGoRoot}${packageDir.slice(hostTinyGoRoot.length)}`
+      }
+      return {
+        ...packageInfo,
+        dir: packageDir,
+      }
+    })
+    normalizedFrontendAnalysisInput = {
+      ...normalizedFrontendAnalysisInput,
+      entryFile: inputEntryFile,
+      ...(inputToolchain !== undefined ? { toolchain: inputToolchain } : {}),
+      ...(inputSourceSelection !== undefined ? { sourceSelection: inputSourceSelection } : {}),
+      ...(normalizedFrontendAnalysisInput.packageGraph !== undefined ? { packageGraph } : {}),
+    }
+  }
+  let normalizedFrontendAnalysis = manifest.frontendAnalysis
+  if (normalizedFrontendAnalysis) {
+    let analysisEntryFile = normalizedFrontendAnalysis.entryFile ?? ''
+    if (
+      analysisEntryFile !== '' &&
+      hostWorkspaceRoot !== '' &&
+      (analysisEntryFile === hostWorkspaceRoot || analysisEntryFile.startsWith(`${hostWorkspaceRoot}/`))
+    ) {
+      analysisEntryFile = `${browserWorkspaceRoot}${analysisEntryFile.slice(hostWorkspaceRoot.length)}`
+    } else if (analysisEntryFile !== '') {
+      const analysisEntryFileSlashIndex = analysisEntryFile.lastIndexOf('/')
+      analysisEntryFile = `${browserWorkspaceRoot}/${analysisEntryFileSlashIndex >= 0 ? analysisEntryFile.slice(analysisEntryFileSlashIndex + 1) : analysisEntryFile}`
+    }
+    let compileUnitManifestPath = normalizedFrontendAnalysis.compileUnitManifestPath ?? ''
+    if (
+      compileUnitManifestPath !== '' &&
+      hostTinyGoRoot !== '' &&
+      (compileUnitManifestPath === hostTinyGoRoot || compileUnitManifestPath.startsWith(`${hostTinyGoRoot}/`))
+    ) {
+      compileUnitManifestPath = `${browserTinyGoRoot}${compileUnitManifestPath.slice(hostTinyGoRoot.length)}`
+    } else if (compileUnitManifestPath !== '') {
+      const compileUnitManifestPathSlashIndex = compileUnitManifestPath.lastIndexOf('/')
+      compileUnitManifestPath = `/working/${compileUnitManifestPathSlashIndex >= 0 ? compileUnitManifestPath.slice(compileUnitManifestPathSlashIndex + 1) : compileUnitManifestPath}`
+    }
+    const allCompileFiles = (normalizedFrontendAnalysis.allCompileFiles ?? []).map((filePath) => {
+      if (
+        filePath !== '' &&
+        hostWorkspaceRoot !== '' &&
+        (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+      ) {
+        return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+      }
+      if (
+        filePath !== '' &&
+        hostTinyGoRoot !== '' &&
+        (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+      ) {
+        return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+      }
+      return filePath
+    })
+    const compileGroups = (normalizedFrontendAnalysis.compileGroups ?? []).map((compileGroup) => ({
+      ...compileGroup,
+      files: (compileGroup.files ?? []).map((filePath) => {
+        if (
+          filePath !== '' &&
+          hostWorkspaceRoot !== '' &&
+          (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+        ) {
+          return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+        }
+        if (
+          filePath !== '' &&
+          hostTinyGoRoot !== '' &&
+          (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+        ) {
+          return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+        }
+        return filePath
+      }),
+    }))
+    const compileUnits = (normalizedFrontendAnalysis.compileUnits ?? []).map((compileUnit) => {
+      let packageDir = compileUnit.packageDir ?? ''
+      if (
+        packageDir !== '' &&
+        hostWorkspaceRoot !== '' &&
+        (packageDir === hostWorkspaceRoot || packageDir.startsWith(`${hostWorkspaceRoot}/`))
+      ) {
+        packageDir = `${browserWorkspaceRoot}${packageDir.slice(hostWorkspaceRoot.length)}`
+      } else if (
+        packageDir !== '' &&
+        hostTinyGoRoot !== '' &&
+        (packageDir === hostTinyGoRoot || packageDir.startsWith(`${hostTinyGoRoot}/`))
+      ) {
+        packageDir = `${browserTinyGoRoot}${packageDir.slice(hostTinyGoRoot.length)}`
+      }
+      return {
+        ...compileUnit,
+        packageDir,
+        files: (compileUnit.files ?? []).map((filePath) => {
+          if (
+            filePath !== '' &&
+            hostWorkspaceRoot !== '' &&
+            (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+          ) {
+            return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+          }
+          if (
+            filePath !== '' &&
+            hostTinyGoRoot !== '' &&
+            (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+          ) {
+            return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+          }
+          return filePath
+        }),
+      }
+    })
+    const packageGraph = (normalizedFrontendAnalysis.packageGraph ?? []).map((packageInfo) => {
+      let packageDir = packageInfo.dir ?? ''
+      if (
+        packageDir !== '' &&
+        hostWorkspaceRoot !== '' &&
+        (packageDir === hostWorkspaceRoot || packageDir.startsWith(`${hostWorkspaceRoot}/`))
+      ) {
+        packageDir = `${browserWorkspaceRoot}${packageDir.slice(hostWorkspaceRoot.length)}`
+      } else if (
+        packageDir !== '' &&
+        hostTinyGoRoot !== '' &&
+        (packageDir === hostTinyGoRoot || packageDir.startsWith(`${hostTinyGoRoot}/`))
+      ) {
+        packageDir = `${browserTinyGoRoot}${packageDir.slice(hostTinyGoRoot.length)}`
+      }
+      return {
+        ...packageInfo,
+        dir: packageDir,
+      }
+    })
+    normalizedFrontendAnalysis = {
+      ...normalizedFrontendAnalysis,
+      entryFile: analysisEntryFile,
+      compileUnitManifestPath,
+      allCompileFiles,
+      compileGroups,
+      compileUnits,
+      ...(normalizedFrontendAnalysis.packageGraph !== undefined ? { packageGraph } : {}),
+    }
+  }
+  let normalizedFrontendRealAdapter = manifest.frontendRealAdapter ?? manifest.realFrontendAnalysis
+  if (normalizedFrontendRealAdapter) {
+    let analysisEntryFile = normalizedFrontendRealAdapter.entryFile ?? ''
+    if (
+      analysisEntryFile !== '' &&
+      hostWorkspaceRoot !== '' &&
+      (analysisEntryFile === hostWorkspaceRoot || analysisEntryFile.startsWith(`${hostWorkspaceRoot}/`))
+    ) {
+      analysisEntryFile = `${browserWorkspaceRoot}${analysisEntryFile.slice(hostWorkspaceRoot.length)}`
+    } else if (analysisEntryFile !== '') {
+      const analysisEntryFileSlashIndex = analysisEntryFile.lastIndexOf('/')
+      analysisEntryFile = `${browserWorkspaceRoot}/${analysisEntryFileSlashIndex >= 0 ? analysisEntryFile.slice(analysisEntryFileSlashIndex + 1) : analysisEntryFile}`
+    }
+    let compileUnitManifestPath = normalizedFrontendRealAdapter.compileUnitManifestPath ?? ''
+    if (
+      compileUnitManifestPath !== '' &&
+      hostTinyGoRoot !== '' &&
+      (compileUnitManifestPath === hostTinyGoRoot || compileUnitManifestPath.startsWith(`${hostTinyGoRoot}/`))
+    ) {
+      compileUnitManifestPath = `${browserTinyGoRoot}${compileUnitManifestPath.slice(hostTinyGoRoot.length)}`
+    } else if (compileUnitManifestPath !== '') {
+      const compileUnitManifestPathSlashIndex = compileUnitManifestPath.lastIndexOf('/')
+      compileUnitManifestPath = `/working/${compileUnitManifestPathSlashIndex >= 0 ? compileUnitManifestPath.slice(compileUnitManifestPathSlashIndex + 1) : compileUnitManifestPath}`
+    }
+    const allCompileFiles = (normalizedFrontendRealAdapter.allCompileFiles ?? []).map((filePath) => {
+      if (
+        filePath !== '' &&
+        hostWorkspaceRoot !== '' &&
+        (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+      ) {
+        return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+      }
+      if (
+        filePath !== '' &&
+        hostTinyGoRoot !== '' &&
+        (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+      ) {
+        return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+      }
+      return filePath
+    })
+    const compileGroups = (normalizedFrontendRealAdapter.compileGroups ?? []).map((compileGroup) => ({
+      ...compileGroup,
+      files: (compileGroup.files ?? []).map((filePath) => {
+        if (
+          filePath !== '' &&
+          hostWorkspaceRoot !== '' &&
+          (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+        ) {
+          return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+        }
+        if (
+          filePath !== '' &&
+          hostTinyGoRoot !== '' &&
+          (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+        ) {
+          return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+        }
+        return filePath
+      }),
+    }))
+    const compileUnits = (normalizedFrontendRealAdapter.compileUnits ?? []).map((compileUnit) => {
+      let packageDir = compileUnit.packageDir ?? ''
+      if (
+        packageDir !== '' &&
+        hostWorkspaceRoot !== '' &&
+        (packageDir === hostWorkspaceRoot || packageDir.startsWith(`${hostWorkspaceRoot}/`))
+      ) {
+        packageDir = `${browserWorkspaceRoot}${packageDir.slice(hostWorkspaceRoot.length)}`
+      } else if (
+        packageDir !== '' &&
+        hostTinyGoRoot !== '' &&
+        (packageDir === hostTinyGoRoot || packageDir.startsWith(`${hostTinyGoRoot}/`))
+      ) {
+        packageDir = `${browserTinyGoRoot}${packageDir.slice(hostTinyGoRoot.length)}`
+      }
+      return {
+        ...compileUnit,
+        packageDir,
+        files: (compileUnit.files ?? []).map((filePath) => {
+          if (
+            filePath !== '' &&
+            hostWorkspaceRoot !== '' &&
+            (filePath === hostWorkspaceRoot || filePath.startsWith(`${hostWorkspaceRoot}/`))
+          ) {
+            return `${browserWorkspaceRoot}${filePath.slice(hostWorkspaceRoot.length)}`
+          }
+          if (
+            filePath !== '' &&
+            hostTinyGoRoot !== '' &&
+            (filePath === hostTinyGoRoot || filePath.startsWith(`${hostTinyGoRoot}/`))
+          ) {
+            return `${browserTinyGoRoot}${filePath.slice(hostTinyGoRoot.length)}`
+          }
+          return filePath
+        }),
+      }
+    })
+    const packageGraph = (normalizedFrontendRealAdapter.packageGraph ?? []).map((packageInfo) => {
+      let packageDir = packageInfo.dir ?? ''
+      if (
+        packageDir !== '' &&
+        hostWorkspaceRoot !== '' &&
+        (packageDir === hostWorkspaceRoot || packageDir.startsWith(`${hostWorkspaceRoot}/`))
+      ) {
+        packageDir = `${browserWorkspaceRoot}${packageDir.slice(hostWorkspaceRoot.length)}`
+      } else if (
+        packageDir !== '' &&
+        hostTinyGoRoot !== '' &&
+        (packageDir === hostTinyGoRoot || packageDir.startsWith(`${hostTinyGoRoot}/`))
+      ) {
+        packageDir = `${browserTinyGoRoot}${packageDir.slice(hostTinyGoRoot.length)}`
+      }
+      return {
+        ...packageInfo,
+        dir: packageDir,
+      }
+    })
+    normalizedFrontendRealAdapter = {
+      ...normalizedFrontendRealAdapter,
+      entryFile: analysisEntryFile,
+      compileUnitManifestPath,
+      allCompileFiles,
+      compileGroups,
+      compileUnits,
+      ...(normalizedFrontendRealAdapter.packageGraph !== undefined ? { packageGraph } : {}),
+    }
+  }
+  if (manifest.frontendRealAdapter && manifest.realFrontendAnalysis) {
+    const normalizedLegacyFrontendRealAnalysis = normalizeTinyGoDriverBridgeManifestForBrowser({
+      ...manifest,
+      frontendRealAdapter: undefined,
+      realFrontendAnalysis: manifest.realFrontendAnalysis,
+    }).frontendRealAdapter
+    if (JSON.stringify(normalizedFrontendRealAdapter ?? null) !== JSON.stringify(normalizedLegacyFrontendRealAnalysis ?? null)) {
+      throw new Error('frontendRealAdapter did not match realFrontendAnalysis alias')
+    }
+  }
+  return {
+    ...manifest,
+    artifactOutputPath: browserArtifactOutputPath,
+    entryFile: browserEntryFile,
+    entryPackage: normalizedEntryPackage,
+    frontendAnalysisInput: normalizedFrontendAnalysisInput,
+    frontendAnalysis: normalizedFrontendAnalysis,
+    frontendRealAdapter: normalizedFrontendRealAdapter,
+    realFrontendAnalysis: normalizedFrontendRealAdapter,
+    packageGraph: normalizedPackageGraph,
+    toolchain: normalizedToolchain,
   }
 }
 
@@ -314,6 +1128,57 @@ const normalizeExecutionLdflags = (ldflags: string[]) => {
   return executionLdflags
 }
 
+const normalizePackageFactsByKind = (
+  kind: string,
+  depOnly?: boolean,
+  standard?: boolean,
+) => {
+  let normalizedDepOnly = depOnly ?? false
+  let normalizedStandard = standard ?? false
+  if (kind === 'program') {
+    normalizedDepOnly = false
+    normalizedStandard = false
+  } else if (kind === 'imported') {
+    normalizedDepOnly = true
+    normalizedStandard = false
+  } else if (kind === 'stdlib') {
+    normalizedDepOnly = true
+    normalizedStandard = true
+  }
+  return {
+    depOnly: normalizedDepOnly,
+    standard: normalizedStandard,
+  }
+}
+
+const isTinyGoRootStdlibPackage = (
+  kind: string,
+  packageDir: string,
+  standard: boolean,
+) => standard || kind === 'stdlib' || packageDir.startsWith('/working/.tinygo-root/')
+
+const importsMatchForFrontendBridge = (
+  manifestImports: string[],
+  bridgeImports: string[],
+  allowSubset: boolean,
+) => {
+  const normalizedManifestImports = [...manifestImports].sort()
+  const normalizedBridgeImports = [...bridgeImports].sort()
+  if (allowSubset) {
+    const bridgeImportSet = new Set(normalizedBridgeImports)
+    return normalizedManifestImports.every((importPath) => bridgeImportSet.has(importPath))
+  }
+  if (normalizedManifestImports.length !== normalizedBridgeImports.length) {
+    return false
+  }
+  for (const [index, importPath] of normalizedManifestImports.entries()) {
+    if (normalizedBridgeImports[index] !== importPath) {
+      return false
+    }
+  }
+  return true
+}
+
 export const buildToolPlanFromCompileUnitManifest = (
   manifest: TinyGoCompileUnitManifest,
 ): CompileUnitToolInvocation[] => {
@@ -355,6 +1220,1360 @@ export const buildToolPlanFromCompileUnitManifest = (
       cwd: linkCwd,
     },
   ]
+}
+
+export const verifyTinyGoHostProbeManifestAgainstDriverMetadata = (
+  manifest: TinyGoHostProbeManifest,
+  driverMetadata: TinyGoDriverMetadataContract,
+) => {
+  const command = manifest.command ?? []
+  if (command.length < 6) {
+    throw new Error('real TinyGo host probe command was incomplete')
+  }
+  const target = manifest.target ?? ''
+  const targetInfo = manifest.targetInfo ?? {}
+  if (target === '' || targetInfo.llvmTriple === undefined) {
+    throw new Error('real TinyGo host probe target facts were incomplete')
+  }
+  if (driverMetadata.target !== undefined && target !== driverMetadata.target) {
+    throw new Error('real TinyGo host probe target did not match driver metadata')
+  }
+  if (driverMetadata.output !== undefined && (manifest.artifact?.path ?? '') !== driverMetadata.output) {
+    throw new Error('real TinyGo host probe artifact path did not match driver metadata')
+  }
+
+  let optimizeValue = driverMetadata.optimize ?? ''
+  if (optimizeValue === '-O0') {
+    optimizeValue = '0'
+  } else if (optimizeValue === '-O1') {
+    optimizeValue = '1'
+  } else if (optimizeValue === '-O2') {
+    optimizeValue = '2'
+  } else if (optimizeValue === '-O3') {
+    optimizeValue = '3'
+  } else if (optimizeValue === '-Os') {
+    optimizeValue = 's'
+  } else if (optimizeValue === '-Oz') {
+    optimizeValue = 'z'
+  }
+  if (command[1] !== 'build' || command[2] !== '-target' || command[3] !== target) {
+    throw new Error('real TinyGo host probe command did not match driver metadata')
+  }
+  const commandArgs = command.slice(1)
+  const optimizeFlagIndex = commandArgs.indexOf('-opt')
+  const commandOptimize =
+    optimizeFlagIndex < 0 || optimizeFlagIndex + 1 >= commandArgs.length ? undefined : commandArgs[optimizeFlagIndex + 1]
+  if (commandOptimize !== undefined && optimizeValue !== '' && commandOptimize !== optimizeValue) {
+    throw new Error('real TinyGo host probe command did not match driver metadata')
+  }
+  const schedulerFlagIndex = commandArgs.indexOf('-scheduler')
+  const commandScheduler =
+    schedulerFlagIndex < 0 || schedulerFlagIndex + 1 >= commandArgs.length
+      ? undefined
+      : commandArgs[schedulerFlagIndex + 1]
+  if (
+    commandScheduler !== undefined &&
+    driverMetadata.scheduler !== undefined &&
+    driverMetadata.scheduler !== '' &&
+    commandScheduler !== driverMetadata.scheduler
+  ) {
+    throw new Error('real TinyGo host probe command did not match driver metadata')
+  }
+  const panicFlagIndex = commandArgs.indexOf('-panic')
+  const commandPanicStrategy =
+    panicFlagIndex < 0 || panicFlagIndex + 1 >= commandArgs.length ? undefined : commandArgs[panicFlagIndex + 1]
+  if (
+    commandPanicStrategy !== undefined &&
+    driverMetadata.panicStrategy !== undefined &&
+    driverMetadata.panicStrategy !== '' &&
+    commandPanicStrategy !== driverMetadata.panicStrategy
+  ) {
+    throw new Error('real TinyGo host probe command did not match driver metadata')
+  }
+  const outputFlagIndex = commandArgs.indexOf('-o')
+  if (
+    outputFlagIndex < 0 ||
+    outputFlagIndex + 2 >= commandArgs.length ||
+    commandArgs[outputFlagIndex + 1] !== (driverMetadata.output ?? manifest.artifact?.path ?? '') ||
+    commandArgs[commandArgs.length - 1] !== (driverMetadata.entry ?? command[command.length - 1] ?? '')
+  ) {
+    throw new Error('real TinyGo host probe command did not match driver metadata')
+  }
+
+  if (
+    (driverMetadata.llvmTarget !== undefined && targetInfo.llvmTriple !== driverMetadata.llvmTarget) ||
+    (driverMetadata.goos !== undefined && targetInfo.goos !== driverMetadata.goos) ||
+    (driverMetadata.goarch !== undefined && targetInfo.goarch !== driverMetadata.goarch) ||
+    (driverMetadata.gc !== undefined && targetInfo.gc !== driverMetadata.gc) ||
+    (driverMetadata.scheduler !== undefined && targetInfo.scheduler !== driverMetadata.scheduler)
+  ) {
+    throw new Error('real TinyGo host probe target facts did not match driver metadata')
+  }
+
+  const actualBuildTags = new Set(targetInfo.buildTags ?? [])
+  for (const buildTag of driverMetadata.buildTags ?? []) {
+    if (!actualBuildTags.has(buildTag)) {
+      throw new Error('real TinyGo host probe build tags did not cover driver metadata')
+    }
+  }
+
+  return {
+    artifactOutputPath: manifest.artifact?.path ?? '',
+    commandArgv: command,
+    driverBuildTags: [...(driverMetadata.buildTags ?? [])].sort(),
+    entryFile: driverMetadata.entry ?? command[command.length - 1] ?? '',
+    gc: targetInfo.gc ?? '',
+    goarch: targetInfo.goarch ?? '',
+    goos: targetInfo.goos ?? '',
+    hostBuildTags: [...(targetInfo.buildTags ?? [])].sort(),
+    llvmTriple: targetInfo.llvmTriple ?? '',
+    scheduler: targetInfo.scheduler ?? '',
+    target,
+  }
+}
+
+export const verifyFrontendInputManifestAgainstDriverBridgeManifest = (
+  manifest: TinyGoFrontendInputManifest,
+  bridgeManifest: TinyGoDriverBridgeManifest,
+) => {
+  const compileUnits = manifest.compileUnits ?? []
+  const packageGraph = manifest.packageGraph ?? []
+  const buildTags = [...(manifest.buildTags ?? [])].sort()
+  const buildContext = manifest.buildContext ?? {}
+  const buildContextBuildTags = [...(buildContext.buildTags ?? [])].sort()
+
+  if (
+    (buildContext.target ?? '') === '' ||
+    (buildContext.llvmTarget ?? '') === '' ||
+    (buildContext.goos ?? '') === '' ||
+    (buildContext.goarch ?? '') === '' ||
+    (buildContext.gc ?? '') === '' ||
+    (buildContext.scheduler ?? '') === ''
+  ) {
+    throw new Error('frontend input build context was incomplete')
+  }
+  if ((manifest.modulePath ?? '') !== (buildContext.modulePath ?? '')) {
+    throw new Error('frontend input build context did not match top-level modulePath')
+  }
+  if (buildTags.length !== buildContextBuildTags.length) {
+    throw new Error('frontend input build context did not match top-level buildTags')
+  }
+  for (const [index, buildTag] of buildTags.entries()) {
+    if (buildContextBuildTags[index] !== buildTag) {
+      throw new Error('frontend input build context did not match top-level buildTags')
+    }
+  }
+  if (
+    (bridgeManifest.target ?? '') !== '' &&
+    (buildContext.target ?? '') !== bridgeManifest.target
+  ) {
+    throw new Error('frontend input build context did not match real TinyGo driver bridge')
+  }
+  if (
+    (bridgeManifest.llvmTriple ?? '') !== '' &&
+    (buildContext.llvmTarget ?? '') !== bridgeManifest.llvmTriple
+  ) {
+    throw new Error('frontend input build context did not match real TinyGo driver bridge')
+  }
+  if ((bridgeManifest.goos ?? '') !== '' && (buildContext.goos ?? '') !== bridgeManifest.goos) {
+    throw new Error('frontend input build context did not match real TinyGo driver bridge')
+  }
+  if ((bridgeManifest.goarch ?? '') !== '' && (buildContext.goarch ?? '') !== bridgeManifest.goarch) {
+    throw new Error('frontend input build context did not match real TinyGo driver bridge')
+  }
+  if ((bridgeManifest.gc ?? '') !== '' && (buildContext.gc ?? '') !== bridgeManifest.gc) {
+    throw new Error('frontend input build context did not match real TinyGo driver bridge')
+  }
+  if (
+    (bridgeManifest.scheduler ?? '') !== '' &&
+    (buildContext.scheduler ?? '') !== bridgeManifest.scheduler
+  ) {
+    throw new Error('frontend input build context did not match real TinyGo driver bridge')
+  }
+
+  const driverBuildTags = [...(bridgeManifest.driverBuildTags ?? [])].sort()
+  if (driverBuildTags.length !== 0) {
+    if (driverBuildTags.length !== buildTags.length) {
+      throw new Error('frontend input build context did not match real TinyGo driver bridge')
+    }
+    for (const [index, buildTag] of buildTags.entries()) {
+      if (driverBuildTags[index] !== buildTag) {
+        throw new Error('frontend input build context did not match real TinyGo driver bridge')
+      }
+    }
+  } else {
+    const hostBuildTags = new Set(bridgeManifest.hostBuildTags ?? [])
+    for (const buildTag of buildTags) {
+      if (!hostBuildTags.has(buildTag)) {
+        throw new Error('frontend input build context did not match real TinyGo driver bridge')
+      }
+    }
+  }
+
+  if (packageGraph.length !== compileUnits.length) {
+    throw new Error('frontend input package graph did not match compile units')
+  }
+  const packageGraphByImportPath = new Map(
+    packageGraph
+      .map((packageInfo) => [packageInfo.importPath ?? '', packageInfo] as const)
+      .filter(([importPath]) => importPath !== ''),
+  )
+  if (packageGraphByImportPath.size !== packageGraph.length) {
+    throw new Error('frontend input package graph did not match compile units')
+  }
+  for (const compileUnit of compileUnits) {
+    const compileUnitImportPath = compileUnit.importPath ?? ''
+    const packageInfo = packageGraphByImportPath.get(compileUnitImportPath)
+    if (!packageInfo) {
+      throw new Error('frontend input package graph did not match compile units')
+    }
+    const normalizedPackageFacts = normalizePackageFactsByKind(
+      compileUnit.kind ?? '',
+      compileUnit.depOnly,
+      compileUnit.standard,
+    )
+    if (
+      (packageInfo.dir ?? '') !== (compileUnit.packageDir ?? '') ||
+      (packageInfo.name ?? '') !== (compileUnit.packageName ?? '') ||
+      (packageInfo.modulePath ?? '') !== (compileUnit.modulePath ?? '') ||
+      (packageInfo.depOnly ?? false) !== normalizedPackageFacts.depOnly ||
+      (packageInfo.standard ?? false) !== normalizedPackageFacts.standard
+    ) {
+      throw new Error('frontend input package graph did not match compile units')
+    }
+    const packageImports = [...(packageInfo.imports ?? [])].sort()
+    const compileUnitImports = [...(compileUnit.imports ?? [])].sort()
+    if (packageImports.length !== compileUnitImports.length) {
+      throw new Error('frontend input package graph did not match compile units')
+    }
+    for (const [index, importPath] of compileUnitImports.entries()) {
+      if (packageImports[index] !== importPath) {
+        throw new Error('frontend input package graph did not match compile units')
+      }
+    }
+    const packageGoFiles = [...(packageInfo.files?.goFiles ?? [])].sort()
+    const compileUnitGoFiles = [...(compileUnit.files ?? [])]
+      .map((file) => {
+        const packageDir = compileUnit.packageDir ?? ''
+        if (packageDir !== '' && file.startsWith(`${packageDir}/`)) {
+          return file.slice(packageDir.length + 1)
+        }
+        const slashIndex = file.lastIndexOf('/')
+        return slashIndex >= 0 ? file.slice(slashIndex + 1) : file
+      })
+      .sort()
+    if (packageGoFiles.length !== compileUnitGoFiles.length) {
+      throw new Error('frontend input package graph did not match compile units')
+    }
+    for (const [index, goFile] of compileUnitGoFiles.entries()) {
+      if (packageGoFiles[index] !== goFile) {
+        throw new Error('frontend input package graph did not match compile units')
+      }
+    }
+  }
+
+  const compileUnitVerification = verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: manifest.entryFile,
+    optimizeFlag: manifest.optimizeFlag,
+    toolchain: manifest.toolchain,
+    sourceSelection: manifest.sourceSelection,
+    compileUnits: manifest.compileUnits,
+  }, bridgeManifest)
+
+  return {
+    ...compileUnitVerification,
+    buildTags,
+    gc: buildContext.gc ?? '',
+    goarch: buildContext.goarch ?? '',
+    goos: buildContext.goos ?? '',
+    graphPackageCount: packageGraph.length,
+    llvmTarget: buildContext.llvmTarget ?? compileUnitVerification.llvmTarget,
+    modulePath: buildContext.modulePath ?? '',
+    scheduler: buildContext.scheduler ?? '',
+    target: buildContext.target ?? compileUnitVerification.target,
+  }
+}
+
+export const verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest = (
+  manifest: TinyGoFrontendInputManifest,
+  bridgeManifest: TinyGoDriverBridgeManifest,
+) => {
+  if ((manifest.compileUnits ?? []).length !== 0) {
+    throw new Error('frontend analysis input compileUnits are not supported')
+  }
+  const bridgeAnalysisInput = bridgeManifest.frontendAnalysisInput
+  if (!bridgeAnalysisInput) {
+    throw new Error('real TinyGo driver bridge frontend analysis input was missing')
+  }
+  if ((bridgeAnalysisInput.compileUnits ?? []).length !== 0) {
+    throw new Error('real TinyGo driver bridge frontend analysis input compileUnits are not supported')
+  }
+
+  const synthesizeCompileUnits = (inputManifest: TinyGoFrontendInputManifest) =>
+    (inputManifest.packageGraph ?? []).map((packageInfo) => {
+      const packageDir = packageInfo.dir ?? ''
+      const goFiles = packageInfo.files?.goFiles ?? []
+      return {
+        kind: packageInfo.standard ? 'stdlib' : (packageInfo.depOnly ? 'imported' : 'program'),
+        importPath: packageInfo.importPath ?? '',
+        imports: [...(packageInfo.imports ?? [])],
+        modulePath: packageInfo.modulePath ?? '',
+        depOnly: packageInfo.depOnly,
+        packageName: packageInfo.name ?? '',
+        packageDir,
+        files: goFiles.map((goFile) => packageDir === '' ? goFile : `${packageDir.replace(/\/$/, '')}/${goFile}`),
+        standard: packageInfo.standard,
+      }
+    })
+
+  let verification: ReturnType<typeof verifyFrontendInputManifestAgainstDriverBridgeManifest>
+  try {
+    verification = verifyFrontendInputManifestAgainstDriverBridgeManifest({
+      ...manifest,
+      compileUnits: synthesizeCompileUnits(manifest),
+    }, {
+      ...bridgeManifest,
+      driverBuildTags: bridgeAnalysisInput.buildContext?.buildTags ?? bridgeAnalysisInput.buildTags ?? bridgeManifest.driverBuildTags,
+      entryFile: bridgeAnalysisInput.entryFile ?? bridgeManifest.entryFile,
+      packageGraph: (bridgeAnalysisInput.packageGraph ?? []).map((packageInfo) => ({
+        depOnly: packageInfo.depOnly,
+        dir: packageInfo.dir,
+        goFiles: packageInfo.files?.goFiles ?? [],
+        importPath: packageInfo.importPath,
+        imports: packageInfo.imports,
+        modulePath: packageInfo.modulePath,
+        name: packageInfo.name,
+        standard: packageInfo.standard,
+      })),
+      target: bridgeAnalysisInput.buildContext?.target ?? bridgeAnalysisInput.toolchain?.target ?? bridgeManifest.target,
+      llvmTriple:
+        bridgeAnalysisInput.buildContext?.llvmTarget ??
+        bridgeAnalysisInput.toolchain?.llvmTarget ??
+        bridgeManifest.llvmTriple,
+      goos: bridgeAnalysisInput.buildContext?.goos ?? bridgeManifest.goos,
+      goarch: bridgeAnalysisInput.buildContext?.goarch ?? bridgeManifest.goarch,
+      gc: bridgeAnalysisInput.buildContext?.gc ?? bridgeManifest.gc,
+      scheduler: bridgeAnalysisInput.buildContext?.scheduler ?? bridgeManifest.scheduler,
+    })
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+    }
+    throw error
+  }
+
+  const manifestBuildTags = [...(manifest.buildTags ?? [])].sort()
+  const bridgeBuildTags = [...(bridgeAnalysisInput.buildTags ?? [])].sort()
+  if (manifestBuildTags.length !== bridgeBuildTags.length) {
+    throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+  }
+  for (const [index, buildTag] of manifestBuildTags.entries()) {
+    if (bridgeBuildTags[index] !== buildTag) {
+      throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+    }
+  }
+  const manifestBuildContext = manifest.buildContext ?? {}
+  const bridgeBuildContext = bridgeAnalysisInput.buildContext ?? {}
+  const manifestBuildContextBuildTags = [...(manifestBuildContext.buildTags ?? [])].sort()
+  const bridgeBuildContextBuildTags = [...(bridgeBuildContext.buildTags ?? [])].sort()
+  if (
+    (manifestBuildContext.target ?? '') !== (bridgeBuildContext.target ?? '') ||
+    (manifestBuildContext.llvmTarget ?? '') !== (bridgeBuildContext.llvmTarget ?? '') ||
+    (manifestBuildContext.goos ?? '') !== (bridgeBuildContext.goos ?? '') ||
+    (manifestBuildContext.goarch ?? '') !== (bridgeBuildContext.goarch ?? '') ||
+    (manifestBuildContext.gc ?? '') !== (bridgeBuildContext.gc ?? '') ||
+    (manifestBuildContext.scheduler ?? '') !== (bridgeBuildContext.scheduler ?? '') ||
+    (manifestBuildContext.modulePath ?? '') !== (bridgeBuildContext.modulePath ?? '')
+  ) {
+    throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+  }
+  if (manifestBuildContextBuildTags.length !== bridgeBuildContextBuildTags.length) {
+    throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+  }
+  for (const [index, buildTag] of manifestBuildContextBuildTags.entries()) {
+    if (bridgeBuildContextBuildTags[index] !== buildTag) {
+      throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+    }
+  }
+  if (
+    (manifest.modulePath ?? '') !== (bridgeAnalysisInput.modulePath ?? '') ||
+    (manifest.optimizeFlag ?? '') !== (bridgeAnalysisInput.optimizeFlag ?? '') ||
+    (manifest.entryFile ?? '') !== (bridgeAnalysisInput.entryFile ?? '')
+  ) {
+    throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+  }
+  const manifestToolchain = manifest.toolchain ?? {}
+  const bridgeToolchain = bridgeAnalysisInput.toolchain ?? {}
+  if (
+    (manifestToolchain.target ?? '') !== (bridgeToolchain.target ?? '') ||
+    (
+      (manifestToolchain.llvmTarget ?? '') !== '' &&
+      (bridgeToolchain.llvmTarget ?? '') !== '' &&
+      (manifestToolchain.llvmTarget ?? '') !== (bridgeToolchain.llvmTarget ?? '')
+    ) ||
+    (manifestToolchain.linker ?? '') !== (bridgeToolchain.linker ?? '') ||
+    JSON.stringify(manifestToolchain.cflags ?? []) !== JSON.stringify(bridgeToolchain.cflags ?? []) ||
+    JSON.stringify(manifestToolchain.ldflags ?? []) !== JSON.stringify(bridgeToolchain.ldflags ?? []) ||
+    (manifestToolchain.translationUnitPath ?? '') !== (bridgeToolchain.translationUnitPath ?? '') ||
+    (manifestToolchain.objectOutputPath ?? '') !== (bridgeToolchain.objectOutputPath ?? '') ||
+    (manifestToolchain.artifactOutputPath ?? '') !== (bridgeToolchain.artifactOutputPath ?? '')
+  ) {
+    throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+  }
+  const manifestSourceSelection = manifest.sourceSelection ?? {}
+  const bridgeSourceSelection = bridgeAnalysisInput.sourceSelection ?? {}
+  for (const selectionField of ['targetAssets', 'runtimeSupport', 'program', 'imported', 'stdlib', 'allCompile'] as const) {
+    const manifestSelection = [...(manifestSourceSelection[selectionField] ?? [])].sort()
+    const bridgeSelection = [...(bridgeSourceSelection[selectionField] ?? [])].sort()
+    if (manifestSelection.length !== bridgeSelection.length) {
+      throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+    }
+    for (const [index, filePath] of manifestSelection.entries()) {
+      if (bridgeSelection[index] !== filePath) {
+        throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+      }
+    }
+  }
+  if (Object.keys(manifestSourceSelection).length !== Object.keys(bridgeSourceSelection).length) {
+    throw new Error('frontend analysis input did not match real TinyGo driver bridge')
+  }
+  return {
+    buildTags: verification.buildTags,
+    gc: verification.gc,
+    goarch: verification.goarch,
+    goos: verification.goos,
+    graphPackageCount: verification.graphPackageCount,
+    llvmTarget: verification.llvmTarget,
+    modulePath: verification.modulePath,
+    scheduler: verification.scheduler,
+    target: verification.target,
+  }
+}
+
+export const verifyFrontendAnalysisAgainstDriverBridgeManifest = (
+  manifest: TinyGoFrontendAnalysisManifest,
+  bridgeManifest: TinyGoDriverBridgeManifest,
+) => {
+  const bridgeAnalysis = bridgeManifest.frontendAnalysis
+  if (!bridgeAnalysis) {
+    throw new Error('real TinyGo driver bridge frontend analysis was missing')
+  }
+
+  const manifestTarget = manifest.toolchain?.target ?? ''
+  const bridgeTarget = bridgeAnalysis.toolchain?.target ?? bridgeManifest.target ?? ''
+  if (bridgeTarget === '' || manifestTarget === '' || manifestTarget !== bridgeTarget) {
+    throw new Error('frontend analysis target did not match real TinyGo driver bridge')
+  }
+  const manifestLLVMTarget = manifest.toolchain?.llvmTarget ?? ''
+  const bridgeLLVMTarget = bridgeAnalysis.toolchain?.llvmTarget ?? bridgeManifest.llvmTriple ?? ''
+  if (bridgeLLVMTarget === '' || manifestLLVMTarget === '' || manifestLLVMTarget !== bridgeLLVMTarget) {
+    throw new Error('frontend analysis llvmTarget did not match real TinyGo driver bridge')
+  }
+  const buildContext = manifest.buildContext ?? {}
+  const bridgeBuildContext = bridgeAnalysis.buildContext ?? {}
+  const manifestBuildContextBuildTags = [...(buildContext.buildTags ?? [])].sort()
+  const bridgeBuildContextBuildTags = [...(bridgeBuildContext.buildTags ?? bridgeManifest.driverBuildTags ?? [])].sort()
+  if (
+    (buildContext.target ?? '') !== '' ||
+    (buildContext.llvmTarget ?? '') !== '' ||
+    (buildContext.goos ?? '') !== '' ||
+    (buildContext.goarch ?? '') !== '' ||
+    (buildContext.gc ?? '') !== '' ||
+    (buildContext.scheduler ?? '') !== '' ||
+    manifestBuildContextBuildTags.length !== 0 ||
+    (buildContext.modulePath ?? '') !== '' ||
+    (bridgeBuildContext.target ?? '') !== '' ||
+    (bridgeBuildContext.llvmTarget ?? '') !== '' ||
+    (bridgeBuildContext.goos ?? '') !== '' ||
+    (bridgeBuildContext.goarch ?? '') !== '' ||
+    (bridgeBuildContext.gc ?? '') !== '' ||
+    (bridgeBuildContext.scheduler ?? '') !== '' ||
+    bridgeBuildContextBuildTags.length !== 0 ||
+    (bridgeBuildContext.modulePath ?? '') !== ''
+  ) {
+    if (
+      (buildContext.target ?? '') !== (bridgeBuildContext.target ?? bridgeManifest.target ?? '') ||
+      (buildContext.llvmTarget ?? '') !== (bridgeBuildContext.llvmTarget ?? bridgeManifest.llvmTriple ?? '') ||
+      (buildContext.goos ?? '') !== (bridgeBuildContext.goos ?? bridgeManifest.goos ?? '') ||
+      (buildContext.goarch ?? '') !== (bridgeBuildContext.goarch ?? bridgeManifest.goarch ?? '') ||
+      (buildContext.gc ?? '') !== (bridgeBuildContext.gc ?? bridgeManifest.gc ?? '') ||
+      (buildContext.scheduler ?? '') !== (bridgeBuildContext.scheduler ?? bridgeManifest.scheduler ?? '')
+    ) {
+      throw new Error('frontend analysis buildContext did not match real TinyGo driver bridge')
+    }
+    if ((bridgeBuildContext.modulePath ?? '') !== '' && (buildContext.modulePath ?? '') !== (bridgeBuildContext.modulePath ?? '')) {
+      throw new Error('frontend analysis buildContext did not match real TinyGo driver bridge')
+    }
+    if (bridgeBuildContextBuildTags.length !== manifestBuildContextBuildTags.length) {
+      throw new Error('frontend analysis buildContext did not match real TinyGo driver bridge')
+    }
+    for (const [index, buildTag] of manifestBuildContextBuildTags.entries()) {
+      if (bridgeBuildContextBuildTags[index] !== buildTag) {
+        throw new Error('frontend analysis buildContext did not match real TinyGo driver bridge')
+      }
+    }
+  }
+  if ((manifest.entryFile ?? '') !== (bridgeAnalysis.entryFile ?? '')) {
+    throw new Error('frontend analysis entryFile did not match real TinyGo driver bridge')
+  }
+  if ((manifest.compileUnitManifestPath ?? '') !== (bridgeAnalysis.compileUnitManifestPath ?? '')) {
+    throw new Error('frontend analysis compileUnitManifestPath did not match real TinyGo driver bridge')
+  }
+
+  const allCompileFiles = [...(manifest.allCompileFiles ?? [])].sort()
+  const bridgeAllCompileFiles = [...(bridgeAnalysis.allCompileFiles ?? [])].sort()
+  if (allCompileFiles.length !== bridgeAllCompileFiles.length) {
+    throw new Error('frontend analysis allCompileFiles did not match real TinyGo driver bridge')
+  }
+  for (const [index, filePath] of allCompileFiles.entries()) {
+    if (bridgeAllCompileFiles[index] !== filePath) {
+      throw new Error('frontend analysis allCompileFiles did not match real TinyGo driver bridge')
+    }
+  }
+
+  const compileGroups = manifest.compileGroups ?? []
+  const bridgeCompileGroups = bridgeAnalysis.compileGroups ?? []
+  if (compileGroups.length !== bridgeCompileGroups.length) {
+    throw new Error('frontend analysis compileGroups did not match real TinyGo driver bridge')
+  }
+  for (const [index, compileGroup] of compileGroups.entries()) {
+    const bridgeCompileGroup = bridgeCompileGroups[index]
+    if (!bridgeCompileGroup || (compileGroup.name ?? '') !== (bridgeCompileGroup.name ?? '')) {
+      throw new Error('frontend analysis compileGroups did not match real TinyGo driver bridge')
+    }
+    const compileGroupFiles = [...(compileGroup.files ?? [])].sort()
+    const bridgeCompileGroupFiles = [...(bridgeCompileGroup.files ?? [])].sort()
+    if (compileGroupFiles.length !== bridgeCompileGroupFiles.length) {
+      throw new Error('frontend analysis compileGroups did not match real TinyGo driver bridge')
+    }
+    for (const [fileIndex, filePath] of compileGroupFiles.entries()) {
+      if (bridgeCompileGroupFiles[fileIndex] !== filePath) {
+        throw new Error('frontend analysis compileGroups did not match real TinyGo driver bridge')
+      }
+    }
+  }
+
+  const compileUnits = manifest.compileUnits ?? []
+  const bridgeCompileUnits = bridgeAnalysis.compileUnits ?? []
+  if (compileUnits.length !== bridgeCompileUnits.length) {
+    throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+  }
+  const bridgeCompileUnitsByImportPath = new Map(
+    bridgeCompileUnits
+      .filter((compileUnit) => (compileUnit.importPath ?? '') !== '')
+      .map((compileUnit) => [compileUnit.importPath ?? '', compileUnit] as const),
+  )
+  if (bridgeCompileUnitsByImportPath.size !== bridgeCompileUnits.length) {
+    throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+  }
+  const matchedBridgeCompileUnitImportPaths = new Set<string>()
+  for (const compileUnit of compileUnits) {
+    const compileUnitImportPath = compileUnit.importPath ?? ''
+    let bridgeCompileUnit = bridgeCompileUnitsByImportPath.get(compileUnitImportPath)
+    let bridgeCompileUnitImportPath = compileUnitImportPath
+    if (!bridgeCompileUnit && (compileUnit.kind ?? '') === 'program') {
+      if (compileUnitImportPath === 'command-line-arguments') {
+        bridgeCompileUnitImportPath = bridgeManifest.entryPackage?.importPath ?? ''
+        bridgeCompileUnit = bridgeCompileUnitImportPath === '' ? undefined : bridgeCompileUnitsByImportPath.get(bridgeCompileUnitImportPath)
+      } else if (compileUnitImportPath === (bridgeManifest.entryPackage?.importPath ?? '')) {
+        bridgeCompileUnitImportPath = 'command-line-arguments'
+        bridgeCompileUnit = bridgeCompileUnitsByImportPath.get(bridgeCompileUnitImportPath)
+      }
+    }
+    if (!bridgeCompileUnit) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+    }
+    const normalizedCompileUnitFacts = normalizePackageFactsByKind(
+      compileUnit.kind ?? '',
+      compileUnit.depOnly,
+      compileUnit.standard,
+    )
+    const normalizedBridgeCompileUnitFacts = normalizePackageFactsByKind(
+      bridgeCompileUnit.kind ?? '',
+      bridgeCompileUnit.depOnly,
+      bridgeCompileUnit.standard,
+    )
+    const compileUnitImportPathMatches =
+      compileUnitImportPath === (bridgeCompileUnit.importPath ?? '') ||
+      (
+        (compileUnit.kind ?? '') === 'program' &&
+        (
+          (
+            compileUnitImportPath === 'command-line-arguments' &&
+            (bridgeCompileUnit.importPath ?? '') === (bridgeManifest.entryPackage?.importPath ?? '')
+          ) ||
+          (
+            compileUnitImportPath === (bridgeManifest.entryPackage?.importPath ?? '') &&
+            (bridgeCompileUnit.importPath ?? '') === 'command-line-arguments'
+          )
+        )
+      )
+    if (
+      (compileUnit.kind ?? '') !== (bridgeCompileUnit.kind ?? '') ||
+      !compileUnitImportPathMatches ||
+      (compileUnit.modulePath ?? '') !== (bridgeCompileUnit.modulePath ?? '') ||
+      (compileUnit.packageName ?? '') !== (bridgeCompileUnit.packageName ?? '') ||
+      (compileUnit.packageDir ?? '') !== (bridgeCompileUnit.packageDir ?? '') ||
+      normalizedCompileUnitFacts.depOnly !== normalizedBridgeCompileUnitFacts.depOnly ||
+      normalizedCompileUnitFacts.standard !== normalizedBridgeCompileUnitFacts.standard
+    ) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+    }
+    const compileUnitImports = [...(compileUnit.imports ?? [])]
+    const bridgeCompileUnitImports = [...(bridgeCompileUnit.imports ?? [])]
+    if (
+      !importsMatchForFrontendBridge(
+        compileUnitImports,
+        bridgeCompileUnitImports,
+        isTinyGoRootStdlibPackage(
+          compileUnit.kind ?? '',
+          compileUnit.packageDir ?? '',
+          normalizedCompileUnitFacts.standard || normalizedBridgeCompileUnitFacts.standard,
+        ),
+      )
+    ) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+    }
+    const compileUnitFiles = [...(compileUnit.files ?? [])].sort()
+    const bridgeCompileUnitFiles = [...(bridgeCompileUnit.files ?? [])].sort()
+    if (compileUnitFiles.length !== bridgeCompileUnitFiles.length) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+    }
+    for (const [fileIndex, filePath] of compileUnitFiles.entries()) {
+      if (bridgeCompileUnitFiles[fileIndex] !== filePath) {
+        throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+      }
+    }
+    matchedBridgeCompileUnitImportPaths.add(bridgeCompileUnitImportPath)
+  }
+  if (matchedBridgeCompileUnitImportPaths.size !== bridgeCompileUnitsByImportPath.size) {
+    throw new Error('frontend analysis compileUnits did not match real TinyGo driver bridge')
+  }
+  const packageGraph = manifest.packageGraph ?? []
+  const bridgePackageGraph = bridgeAnalysis.packageGraph ?? bridgeManifest.packageGraph ?? []
+  if (packageGraph.length !== bridgePackageGraph.length) {
+    throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+  }
+  const bridgePackageGraphByImportPath = new Map(
+    bridgePackageGraph
+      .filter((packageInfo) => (packageInfo.importPath ?? '') !== '')
+      .map((packageInfo) => [packageInfo.importPath ?? '', packageInfo] as const),
+  )
+  if (bridgePackageGraphByImportPath.size !== bridgePackageGraph.length) {
+    throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+  }
+  const matchedBridgeImportPaths = new Set<string>()
+  for (const packageInfo of packageGraph) {
+    const packageImportPath = packageInfo.importPath ?? ''
+    let bridgePackageInfo = bridgePackageGraphByImportPath.get(packageImportPath)
+    let bridgeImportPath = packageImportPath
+    if (!bridgePackageInfo && packageImportPath === 'command-line-arguments' && !(packageInfo.depOnly ?? false)) {
+      bridgeImportPath = bridgeManifest.entryPackage?.importPath ?? ''
+      bridgePackageInfo = bridgeImportPath === '' ? undefined : bridgePackageGraphByImportPath.get(bridgeImportPath)
+    }
+    if (!bridgePackageInfo) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+    }
+    if (
+      (packageInfo.dir ?? '') !== (bridgePackageInfo.dir ?? '') ||
+      (packageInfo.name ?? '') !== (bridgePackageInfo.name ?? '') ||
+      (packageInfo.modulePath ?? '') !== (bridgePackageInfo.modulePath ?? '') ||
+      Boolean(packageInfo.depOnly) !== Boolean(bridgePackageInfo.depOnly) ||
+      Boolean(packageInfo.standard) !== Boolean(bridgePackageInfo.standard)
+    ) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+    }
+    const packageImports = [...(packageInfo.imports ?? [])]
+    const bridgePackageImports = [...(bridgePackageInfo.imports ?? [])]
+    if (
+      !importsMatchForFrontendBridge(
+        packageImports,
+        bridgePackageImports,
+        isTinyGoRootStdlibPackage(
+          packageInfo.standard ? 'stdlib' : '',
+          packageInfo.dir ?? '',
+          Boolean(packageInfo.standard) || Boolean(bridgePackageInfo.standard),
+        ),
+      )
+    ) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+    }
+    const packageGoFiles = [...(packageInfo.files?.goFiles ?? [])].sort()
+    let bridgePackageGoFiles: string[] = []
+    if ('files' in bridgePackageInfo) {
+      bridgePackageGoFiles = [...(bridgePackageInfo.files?.goFiles ?? [])].sort()
+    }
+    if (bridgePackageGoFiles.length === 0 && 'goFiles' in bridgePackageInfo) {
+      bridgePackageGoFiles = [...(bridgePackageInfo.goFiles ?? [])].sort()
+    }
+    if (packageGoFiles.length !== bridgePackageGoFiles.length) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+    }
+    for (const [fileIndex, goFile] of packageGoFiles.entries()) {
+      if (bridgePackageGoFiles[fileIndex] !== goFile) {
+        throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+      }
+    }
+    matchedBridgeImportPaths.add(bridgeImportPath)
+  }
+  if (matchedBridgeImportPaths.size !== bridgePackageGraphByImportPath.size) {
+    throw new Error('frontend analysis packageGraph did not match real TinyGo driver bridge')
+  }
+  const programCompileUnit = compileUnits.find((compileUnit) => (compileUnit.kind ?? '') === 'program')
+  const programImportPath = programCompileUnit?.importPath ?? ''
+  const programImportAlias = programImportPath === '' ? '' : (programImportPath === 'command-line-arguments' ? 'synthetic' : 'direct')
+
+  return {
+    allCompileCount: allCompileFiles.length,
+    compileGroupCount: compileGroups.length,
+    compileUnitCount: compileUnits.length,
+    compileUnitManifestPath: manifest.compileUnitManifestPath ?? '',
+    entryFile: manifest.entryFile ?? '',
+    gc: buildContext.gc ?? '',
+    goarch: buildContext.goarch ?? '',
+    goos: buildContext.goos ?? '',
+    graphPackageCount: packageGraph.length,
+    llvmTarget: manifestLLVMTarget,
+    programImportAlias,
+    programImportPath,
+    scheduler: buildContext.scheduler ?? '',
+    target: manifestTarget,
+  }
+}
+
+export const verifyFrontendAnalysisAgainstRealDriverBridgeManifest = (
+  manifest: TinyGoFrontendAnalysisManifest,
+  bridgeManifest: TinyGoDriverBridgeManifest,
+) => {
+  const realAnalysis = bridgeManifest.frontendRealAdapter ?? bridgeManifest.realFrontendAnalysis
+  if (!realAnalysis) {
+    throw new Error('real TinyGo analysis adapter was missing')
+  }
+
+  const manifestTarget = manifest.toolchain?.target ?? ''
+  const realTarget = realAnalysis.toolchain?.target ?? bridgeManifest.target ?? ''
+  if (realTarget === '' || manifestTarget === '' || manifestTarget !== realTarget) {
+    throw new Error('frontend analysis target did not match real TinyGo analysis adapter')
+  }
+  const manifestLLVMTarget = manifest.toolchain?.llvmTarget ?? ''
+  const realLLVMTarget = realAnalysis.toolchain?.llvmTarget ?? bridgeManifest.llvmTriple ?? ''
+  if (realLLVMTarget === '' || manifestLLVMTarget === '' || manifestLLVMTarget !== realLLVMTarget) {
+    throw new Error('frontend analysis llvmTarget did not match real TinyGo analysis adapter')
+  }
+  const buildContext = manifest.buildContext ?? {}
+  const realBuildContext = realAnalysis.buildContext ?? {}
+  const manifestBuildContextBuildTags = [...(buildContext.buildTags ?? [])].sort()
+  const realBuildContextBuildTags = [...(realBuildContext.buildTags ?? bridgeManifest.driverBuildTags ?? [])].sort()
+  if (
+    (buildContext.target ?? '') !== '' ||
+    (buildContext.llvmTarget ?? '') !== '' ||
+    (buildContext.goos ?? '') !== '' ||
+    (buildContext.goarch ?? '') !== '' ||
+    (buildContext.gc ?? '') !== '' ||
+    (buildContext.scheduler ?? '') !== '' ||
+    manifestBuildContextBuildTags.length !== 0 ||
+    (buildContext.modulePath ?? '') !== '' ||
+    (realBuildContext.target ?? '') !== '' ||
+    (realBuildContext.llvmTarget ?? '') !== '' ||
+    (realBuildContext.goos ?? '') !== '' ||
+    (realBuildContext.goarch ?? '') !== '' ||
+    (realBuildContext.gc ?? '') !== '' ||
+    (realBuildContext.scheduler ?? '') !== '' ||
+    realBuildContextBuildTags.length !== 0 ||
+    (realBuildContext.modulePath ?? '') !== ''
+  ) {
+    if (
+      (buildContext.target ?? '') !== (realBuildContext.target ?? bridgeManifest.target ?? '') ||
+      (buildContext.llvmTarget ?? '') !== (realBuildContext.llvmTarget ?? bridgeManifest.llvmTriple ?? '') ||
+      (buildContext.goos ?? '') !== (realBuildContext.goos ?? bridgeManifest.goos ?? '') ||
+      (buildContext.goarch ?? '') !== (realBuildContext.goarch ?? bridgeManifest.goarch ?? '') ||
+      (buildContext.gc ?? '') !== (realBuildContext.gc ?? bridgeManifest.gc ?? '') ||
+      (buildContext.scheduler ?? '') !== (realBuildContext.scheduler ?? bridgeManifest.scheduler ?? '')
+    ) {
+      throw new Error('frontend analysis buildContext did not match real TinyGo analysis adapter')
+    }
+    if ((realBuildContext.modulePath ?? '') !== '' && (buildContext.modulePath ?? '') !== (realBuildContext.modulePath ?? '')) {
+      throw new Error('frontend analysis buildContext did not match real TinyGo analysis adapter')
+    }
+    if (realBuildContextBuildTags.length !== manifestBuildContextBuildTags.length) {
+      throw new Error('frontend analysis buildContext did not match real TinyGo analysis adapter')
+    }
+    for (const [index, buildTag] of manifestBuildContextBuildTags.entries()) {
+      if (realBuildContextBuildTags[index] !== buildTag) {
+        throw new Error('frontend analysis buildContext did not match real TinyGo analysis adapter')
+      }
+    }
+  }
+  if ((manifest.entryFile ?? '') !== (realAnalysis.entryFile ?? '')) {
+    throw new Error('frontend analysis entryFile did not match real TinyGo analysis adapter')
+  }
+  if ((manifest.compileUnitManifestPath ?? '') !== (realAnalysis.compileUnitManifestPath ?? '')) {
+    throw new Error('frontend analysis compileUnitManifestPath did not match real TinyGo analysis adapter')
+  }
+
+  const allCompileFiles = [...(manifest.allCompileFiles ?? [])].sort()
+  const realAllCompileFiles = [...(realAnalysis.allCompileFiles ?? [])].sort()
+  if (allCompileFiles.length !== realAllCompileFiles.length) {
+    throw new Error('frontend analysis allCompileFiles did not match real TinyGo analysis adapter')
+  }
+  for (const [index, filePath] of allCompileFiles.entries()) {
+    if (realAllCompileFiles[index] !== filePath) {
+      throw new Error('frontend analysis allCompileFiles did not match real TinyGo analysis adapter')
+    }
+  }
+
+  const compileUnits = manifest.compileUnits ?? []
+  const realCompileUnits = realAnalysis.compileUnits ?? []
+  if (compileUnits.length !== realCompileUnits.length) {
+    throw new Error('frontend analysis compileUnits did not match real TinyGo analysis adapter')
+  }
+
+  const selectedCompileGroupNames = ['program', 'imported', 'stdlib', 'all-compile']
+  const compileGroupsByName = new Map(
+    (manifest.compileGroups ?? [])
+      .filter((compileGroup) => selectedCompileGroupNames.includes(compileGroup.name ?? ''))
+      .map((compileGroup) => [compileGroup.name ?? '', compileGroup]),
+  )
+  if (!compileGroupsByName.has('program')) {
+    compileGroupsByName.set('program', {
+      name: 'program',
+      files: compileUnits
+        .filter((compileUnit) => (compileUnit.kind ?? '') === 'program')
+        .flatMap((compileUnit) => compileUnit.files ?? []),
+    })
+  }
+  if (!compileGroupsByName.has('imported')) {
+    compileGroupsByName.set('imported', {
+      name: 'imported',
+      files: compileUnits
+        .filter((compileUnit) => (compileUnit.kind ?? '') === 'imported')
+        .flatMap((compileUnit) => compileUnit.files ?? []),
+    })
+  }
+  if (!compileGroupsByName.has('stdlib')) {
+    compileGroupsByName.set('stdlib', {
+      name: 'stdlib',
+      files: compileUnits
+        .filter((compileUnit) => (compileUnit.kind ?? '') === 'stdlib')
+        .flatMap((compileUnit) => compileUnit.files ?? []),
+    })
+  }
+  if (!compileGroupsByName.has('all-compile')) {
+    compileGroupsByName.set('all-compile', {
+      name: 'all-compile',
+      files: manifest.allCompileFiles ?? [],
+    })
+  }
+  const realCompileGroupsByName = new Map(
+    (realAnalysis.compileGroups ?? [])
+      .filter((compileGroup) => selectedCompileGroupNames.includes(compileGroup.name ?? ''))
+      .map((compileGroup) => [compileGroup.name ?? '', compileGroup]),
+  )
+  if (!realCompileGroupsByName.has('program')) {
+    realCompileGroupsByName.set('program', {
+      name: 'program',
+      files: realCompileUnits
+        .filter((compileUnit) => (compileUnit.kind ?? '') === 'program')
+        .flatMap((compileUnit) => compileUnit.files ?? []),
+    })
+  }
+  if (!realCompileGroupsByName.has('imported')) {
+    realCompileGroupsByName.set('imported', {
+      name: 'imported',
+      files: realCompileUnits
+        .filter((compileUnit) => (compileUnit.kind ?? '') === 'imported')
+        .flatMap((compileUnit) => compileUnit.files ?? []),
+    })
+  }
+  if (!realCompileGroupsByName.has('stdlib')) {
+    realCompileGroupsByName.set('stdlib', {
+      name: 'stdlib',
+      files: realCompileUnits
+        .filter((compileUnit) => (compileUnit.kind ?? '') === 'stdlib')
+        .flatMap((compileUnit) => compileUnit.files ?? []),
+    })
+  }
+  if (!realCompileGroupsByName.has('all-compile')) {
+    realCompileGroupsByName.set('all-compile', {
+      name: 'all-compile',
+      files: realAnalysis.allCompileFiles ?? [],
+    })
+  }
+  for (const compileGroupName of selectedCompileGroupNames) {
+    const compileGroup = compileGroupsByName.get(compileGroupName)
+    const realCompileGroup = realCompileGroupsByName.get(compileGroupName)
+    if (!compileGroup || !realCompileGroup) {
+      throw new Error('frontend analysis compileGroups did not match real TinyGo analysis adapter')
+    }
+    const compileGroupFiles = [...(compileGroup.files ?? [])].sort()
+    const realCompileGroupFiles = [...(realCompileGroup.files ?? [])].sort()
+    if (compileGroupFiles.length !== realCompileGroupFiles.length) {
+      throw new Error('frontend analysis compileGroups did not match real TinyGo analysis adapter')
+    }
+    for (const [index, filePath] of compileGroupFiles.entries()) {
+      if (realCompileGroupFiles[index] !== filePath) {
+        throw new Error('frontend analysis compileGroups did not match real TinyGo analysis adapter')
+      }
+    }
+  }
+  const manifestProgramCompileUnit = compileUnits.find((compileUnit) => (compileUnit.kind ?? '') === 'program')
+  const realProgramCompileUnit = realCompileUnits.find((compileUnit) => (compileUnit.kind ?? '') === 'program')
+  if (!manifestProgramCompileUnit || !realProgramCompileUnit) {
+    throw new Error('frontend analysis compileUnits did not match real TinyGo analysis adapter')
+  }
+  let programImportAlias = 'direct'
+  if ((manifestProgramCompileUnit.importPath ?? '') !== (realProgramCompileUnit.importPath ?? '')) {
+    if ((manifestProgramCompileUnit.importPath ?? '') === 'command-line-arguments') {
+      programImportAlias = 'synthetic'
+    } else {
+      throw new Error('frontend analysis program package did not match real TinyGo analysis adapter')
+    }
+  }
+  const normalizedManifestProgramFacts = normalizePackageFactsByKind(
+    manifestProgramCompileUnit.kind ?? '',
+    manifestProgramCompileUnit.depOnly,
+    manifestProgramCompileUnit.standard,
+  )
+  const normalizedRealProgramFacts = normalizePackageFactsByKind(
+    realProgramCompileUnit.kind ?? '',
+    realProgramCompileUnit.depOnly,
+    realProgramCompileUnit.standard,
+  )
+  if (
+    (manifestProgramCompileUnit.modulePath ?? '') !== (realProgramCompileUnit.modulePath ?? '') ||
+    (manifestProgramCompileUnit.packageName ?? '') !== (realProgramCompileUnit.packageName ?? '') ||
+    (manifestProgramCompileUnit.packageDir ?? '') !== (realProgramCompileUnit.packageDir ?? '') ||
+    normalizedManifestProgramFacts.depOnly !== normalizedRealProgramFacts.depOnly ||
+    normalizedManifestProgramFacts.standard !== normalizedRealProgramFacts.standard
+  ) {
+    throw new Error('frontend analysis program package did not match real TinyGo analysis adapter')
+  }
+  const manifestProgramFiles = [...(manifestProgramCompileUnit.files ?? [])].sort()
+  const realProgramFiles = [...(realProgramCompileUnit.files ?? [])].sort()
+  if (manifestProgramFiles.length !== realProgramFiles.length) {
+    throw new Error('frontend analysis program package did not match real TinyGo analysis adapter')
+  }
+  for (const [index, filePath] of manifestProgramFiles.entries()) {
+    if (realProgramFiles[index] !== filePath) {
+      throw new Error('frontend analysis program package did not match real TinyGo analysis adapter')
+    }
+  }
+  const manifestProgramImports = [...(manifestProgramCompileUnit.imports ?? [])].sort()
+  const realProgramImports = [...(realProgramCompileUnit.imports ?? [])].sort()
+  if (manifestProgramImports.length !== realProgramImports.length) {
+    throw new Error('frontend analysis program package did not match real TinyGo analysis adapter')
+  }
+  for (const [index, importPath] of manifestProgramImports.entries()) {
+    if (realProgramImports[index] !== importPath) {
+      throw new Error('frontend analysis program package did not match real TinyGo analysis adapter')
+    }
+  }
+
+  const realCompileUnitsByImportPath = new Map(
+    realCompileUnits
+      .filter((compileUnit) => (compileUnit.kind ?? '') !== 'program')
+      .map((compileUnit) => [compileUnit.importPath ?? '', compileUnit] as const)
+      .filter(([importPath]) => importPath !== ''),
+  )
+  for (const compileUnit of compileUnits) {
+    if ((compileUnit.kind ?? '') === 'program') {
+      continue
+    }
+    const realCompileUnit = realCompileUnitsByImportPath.get(compileUnit.importPath ?? '')
+    if (!realCompileUnit) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo analysis adapter')
+    }
+    const normalizedCompileUnitFacts = normalizePackageFactsByKind(
+      compileUnit.kind ?? '',
+      compileUnit.depOnly,
+      compileUnit.standard,
+    )
+    const normalizedRealCompileUnitFacts = normalizePackageFactsByKind(
+      realCompileUnit.kind ?? '',
+      realCompileUnit.depOnly,
+      realCompileUnit.standard,
+    )
+    if (
+      (compileUnit.kind ?? '') !== (realCompileUnit.kind ?? '') ||
+      (compileUnit.modulePath ?? '') !== (realCompileUnit.modulePath ?? '') ||
+      (compileUnit.packageName ?? '') !== (realCompileUnit.packageName ?? '') ||
+      (compileUnit.packageDir ?? '') !== (realCompileUnit.packageDir ?? '') ||
+      normalizedCompileUnitFacts.depOnly !== normalizedRealCompileUnitFacts.depOnly ||
+      normalizedCompileUnitFacts.standard !== normalizedRealCompileUnitFacts.standard
+    ) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo analysis adapter')
+    }
+    const compileUnitFiles = [...(compileUnit.files ?? [])].sort()
+    const realCompileUnitFiles = [...(realCompileUnit.files ?? [])].sort()
+    if (compileUnitFiles.length !== realCompileUnitFiles.length) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo analysis adapter')
+    }
+    for (const [index, filePath] of compileUnitFiles.entries()) {
+      if (realCompileUnitFiles[index] !== filePath) {
+        throw new Error('frontend analysis compileUnits did not match real TinyGo analysis adapter')
+      }
+    }
+    const compileUnitImports = [...(compileUnit.imports ?? [])]
+    const realCompileUnitImports = [...(realCompileUnit.imports ?? [])]
+    if (
+      !importsMatchForFrontendBridge(
+        compileUnitImports,
+        realCompileUnitImports,
+        isTinyGoRootStdlibPackage(
+          compileUnit.kind ?? '',
+          compileUnit.packageDir ?? '',
+          normalizedCompileUnitFacts.standard || normalizedRealCompileUnitFacts.standard,
+        ),
+      )
+    ) {
+      throw new Error('frontend analysis compileUnits did not match real TinyGo analysis adapter')
+    }
+  }
+  const packageGraph = manifest.packageGraph ?? []
+  const realPackageGraph = realAnalysis.packageGraph ?? bridgeManifest.packageGraph ?? []
+  if (packageGraph.length !== realPackageGraph.length) {
+    throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+  }
+  const realPackageGraphByImportPath = new Map(
+    realPackageGraph
+      .filter((packageInfo) => (packageInfo.importPath ?? '') !== '')
+      .map((packageInfo) => [packageInfo.importPath ?? '', packageInfo] as const),
+  )
+  if (realPackageGraphByImportPath.size !== realPackageGraph.length) {
+    throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+  }
+  const matchedRealImportPaths = new Set<string>()
+  for (const packageInfo of packageGraph) {
+    const packageImportPath = packageInfo.importPath ?? ''
+    let realPackageInfo = realPackageGraphByImportPath.get(packageImportPath)
+    let realImportPath = packageImportPath
+    if (!realPackageInfo && packageImportPath === 'command-line-arguments' && !(packageInfo.depOnly ?? false)) {
+      const realProgramCompileUnit = (realAnalysis.compileUnits ?? []).find((compileUnit) => (compileUnit.kind ?? '') === 'program')
+      realImportPath = realProgramCompileUnit?.importPath ?? ''
+      realPackageInfo = realImportPath === '' ? undefined : realPackageGraphByImportPath.get(realImportPath)
+    }
+    if (!realPackageInfo) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+    }
+    if (
+      (packageInfo.dir ?? '') !== (realPackageInfo.dir ?? '') ||
+      (packageInfo.name ?? '') !== (realPackageInfo.name ?? '') ||
+      (packageInfo.modulePath ?? '') !== (realPackageInfo.modulePath ?? '') ||
+      Boolean(packageInfo.depOnly) !== Boolean(realPackageInfo.depOnly) ||
+      Boolean(packageInfo.standard) !== Boolean(realPackageInfo.standard)
+    ) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+    }
+    const packageImports = [...(packageInfo.imports ?? [])]
+    const realPackageImports = [...(realPackageInfo.imports ?? [])]
+    if (
+      !importsMatchForFrontendBridge(
+        packageImports,
+        realPackageImports,
+        isTinyGoRootStdlibPackage(
+          packageInfo.standard ? 'stdlib' : '',
+          packageInfo.dir ?? '',
+          Boolean(packageInfo.standard) || Boolean(realPackageInfo.standard),
+        ),
+      )
+    ) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+    }
+    const packageGoFiles = [...(packageInfo.files?.goFiles ?? [])].sort()
+    let realPackageGoFiles: string[] = []
+    if ('files' in realPackageInfo) {
+      realPackageGoFiles = [...(realPackageInfo.files?.goFiles ?? [])].sort()
+    }
+    if (realPackageGoFiles.length === 0 && 'goFiles' in realPackageInfo) {
+      realPackageGoFiles = [...(realPackageInfo.goFiles ?? [])].sort()
+    }
+    if (packageGoFiles.length !== realPackageGoFiles.length) {
+      throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+    }
+    for (const [index, goFile] of packageGoFiles.entries()) {
+      if (realPackageGoFiles[index] !== goFile) {
+        throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+      }
+    }
+    matchedRealImportPaths.add(realImportPath)
+  }
+  if (matchedRealImportPaths.size !== realPackageGraphByImportPath.size) {
+    throw new Error('frontend analysis packageGraph did not match real TinyGo analysis adapter')
+  }
+
+  return {
+    allCompileCount: allCompileFiles.length,
+    compileGroupCount: selectedCompileGroupNames.length,
+    compileUnitCount: compileUnits.length,
+    entryFile: manifest.entryFile ?? '',
+    gc: buildContext.gc ?? '',
+    goarch: buildContext.goarch ?? '',
+    goos: buildContext.goos ?? '',
+    graphPackageCount: packageGraph.length,
+    llvmTarget: manifestLLVMTarget,
+    programImportAlias,
+    scheduler: buildContext.scheduler ?? '',
+    target: manifestTarget,
+  }
+}
+
+export const verifyFrontendRealAdapterAgainstFrontendAnalysis = (
+  manifest: TinyGoFrontendAnalysisManifest,
+  analysisManifest: TinyGoFrontendAnalysisManifest,
+) => verifyFrontendAnalysisAgainstRealDriverBridgeManifest(analysisManifest, {
+  driverBuildTags: manifest.buildContext?.buildTags ?? analysisManifest.buildContext?.buildTags ?? [],
+  frontendRealAdapter: manifest,
+  gc: manifest.buildContext?.gc ?? analysisManifest.buildContext?.gc ?? '',
+  goarch: manifest.buildContext?.goarch ?? analysisManifest.buildContext?.goarch ?? '',
+  goos: manifest.buildContext?.goos ?? analysisManifest.buildContext?.goos ?? '',
+  llvmTriple:
+    manifest.toolchain?.llvmTarget ??
+    manifest.buildContext?.llvmTarget ??
+    analysisManifest.toolchain?.llvmTarget ??
+    analysisManifest.buildContext?.llvmTarget ??
+    '',
+  scheduler: manifest.buildContext?.scheduler ?? analysisManifest.buildContext?.scheduler ?? '',
+  target:
+    manifest.toolchain?.target ??
+    manifest.buildContext?.target ??
+    analysisManifest.toolchain?.target ??
+    analysisManifest.buildContext?.target ??
+    '',
+})
+
+export const verifyCompileUnitManifestAgainstDriverBridgeManifest = (
+  manifest: TinyGoCompileUnitManifest,
+  bridgeManifest: TinyGoDriverBridgeManifest,
+) => {
+  const compileUnits = manifest.compileUnits ?? []
+  const normalizedToolchain = normalizeCompileUnitToolchain(manifest)
+  if ((bridgeManifest.target ?? '') === '' || (bridgeManifest.llvmTriple ?? '') === '') {
+    throw new Error('real TinyGo driver bridge target facts were incomplete')
+  }
+  if (normalizedToolchain.target !== bridgeManifest.target) {
+    throw new Error('frontend compile unit target did not match real TinyGo driver bridge')
+  }
+  if (normalizedToolchain.llvmTarget !== bridgeManifest.llvmTriple) {
+    throw new Error('frontend compile unit target did not match real TinyGo driver bridge')
+  }
+  if ((bridgeManifest.artifactOutputPath ?? '') !== '' && normalizedToolchain.artifactOutputPath !== bridgeManifest.artifactOutputPath) {
+    throw new Error('frontend compile unit artifact output did not match real TinyGo driver bridge')
+  }
+  if ((bridgeManifest.entryFile ?? '') !== '' && manifest.entryFile !== bridgeManifest.entryFile) {
+    throw new Error('frontend compile unit entry file did not match real TinyGo driver bridge')
+  }
+
+  const programCompileUnits = compileUnits.filter((compileUnit) => compileUnit.kind === 'program')
+  if (programCompileUnits.length !== 1) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  const programCompileUnit = programCompileUnits[0]
+  const programFiles = [...(programCompileUnit.files ?? [])].sort()
+  const sourceSelectionProgram = [...(manifest.sourceSelection?.program ?? programFiles)].sort()
+  if (JSON.stringify(programFiles) !== JSON.stringify(sourceSelectionProgram)) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+
+  const bridgeEntryPackage = bridgeManifest.entryPackage ?? {}
+  const bridgeEntryGoFiles = ((bridgeEntryPackage.goFiles ?? []).map((file) => {
+    if ((bridgeEntryPackage.dir ?? '') === '') {
+      return file
+    }
+    return `${(bridgeEntryPackage.dir ?? '').replace(/\/$/, '')}/${file}`
+  })).sort()
+  if (
+    (bridgeEntryPackage.importPath ?? '') !== '' &&
+    (programCompileUnit.importPath ?? '') !== bridgeEntryPackage.importPath &&
+    (programCompileUnit.importPath ?? '') !== 'command-line-arguments'
+  ) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  if ((bridgeEntryPackage.name ?? '') !== '' && (programCompileUnit.packageName ?? '') !== bridgeEntryPackage.name) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  if ((bridgeEntryPackage.dir ?? '') !== '' && (programCompileUnit.packageDir ?? '') !== bridgeEntryPackage.dir) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  if ((bridgeEntryPackage.modulePath ?? '') !== '' && (programCompileUnit.modulePath ?? '') !== (bridgeEntryPackage.modulePath ?? '')) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  if (
+    typeof programCompileUnit.depOnly === 'boolean' &&
+    typeof bridgeEntryPackage.depOnly === 'boolean' &&
+    programCompileUnit.depOnly !== bridgeEntryPackage.depOnly
+  ) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  if (
+    typeof programCompileUnit.standard === 'boolean' &&
+    typeof bridgeEntryPackage.standard === 'boolean' &&
+    programCompileUnit.standard !== bridgeEntryPackage.standard
+  ) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  if (bridgeEntryGoFiles.length !== 0 && JSON.stringify(programFiles) !== JSON.stringify(bridgeEntryGoFiles)) {
+    throw new Error('frontend compile unit program package did not match real TinyGo driver bridge')
+  }
+  const compileUnitFileCount = compileUnits.reduce((count, compileUnit) => count + (compileUnit.files ?? []).length, 0)
+  const bridgeFileKeys = new Set<string>()
+  for (const goFile of bridgeEntryPackage.goFiles ?? []) {
+    const bridgeEntryImportPath = bridgeEntryPackage.importPath ?? programCompileUnit.importPath ?? 'command-line-arguments'
+    bridgeFileKeys.add(`${bridgeEntryImportPath}\u0000${goFile}`)
+  }
+  for (const packageInfo of bridgeManifest.packageGraph ?? []) {
+    const packageImportPath = packageInfo.importPath ?? ''
+    if (packageImportPath === '') {
+      continue
+    }
+    for (const goFile of packageInfo.goFiles ?? []) {
+      bridgeFileKeys.add(`${packageImportPath}\u0000${goFile}`)
+    }
+  }
+  let coveredFileCount = bridgeEntryGoFiles.length !== 0 ? programFiles.length : 0
+  const compileUnitImportPaths = compileUnits
+    .filter((compileUnit) => compileUnit.kind !== 'program')
+    .map((compileUnit) => compileUnit.importPath ?? '')
+    .filter((importPath) => importPath !== '')
+    .sort()
+  const bridgeEntryImports = [...(bridgeEntryPackage.imports ?? [])].sort()
+  const availableCompileUnitImports = new Set(compileUnitImportPaths)
+  for (const importPath of bridgeEntryImports) {
+    if (!availableCompileUnitImports.has(importPath)) {
+      throw new Error('frontend compile unit imports did not cover real TinyGo driver bridge imports')
+    }
+  }
+  const bridgePackageGraphImportPaths = [...new Set((bridgeManifest.packageGraph ?? [])
+    .map((packageInfo) => packageInfo.importPath ?? '')
+    .filter((importPath) => importPath !== '' && importPath !== (bridgeEntryPackage.importPath ?? '')))].sort()
+  if (bridgePackageGraphImportPaths.length !== 0) {
+    const availableBridgePackages = new Map(
+      (bridgeManifest.packageGraph ?? [])
+        .map((packageInfo) => [packageInfo.importPath ?? '', packageInfo] as const)
+        .filter(([importPath]) => importPath !== ''),
+    )
+    for (const compileUnit of compileUnits.filter((candidate) => candidate.kind !== 'program')) {
+      const compileUnitImportPath = compileUnit.importPath ?? ''
+      if (compileUnitImportPath === '') {
+        throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+      }
+      const bridgePackage = availableBridgePackages.get(compileUnitImportPath)
+      if (!bridgePackage) {
+        throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+      }
+      if (Array.isArray(compileUnit.imports)) {
+        const compileUnitDirectImports = [...compileUnit.imports].sort()
+        const bridgePackageDirectImports = [...(bridgePackage.imports ?? [])].sort()
+        if ((compileUnit.kind ?? '') === 'stdlib' || (compileUnit.packageDir ?? '').startsWith('/working/.tinygo-root/')) {
+          const availableBridgeImports = new Set(bridgePackageDirectImports)
+          for (const importPath of compileUnitDirectImports) {
+            if (!availableBridgeImports.has(importPath)) {
+              throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+            }
+          }
+        } else if (JSON.stringify(compileUnitDirectImports) !== JSON.stringify(bridgePackageDirectImports)) {
+          throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+        }
+      }
+      if ((bridgePackage.name ?? '') !== '' && (compileUnit.packageName ?? '') !== bridgePackage.name) {
+        throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+      }
+      if ((bridgePackage.modulePath ?? '') !== '' && (compileUnit.modulePath ?? '') !== (bridgePackage.modulePath ?? '')) {
+        throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+      }
+      if (
+        typeof compileUnit.depOnly === 'boolean' &&
+        typeof bridgePackage.depOnly === 'boolean' &&
+        compileUnit.depOnly !== bridgePackage.depOnly
+      ) {
+        throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+      }
+      if (
+        typeof compileUnit.standard === 'boolean' &&
+        typeof bridgePackage.standard === 'boolean' &&
+        compileUnit.standard !== bridgePackage.standard
+      ) {
+        throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+      }
+      if (
+        (compileUnit.packageDir ?? '') !== '' &&
+        !(compileUnit.packageDir ?? '').startsWith('/working/.tinygo-root/') &&
+        (bridgePackage.dir ?? '') !== '' &&
+        (compileUnit.packageDir ?? '') !== bridgePackage.dir
+      ) {
+        throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+      }
+      if (
+        !(compileUnit.packageDir ?? '').startsWith('/working/.tinygo-root/') &&
+        Array.isArray(compileUnit.files) &&
+        Array.isArray(bridgePackage.goFiles) &&
+        (bridgePackage.dir ?? '') !== '' &&
+        bridgePackage.goFiles.length !== 0
+      ) {
+        const bridgePackageFiles = bridgePackage.goFiles
+          .map((file) => `${(bridgePackage.dir ?? '').replace(/\/$/, '')}/${file}`)
+          .sort()
+        const compileUnitFiles = [...compileUnit.files].sort()
+        if (JSON.stringify(compileUnitFiles) !== JSON.stringify(bridgePackageFiles)) {
+          throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+        }
+        coveredFileCount += compileUnit.files.length
+      } else if (Array.isArray(compileUnit.files) && Array.isArray(bridgePackage.goFiles) && bridgePackage.goFiles.length !== 0) {
+        const bridgePackageFileNames = new Set(bridgePackage.goFiles)
+        const compileUnitFileNames = compileUnit.files
+          .map((file) => {
+            const slashIndex = file.lastIndexOf('/')
+            return slashIndex >= 0 ? file.slice(slashIndex + 1) : file
+          })
+          .sort()
+        for (const fileName of compileUnitFileNames) {
+          if (!bridgePackageFileNames.has(fileName)) {
+            throw new Error('frontend compile unit package graph did not match real TinyGo driver bridge')
+          }
+        }
+        coveredFileCount += compileUnit.files.length
+      }
+    }
+  }
+  const bridgeGraphPackages = bridgeManifest.packageGraph ?? []
+  const graphPackageCount =
+    bridgeGraphPackages.length !== 0
+      ? bridgeGraphPackages.length
+      : ((bridgeEntryPackage.importPath ?? '') !== '' ? 1 : 0) + bridgePackageGraphImportPaths.length
+  const programImportAlias =
+    (programCompileUnit.importPath ?? '') === 'command-line-arguments' &&
+    (bridgeEntryPackage.importPath ?? '') !== '' &&
+    (programCompileUnit.importPath ?? '') !== bridgeEntryPackage.importPath
+      ? 'synthetic'
+      : 'direct'
+
+  return {
+    artifactOutputPath: normalizedToolchain.artifactOutputPath,
+    bridgeEntryGoFiles,
+    bridgeEntryImportPath: bridgeEntryPackage.importPath ?? '',
+    bridgeEntryImports,
+    bridgeEntryPackageDir: bridgeEntryPackage.dir ?? '',
+    bridgeEntryPackageName: bridgeEntryPackage.name ?? '',
+    bridgeFileCount: bridgeFileKeys.size,
+    bridgePackageCount: bridgePackageGraphImportPaths.length,
+    bridgePackageGraphImportPaths,
+    compileUnitCount: compileUnits.length,
+    compileUnitFileCount,
+    compileUnitImportPaths,
+    coveredFileCount,
+    coveredPackageCount: compileUnitImportPaths.length,
+    depOnlyPackageCount: bridgeGraphPackages.filter((packageInfo) => packageInfo.depOnly === true).length,
+    entryFile: manifest.entryFile ?? '',
+    graphPackageCount,
+    llvmTarget: normalizedToolchain.llvmTarget,
+    localPackageCount: compileUnits.filter((compileUnit) => (compileUnit.kind ?? '') !== 'stdlib').length,
+    programImportAlias,
+    programFiles,
+    programImportPath: programCompileUnit.importPath ?? '',
+    programPackageDir: programCompileUnit.packageDir ?? '',
+    programPackageName: programCompileUnit.packageName ?? '',
+    standardPackageCount: bridgeGraphPackages.filter((packageInfo) => packageInfo.standard === true).length,
+    target: normalizedToolchain.target,
+  }
 }
 
 export const verifyCompileUnitManifestAgainstCompileRequest = (
@@ -421,31 +2640,97 @@ export const verifyCompileUnitManifestAgainstCompileRequest = (
   const materializedFiles = manifest.materializedFiles
   const allCompileFiles = manifest.sourceSelection.allCompile
   const entryPackageDir = manifest.entryFile.slice(0, manifest.entryFile.lastIndexOf('/')) || '.'
-  const stdlibPackageFiles = Array.isArray(manifest.sourceSelection?.stdlib)
-    ? manifest.sourceSelection.stdlib
-    : allCompileFiles.filter((filePath) => {
-        return filePath.startsWith('/working/.tinygo-root/src/')
-      })
-  const importedPackageFiles = Array.isArray(manifest.sourceSelection?.imported)
-    ? manifest.sourceSelection.imported
-    : allCompileFiles.filter((filePath) => {
-        if (stdlibPackageFiles.includes(filePath)) {
-          return false
-        }
+  const compileUnits =
+    Array.isArray(manifest.compileUnits) && manifest.compileUnits.length !== 0
+      ? manifest.compileUnits.map((compileUnit) => ({
+          kind: compileUnit.kind ?? '',
+          importPath: compileUnit.importPath ?? '',
+          ...(Array.isArray(compileUnit.imports) ? { imports: [...compileUnit.imports] } : {}),
+          modulePath: compileUnit.modulePath ?? '',
+          ...(typeof compileUnit.depOnly === 'boolean' ? { depOnly: compileUnit.depOnly } : {}),
+          packageName: compileUnit.packageName ?? '',
+          packageDir: compileUnit.packageDir ?? '',
+          files: compileUnit.files ?? [],
+          ...(typeof compileUnit.standard === 'boolean' ? { standard: compileUnit.standard } : {}),
+        }))
+      : []
+  const programFiles: string[] = []
+  const importedPackageFiles: string[] = []
+  const stdlibPackageFiles: string[] = []
+  if (compileUnits.length !== 0) {
+    const allCompileFileSet = new Set(allCompileFiles)
+    const seenCompileFiles = new Set<string>()
+    for (const compileUnit of compileUnits) {
+      if (
+        compileUnit.kind === '' ||
+        compileUnit.importPath === '' ||
+        compileUnit.packageName === '' ||
+        compileUnit.packageDir === '' ||
+        !Array.isArray(compileUnit.files) ||
+        compileUnit.files.length === 0 ||
+        (compileUnit.imports !== undefined &&
+          (!Array.isArray(compileUnit.imports) || compileUnit.imports.some((importPath) => importPath === '')))
+      ) {
+        throw new Error('frontend compile unit source selection was missing normalized compile inputs')
+      }
+      for (const filePath of compileUnit.files) {
         const slashIndex = filePath.lastIndexOf('/')
         const fileDir = slashIndex > 0 ? filePath.slice(0, slashIndex) : ''
-        return fileDir !== entryPackageDir
-      })
-  const programFiles = Array.isArray(manifest.sourceSelection?.program)
-    ? manifest.sourceSelection.program
-    : allCompileFiles.filter((filePath) => {
-        if (importedPackageFiles.includes(filePath) || stdlibPackageFiles.includes(filePath)) {
-          return false
+        if (fileDir !== compileUnit.packageDir || !allCompileFileSet.has(filePath) || seenCompileFiles.has(filePath)) {
+          throw new Error('frontend compile unit source selection was missing normalized compile inputs')
         }
-        const slashIndex = filePath.lastIndexOf('/')
-        const fileDir = slashIndex > 0 ? filePath.slice(0, slashIndex) : ''
-        return fileDir === entryPackageDir
-      })
+        seenCompileFiles.add(filePath)
+      }
+      if (compileUnit.kind === 'program') {
+        programFiles.push(...compileUnit.files)
+        continue
+      }
+      if (compileUnit.kind === 'imported') {
+        importedPackageFiles.push(...compileUnit.files)
+        continue
+      }
+      if (compileUnit.kind === 'stdlib') {
+        stdlibPackageFiles.push(...compileUnit.files)
+        continue
+      }
+      throw new Error('frontend compile unit source selection was missing normalized compile inputs')
+    }
+    if (seenCompileFiles.size !== allCompileFiles.length || !programFiles.includes(manifest.entryFile)) {
+      throw new Error('frontend compile unit source selection was missing normalized compile inputs')
+    }
+  } else {
+    stdlibPackageFiles.push(
+      ...(Array.isArray(manifest.sourceSelection?.stdlib)
+        ? manifest.sourceSelection.stdlib
+        : allCompileFiles.filter((filePath) => {
+            return filePath.startsWith('/working/.tinygo-root/src/')
+          })),
+    )
+    importedPackageFiles.push(
+      ...(Array.isArray(manifest.sourceSelection?.imported)
+        ? manifest.sourceSelection.imported
+        : allCompileFiles.filter((filePath) => {
+            if (stdlibPackageFiles.includes(filePath)) {
+              return false
+            }
+            const slashIndex = filePath.lastIndexOf('/')
+            const fileDir = slashIndex > 0 ? filePath.slice(0, slashIndex) : ''
+            return fileDir !== entryPackageDir
+          })),
+    )
+    programFiles.push(
+      ...(Array.isArray(manifest.sourceSelection?.program)
+        ? manifest.sourceSelection.program
+        : allCompileFiles.filter((filePath) => {
+            if (importedPackageFiles.includes(filePath) || stdlibPackageFiles.includes(filePath)) {
+              return false
+            }
+            const slashIndex = filePath.lastIndexOf('/')
+            const fileDir = slashIndex > 0 ? filePath.slice(0, slashIndex) : ''
+            return fileDir === entryPackageDir
+          })),
+    )
+  }
   const targetAssetFiles = Array.isArray(manifest.sourceSelection?.targetAssets)
     ? manifest.sourceSelection.targetAssets
     : materializedFiles.filter((filePath) => filePath.startsWith('/working/.tinygo-root/targets/'))
@@ -485,36 +2770,42 @@ export const verifyCompileUnitManifestAgainstCompileRequest = (
     throw new Error('frontend compile unit tool plan did not match compile request')
   }
 
-  const compileUnits: Array<{ kind: string; packageDir: string; files: string[] }> = []
-  if (programFiles.length !== 0) {
+  if (compileUnits.length === 0) {
     compileUnits.push({
       kind: 'program',
+      importPath: 'command-line-arguments',
+      modulePath: '',
+      packageName: 'main',
       packageDir: entryPackageDir,
       files: [...programFiles],
     })
-  }
-  for (const [kind, files] of [
-    ['imported', importedPackageFiles],
-    ['stdlib', stdlibPackageFiles],
-  ] as const) {
-    const groupedFiles = new Map<string, string[]>()
-    for (const filePath of files) {
-      const slashIndex = filePath.lastIndexOf('/')
-      const packageDir = slashIndex > 0 ? filePath.slice(0, slashIndex) : ''
-      const packageFiles = groupedFiles.get(packageDir)
-      if (packageFiles) {
-        packageFiles.push(filePath)
-        continue
+    for (const [kind, files] of [
+      ['imported', importedPackageFiles],
+      ['stdlib', stdlibPackageFiles],
+    ] as const) {
+      const groupedFiles = new Map<string, string[]>()
+      for (const filePath of files) {
+        const slashIndex = filePath.lastIndexOf('/')
+        const packageDir = slashIndex > 0 ? filePath.slice(0, slashIndex) : ''
+        const packageFiles = groupedFiles.get(packageDir)
+        if (packageFiles) {
+          packageFiles.push(filePath)
+          continue
+        }
+        groupedFiles.set(packageDir, [filePath])
       }
-      groupedFiles.set(packageDir, [filePath])
-    }
-    const packageDirs = [...groupedFiles.keys()].sort()
-    for (const packageDir of packageDirs) {
-      compileUnits.push({
-        kind,
-        packageDir,
-        files: groupedFiles.get(packageDir) ?? [],
-      })
+      const packageDirs = [...groupedFiles.keys()].sort()
+      for (const packageDir of packageDirs) {
+        const packageName = packageDir.slice(packageDir.lastIndexOf('/') + 1) || packageDir
+        compileUnits.push({
+          kind,
+          importPath: packageName,
+          modulePath: '',
+          packageName,
+          packageDir,
+          files: groupedFiles.get(packageDir) ?? [],
+        })
+      }
     }
   }
 
@@ -616,16 +2907,38 @@ export const verifyWorkItemsManifestAgainstLoweringManifest = (
     const kindIndex = kindIndexes.get(kind) ?? 0
     kindIndexes.set(kind, kindIndex + 1)
     const id = `${kind}-${String(kindIndex).padStart(3, '0')}`
+    const packageFacts = normalizePackageFactsByKind(kind, compileUnit.depOnly, compileUnit.standard)
     return {
       id,
       kind,
+      importPath: compileUnit.importPath ?? '',
+      imports: Array.isArray(compileUnit.imports) ? [...compileUnit.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: compileUnit.modulePath ?? '',
+      packageName: compileUnit.packageName ?? '',
       packageDir: compileUnit.packageDir ?? '',
       files: compileUnit.files ?? [],
       bitcodeOutputPath: `/working/tinygo-work/${id}.bc`,
+      standard: packageFacts.standard,
     }
   })
-
-  if (JSON.stringify(workItems) !== JSON.stringify(workItemsManifest.workItems ?? [])) {
+  const normalizedWorkItems = (workItemsManifest.workItems ?? []).map((workItem) => {
+    const packageFacts = normalizePackageFactsByKind(workItem.kind ?? '', workItem.depOnly, workItem.standard)
+    return {
+      id: workItem.id ?? '',
+      kind: workItem.kind ?? '',
+      importPath: workItem.importPath ?? '',
+      imports: Array.isArray(workItem.imports) ? [...workItem.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: workItem.modulePath ?? '',
+      packageName: workItem.packageName ?? '',
+      packageDir: workItem.packageDir ?? '',
+      files: workItem.files ?? [],
+      bitcodeOutputPath: workItem.bitcodeOutputPath ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  if (JSON.stringify(workItems) !== JSON.stringify(normalizedWorkItems)) {
     throw new Error('frontend work items did not match lowering manifest')
   }
 
@@ -645,14 +2958,39 @@ export const verifyLoweredSourcesManifestAgainstWorkItemsManifest = (
     throw new Error('frontend lowered sources optimize flag did not match work items manifest')
   }
 
-  const units = (workItemsManifest.workItems ?? []).map((workItem) => ({
-    id: workItem.id ?? '',
-    kind: workItem.kind ?? '',
-    packageDir: workItem.packageDir ?? '',
-    sourceFiles: workItem.files ?? [],
-    loweredSourcePath: `/working/tinygo-lowered/${workItem.id ?? ''}.c`,
-  }))
-  if (JSON.stringify(units) !== JSON.stringify(loweredSourcesManifest.units ?? [])) {
+  const units = (workItemsManifest.workItems ?? []).map((workItem) => {
+    const packageFacts = normalizePackageFactsByKind(workItem.kind ?? '', workItem.depOnly, workItem.standard)
+    return {
+      id: workItem.id ?? '',
+      kind: workItem.kind ?? '',
+      importPath: workItem.importPath ?? '',
+      imports: Array.isArray(workItem.imports) ? [...workItem.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: workItem.modulePath ?? '',
+      packageName: workItem.packageName ?? '',
+      packageDir: workItem.packageDir ?? '',
+      sourceFiles: workItem.files ?? [],
+      loweredSourcePath: `/working/tinygo-lowered/${workItem.id ?? ''}.c`,
+      standard: packageFacts.standard,
+    }
+  })
+  const normalizedUnits = (loweredSourcesManifest.units ?? []).map((unit) => {
+    const packageFacts = normalizePackageFactsByKind(unit.kind ?? '', unit.depOnly, unit.standard)
+    return {
+      id: unit.id ?? '',
+      kind: unit.kind ?? '',
+      importPath: unit.importPath ?? '',
+      imports: Array.isArray(unit.imports) ? [...unit.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: unit.modulePath ?? '',
+      packageName: unit.packageName ?? '',
+      packageDir: unit.packageDir ?? '',
+      sourceFiles: unit.sourceFiles ?? [],
+      loweredSourcePath: unit.loweredSourcePath ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  if (JSON.stringify(units) !== JSON.stringify(normalizedUnits)) {
     throw new Error('frontend lowered sources did not match work items manifest')
   }
 
@@ -753,17 +3091,45 @@ export const verifyLoweringPlanAgainstWorkItemsManifest = (
     throw new Error('frontend lowering plan optimize flag did not match work items manifest')
   }
 
-  const compileJobs = (workItemsManifest.workItems ?? []).map((workItem) => ({
-    id: workItem.id ?? '',
-    kind: workItem.kind ?? '',
-    packageDir: workItem.packageDir ?? '',
-    files: workItem.files ?? [],
-    bitcodeOutputPath: workItem.bitcodeOutputPath ?? '',
-    llvmTarget: 'wasm32-unknown-wasi',
-    cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
-    optimizeFlag: workItemsManifest.optimizeFlag ?? '',
-  }))
-  if (JSON.stringify(compileJobs) !== JSON.stringify(loweringPlanManifest.compileJobs ?? [])) {
+  const compileJobs = (workItemsManifest.workItems ?? []).map((workItem) => {
+    const packageFacts = normalizePackageFactsByKind(workItem.kind ?? '', workItem.depOnly, workItem.standard)
+    return {
+      id: workItem.id ?? '',
+      kind: workItem.kind ?? '',
+      importPath: workItem.importPath ?? '',
+      imports: Array.isArray(workItem.imports) ? [...workItem.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: workItem.modulePath ?? '',
+      packageName: workItem.packageName ?? '',
+      packageDir: workItem.packageDir ?? '',
+      files: workItem.files ?? [],
+      bitcodeOutputPath: workItem.bitcodeOutputPath ?? '',
+      llvmTarget: 'wasm32-unknown-wasi',
+      cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
+      optimizeFlag: workItemsManifest.optimizeFlag ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  const normalizedCompileJobs = (loweringPlanManifest.compileJobs ?? []).map((compileJob) => {
+    const packageFacts = normalizePackageFactsByKind(compileJob.kind ?? '', compileJob.depOnly, compileJob.standard)
+    return {
+      id: compileJob.id ?? '',
+      kind: compileJob.kind ?? '',
+      importPath: compileJob.importPath ?? '',
+      imports: Array.isArray(compileJob.imports) ? [...compileJob.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: compileJob.modulePath ?? '',
+      packageName: compileJob.packageName ?? '',
+      packageDir: compileJob.packageDir ?? '',
+      files: compileJob.files ?? [],
+      bitcodeOutputPath: compileJob.bitcodeOutputPath ?? '',
+      llvmTarget: compileJob.llvmTarget ?? '',
+      cflags: compileJob.cflags ?? [],
+      optimizeFlag: compileJob.optimizeFlag ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  if (JSON.stringify(compileJobs) !== JSON.stringify(normalizedCompileJobs)) {
     throw new Error('frontend lowering plan compile jobs did not match work items manifest')
   }
 
@@ -790,6 +3156,9 @@ const deriveLoweredUnitsFromBackendInputManifest = (
   const loweredUnits = (backendInputManifest.compileJobs ?? []).map((compileJob) => {
     const id = compileJob.id ?? ''
     const kind = compileJob.kind ?? ''
+    const importPath = compileJob.importPath ?? ''
+    const packageFacts = normalizePackageFactsByKind(kind, compileJob.depOnly, compileJob.standard)
+    const packageName = compileJob.packageName ?? ''
     const packageDir = compileJob.packageDir ?? ''
     const sourceFiles = compileJob.files ?? []
     if (id === '' || kind === '' || packageDir === '' || sourceFiles.length === 0) {
@@ -798,14 +3167,36 @@ const deriveLoweredUnitsFromBackendInputManifest = (
     return {
       id,
       kind,
+      importPath,
+      imports: Array.isArray(compileJob.imports) ? [...compileJob.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: compileJob.modulePath ?? '',
+      packageName,
       packageDir,
       sourceFiles,
       loweredSourcePath: `/working/tinygo-lowered/${id}.c`,
+      standard: packageFacts.standard,
+    }
+  })
+  const normalizedLoweredUnits = (backendInputManifest.loweredUnits ?? []).map((loweredUnit) => {
+    const packageFacts = normalizePackageFactsByKind(loweredUnit.kind ?? '', loweredUnit.depOnly, loweredUnit.standard)
+    return {
+      id: loweredUnit.id ?? '',
+      kind: loweredUnit.kind ?? '',
+      importPath: loweredUnit.importPath ?? '',
+      imports: Array.isArray(loweredUnit.imports) ? [...loweredUnit.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: loweredUnit.modulePath ?? '',
+      packageName: loweredUnit.packageName ?? '',
+      packageDir: loweredUnit.packageDir ?? '',
+      sourceFiles: loweredUnit.sourceFiles ?? [],
+      loweredSourcePath: loweredUnit.loweredSourcePath ?? '',
+      standard: packageFacts.standard,
     }
   })
   if (
     backendInputManifest.loweredUnits !== undefined &&
-    JSON.stringify(loweredUnits) !== JSON.stringify(backendInputManifest.loweredUnits ?? [])
+    JSON.stringify(loweredUnits) !== JSON.stringify(normalizedLoweredUnits)
   ) {
     throw new Error(errorMessage)
   }
@@ -869,7 +3260,45 @@ export const verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManif
   ) {
     throw new Error('frontend backend input did not match lowering plan and lowered sources manifests')
   }
-  if (JSON.stringify(loweringPlanManifest.compileJobs ?? []) !== JSON.stringify(backendInputManifest.compileJobs ?? [])) {
+  const normalizedLoweringPlanCompileJobs = (loweringPlanManifest.compileJobs ?? []).map((compileJob) => {
+    const packageFacts = normalizePackageFactsByKind(compileJob.kind ?? '', compileJob.depOnly, compileJob.standard)
+    return {
+      id: compileJob.id ?? '',
+      kind: compileJob.kind ?? '',
+      importPath: compileJob.importPath ?? '',
+      imports: Array.isArray(compileJob.imports) ? [...compileJob.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: compileJob.modulePath ?? '',
+      packageName: compileJob.packageName ?? '',
+      packageDir: compileJob.packageDir ?? '',
+      files: compileJob.files ?? [],
+      bitcodeOutputPath: compileJob.bitcodeOutputPath ?? '',
+      llvmTarget: compileJob.llvmTarget ?? '',
+      cflags: compileJob.cflags ?? [],
+      optimizeFlag: compileJob.optimizeFlag ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  const normalizedBackendInputCompileJobs = (backendInputManifest.compileJobs ?? []).map((compileJob) => {
+    const packageFacts = normalizePackageFactsByKind(compileJob.kind ?? '', compileJob.depOnly, compileJob.standard)
+    return {
+      id: compileJob.id ?? '',
+      kind: compileJob.kind ?? '',
+      importPath: compileJob.importPath ?? '',
+      imports: Array.isArray(compileJob.imports) ? [...compileJob.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: compileJob.modulePath ?? '',
+      packageName: compileJob.packageName ?? '',
+      packageDir: compileJob.packageDir ?? '',
+      files: compileJob.files ?? [],
+      bitcodeOutputPath: compileJob.bitcodeOutputPath ?? '',
+      llvmTarget: compileJob.llvmTarget ?? '',
+      cflags: compileJob.cflags ?? [],
+      optimizeFlag: compileJob.optimizeFlag ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  if (JSON.stringify(normalizedLoweringPlanCompileJobs) !== JSON.stringify(normalizedBackendInputCompileJobs)) {
     throw new Error('frontend backend input did not match lowering plan and lowered sources manifests')
   }
   const linkJob = {
@@ -888,7 +3317,23 @@ export const verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManif
     backendInputManifest,
     'frontend backend input did not match lowering plan and lowered sources manifests',
   )
-  if (JSON.stringify(loweredSourcesManifest.units ?? []) !== JSON.stringify(loweredUnits)) {
+  const normalizedLoweredSourceUnits = (loweredSourcesManifest.units ?? []).map((unit) => {
+    const packageFacts = normalizePackageFactsByKind(unit.kind ?? '', unit.depOnly, unit.standard)
+    return {
+      id: unit.id ?? '',
+      kind: unit.kind ?? '',
+      importPath: unit.importPath ?? '',
+      imports: Array.isArray(unit.imports) ? [...unit.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: unit.modulePath ?? '',
+      packageName: unit.packageName ?? '',
+      packageDir: unit.packageDir ?? '',
+      sourceFiles: unit.sourceFiles ?? [],
+      loweredSourcePath: unit.loweredSourcePath ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  if (JSON.stringify(normalizedLoweredSourceUnits) !== JSON.stringify(loweredUnits)) {
     throw new Error('frontend backend input did not match lowering plan and lowered sources manifests')
   }
 
@@ -1076,7 +3521,23 @@ export const verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeMani
   ) {
     throw new Error('frontend backend result did not match backend input manifest')
   }
-  if (JSON.stringify(loweredUnits) !== JSON.stringify(loweredSourcesManifest.units ?? [])) {
+  const normalizedLoweredSourceUnits = (loweredSourcesManifest.units ?? []).map((unit) => {
+    const packageFacts = normalizePackageFactsByKind(unit.kind ?? '', unit.depOnly, unit.standard)
+    return {
+      id: unit.id ?? '',
+      kind: unit.kind ?? '',
+      importPath: unit.importPath ?? '',
+      imports: Array.isArray(unit.imports) ? [...unit.imports] : [],
+      depOnly: packageFacts.depOnly,
+      modulePath: unit.modulePath ?? '',
+      packageName: unit.packageName ?? '',
+      packageDir: unit.packageDir ?? '',
+      sourceFiles: unit.sourceFiles ?? [],
+      loweredSourcePath: unit.loweredSourcePath ?? '',
+      standard: packageFacts.standard,
+    }
+  })
+  if (JSON.stringify(loweredUnits) !== JSON.stringify(normalizedLoweredSourceUnits)) {
     throw new Error('frontend backend result did not match backend input manifest')
   }
   if ((backendInputManifest.entryFile ?? '') !== (loweredIRManifest.entryFile ?? '')) {
@@ -1094,10 +3555,22 @@ export const verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeMani
     JSON.stringify((loweredIRManifest.units ?? []).map((unit) => ({
       id: unit.id ?? '',
       kind: unit.kind ?? '',
+      importPath: unit.importPath ?? '',
+      modulePath: unit.modulePath ?? '',
+      packageName: unit.packageName ?? '',
       packageDir: unit.packageDir ?? '',
       sourceFiles: unit.sourceFiles ?? [],
       loweredSourcePath: unit.loweredSourcePath ?? '',
-    }))) !== JSON.stringify(loweredUnits)
+    }))) !== JSON.stringify(loweredUnits.map((unit) => ({
+      id: unit.id,
+      kind: unit.kind,
+      importPath: unit.importPath,
+      modulePath: unit.modulePath,
+      packageName: unit.packageName,
+      packageDir: unit.packageDir,
+      sourceFiles: unit.sourceFiles,
+      loweredSourcePath: unit.loweredSourcePath,
+    })))
   ) {
     throw new Error('frontend backend result did not match backend input manifest')
   }
