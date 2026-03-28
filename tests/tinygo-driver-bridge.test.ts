@@ -9,8 +9,45 @@ import {
   normalizeTinyGoDriverBridgeManifestForBrowser,
   verifyTinyGoHostProbeManifestAgainstDriverMetadata,
 } from '../src/compile-unit.ts'
+import { resolveTinyGoToolchainPaths, toolchainIsReady } from '../scripts/tinygo-toolchain-paths.mjs'
+
+let tinyGoToolchainReadyPromise: Promise<void> | null = null
+
+const ensureTinyGoToolchainReady = async () => {
+  if (tinyGoToolchainReadyPromise) {
+    return tinyGoToolchainReadyPromise
+  }
+  tinyGoToolchainReadyPromise = (async () => {
+    const paths = resolveTinyGoToolchainPaths()
+    if (await toolchainIsReady(paths)) {
+      return
+    }
+    const cwd = new URL('..', import.meta.url).pathname
+    const fetchScriptPath = new URL('../scripts/fetch-tinygo-toolchain.mjs', import.meta.url).pathname
+    const child = spawn(process.execPath, [fetchScriptPath], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let output = ''
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString()
+    })
+    child.stderr.on('data', (chunk) => {
+      output += chunk.toString()
+    })
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', resolve)
+    })
+    assert.equal(exitCode, 0, output)
+  })()
+  return tinyGoToolchainReadyPromise
+}
 
 test('real TinyGo host probe matches native driver metadata for the same request', async (t) => {
+  await ensureTinyGoToolchainReady()
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-driver-bridge-'))
   t.after(async () => {
     await rm(tempDir, { recursive: true, force: true })
@@ -116,6 +153,7 @@ func main() {
 })
 
 test('real TinyGo driver bridge records synthetic frontend handoff facts for the same entry package', async (t) => {
+  await ensureTinyGoToolchainReady()
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-driver-bridge-script-'))
   t.after(async () => {
     await rm(tempDir, { recursive: true, force: true })
@@ -196,6 +234,7 @@ test('real TinyGo driver bridge records synthetic frontend handoff facts for the
 })
 
 test('real TinyGo driver bridge covers local module imports in the synthetic frontend handoff', async (t) => {
+  await ensureTinyGoToolchainReady()
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-driver-bridge-local-import-'))
   t.after(async () => {
     await rm(tempDir, { recursive: true, force: true })

@@ -19,7 +19,7 @@ The dev and build flows prepare browser-side assets automatically before startin
 - `npm run prepare:assets`
   Fetches the emception worker, vendors its runtime assets locally, and rebuilds the Go/WASI probe.
 - `npm run prepare:tinygo`
-  Downloads and extracts the pinned TinyGo release into `.cache/tinygo-toolchain/`.
+  Downloads and extracts the pinned TinyGo release into `.cache/tinygo-toolchain/` using a platform-appropriate archive format. The default path now uses `tar.gz` on Linux/macOS and `zip` on Windows, while explicit archive overrides such as `.deb` are still supported.
 - `npm run dev`
   Starts the local app after preparing assets.
 - `npm run build`
@@ -66,7 +66,7 @@ Do not treat those as source files. Regenerate them through the normal npm scrip
 
 `npm run test:tinygo-host` bootstraps the pinned TinyGo release under `.cache/tinygo-toolchain/`, runs the native driver and the real TinyGo host probe against the same request, reruns the synthetic frontend handoff, executes the resulting wasm module with a WASI shim, and rechecks the same contract in the integration test. This is the first real upstream TinyGo execution path in the repository.
 
-The host probe writes a normalized `tinygo-host-probe.json` manifest next to the generated wasm artifact. That manifest records the concrete `tinygo build` command, the pinned toolchain paths, the artifact path/size, and whether the runtime execution produced the expected `tinygo-ok` output.
+The host probe writes a normalized `tinygo-host-probe.json` manifest next to the generated wasm artifact. That manifest records the concrete `tinygo build` command, the pinned toolchain paths, the artifact path/size, and the runtime execution result. The default smoke probe still expects `tinygo-ok`, but request-driven probes can now provide their own expected runtime logs instead of hard-coding that output.
 
 The bridge probe also writes `tinygo-driver-bridge.json`. That manifest records the verified target facts, build tags, command argv, entry package summary when available, the normalized TinyGo package graph, the synthetic frontend handoff summary, direct import coverage, and the locations of both the native driver result and the host probe manifest.
 

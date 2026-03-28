@@ -9,6 +9,77 @@ import { resolveTinyGoToolchainPaths, toolchainIsReady } from './tinygo-toolchai
 
 const paths = resolveTinyGoToolchainPaths()
 
+const runArchiveExtractor = ({ command, args, description, env }) => {
+  const extract = spawnSync(command, args, {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ...env,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (extract.error) {
+    throw new Error(`TinyGo archive extraction failed: ${description} is not available (${extract.error.message})`)
+  }
+  if (extract.status !== 0) {
+    const details = [extract.stdout, extract.stderr].join('').trim()
+    throw new Error(
+      details === ''
+        ? `TinyGo archive extraction failed with ${description} (exit ${extract.status ?? 1})`
+        : `TinyGo archive extraction failed with ${description}: ${details}`,
+    )
+  }
+}
+
+const extractArchive = async () => {
+  await rm(paths.extractDir, { recursive: true, force: true })
+  await mkdir(paths.extractDir, { recursive: true })
+
+  if (paths.archiveType === 'deb') {
+    runArchiveExtractor({
+      command: process.env.WASM_TINYGO_DPKG_DEB_BIN ?? 'dpkg-deb',
+      args: ['-x', paths.archivePath, paths.extractDir],
+      description: 'dpkg-deb',
+    })
+    return
+  }
+  if (paths.archiveType === 'tar.gz') {
+    runArchiveExtractor({
+      command: process.env.WASM_TINYGO_TAR_BIN ?? 'tar',
+      args: ['-xzf', paths.archivePath, '-C', paths.extractDir],
+      description: 'tar',
+    })
+    return
+  }
+  if (paths.archiveType === 'zip') {
+    if (paths.platform === 'win32') {
+      runArchiveExtractor({
+        command: process.env.WASM_TINYGO_POWERSHELL_BIN ?? 'powershell.exe',
+        args: [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          'Expand-Archive -LiteralPath $env:WASM_TINYGO_ARCHIVE_PATH -DestinationPath $env:WASM_TINYGO_EXTRACT_DIR -Force',
+        ],
+        description: 'PowerShell Expand-Archive',
+        env: {
+          WASM_TINYGO_ARCHIVE_PATH: paths.archivePath,
+          WASM_TINYGO_EXTRACT_DIR: paths.extractDir,
+        },
+      })
+      return
+    }
+    runArchiveExtractor({
+      command: process.env.WASM_TINYGO_UNZIP_BIN ?? 'unzip',
+      args: ['-q', paths.archivePath, '-d', paths.extractDir],
+      description: 'unzip',
+    })
+    return
+  }
+
+  throw new Error(`unsupported TinyGo archive type: ${paths.archiveType}`)
+}
+
 await mkdir(paths.cacheDir, { recursive: true })
 
 if (!(await toolchainIsReady(paths))) {
@@ -23,14 +94,7 @@ if (!(await toolchainIsReady(paths))) {
     await rename(archiveTempPath, paths.archivePath)
   }
 
-  await rm(paths.extractDir, { recursive: true, force: true })
-  await mkdir(paths.extractDir, { recursive: true })
-  const extract = spawnSync('dpkg-deb', ['-x', paths.archivePath, paths.extractDir], {
-    stdio: 'inherit',
-  })
-  if (extract.status !== 0) {
-    process.exit(extract.status ?? 1)
-  }
+  await extractArchive()
 }
 
 if (!(await toolchainIsReady(paths))) {
@@ -38,6 +102,7 @@ if (!(await toolchainIsReady(paths))) {
 }
 
 await writeFile(paths.manifestPath, `${JSON.stringify({
+  archiveType: paths.archiveType,
   archivePath: paths.archivePath,
   binPath: paths.binPath,
   releaseUrl: paths.releaseUrl,
