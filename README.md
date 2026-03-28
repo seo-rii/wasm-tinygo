@@ -52,7 +52,11 @@ Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/s
 - `internal/tinygobackend`
   Lowered source generation, lowered IR emission, command batch generation, and final artifact contracts.
 - `src/main.ts`
-  Browser app that drives emception, materializes files, executes plans, and verifies outputs.
+  Browser app shell that wires the reusable runtime into the demo UI.
+- `src/runtime.ts`
+  Reusable browser runtime that boots emception, plans builds, executes plans, and exposes the browser/test-hook API.
+- `src/runtime-entry.ts`
+  Library entry that binds `assetBaseUrl` relative to the published bundle and exports `createBundledTinyGoRuntime()`.
 - `src/bootstrap-exports.ts`
   Bootstrap wasm manifest reader and expectation verifier.
 - `src/compile-unit.ts`
@@ -83,6 +87,11 @@ npm run dev
 ```sh
 npm run build
 ```
+
+The production build now uses a relative Vite base so the resulting `dist/` bundle can be embedded
+under nested paths such as `wasm-idle/static/wasm-tinygo/` without rewriting asset URLs. It also
+emits a stable `dist/runtime.js` entry so host apps can import the TinyGo browser runtime as a
+library instead of embedding the demo page in an iframe.
 
 ## Commands
 

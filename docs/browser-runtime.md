@@ -1,7 +1,8 @@
 # Browser Runtime
 
-This document describes how the browser host in `src/main.ts` drives the
-current `wasm-tinygo` pipeline.
+This document describes how the reusable browser runtime in `src/runtime.ts`
+drives the current `wasm-tinygo` pipeline, and how `src/main.ts` wraps that
+runtime for the demo app.
 
 It is narrower than `docs/architecture.md` and `docs/manifests.md`. Those files
 describe stage ownership and manifest contracts. This file explains the browser
@@ -9,6 +10,19 @@ runtime rules that matter when you change the UI flow, browser smoke tests, or
 test hooks.
 
 ## Lifecycle
+
+## Library entry
+
+`wasm-tinygo` now ships two browser-facing entries:
+
+- `index.html`
+  standalone demo app
+- `runtime.js`
+  reusable library bundle that exports `createBundledTinyGoRuntime(...)`
+
+The demo page uses `createTinyGoBrowserRuntime(...)`, which is a UI-friendly
+adapter around the same runtime core. Host apps such as `wasm-idle` import
+`runtime.js` directly and call the runtime API without going through an iframe.
 
 The browser runtime exposes four user-visible actions:
 
@@ -203,6 +217,7 @@ It now checks:
 - quiet no-op behavior for scripted UI clicks on disabled controls
 - ready-state `boot()` idempotence
 
-If you change browser action sequencing in `src/main.ts`, update the smoke test
-in the same patch. The browser runtime has accumulated enough concurrency rules
-that code-only changes are easy to regress.
+If you change browser action sequencing in `src/runtime.ts` or its demo wiring
+in `src/main.ts`, update the smoke test in the same patch. The browser runtime
+has accumulated enough concurrency rules that code-only changes are easy to
+regress.
