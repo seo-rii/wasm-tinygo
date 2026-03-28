@@ -6,6 +6,13 @@ import {
   verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest,
   buildLoweredBitcodeCompileCommandsFromLoweringPlanAndLoweredSourcesManifest,
   buildToolPlanFromCompileUnitManifest,
+  normalizeTinyGoDriverBridgeManifestForBrowser,
+  verifyCompileUnitManifestAgainstDriverBridgeManifest,
+  verifyFrontendAnalysisAgainstDriverBridgeManifest,
+  verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest,
+  verifyFrontendRealAdapterAgainstFrontendAnalysis,
+  verifyFrontendAnalysisAgainstRealDriverBridgeManifest,
+  verifyFrontendInputManifestAgainstDriverBridgeManifest,
   verifyCommandBatchAgainstBackendInputManifest,
   verifyCommandArtifactManifestAgainstBackendInputAndLoweredBitcodeManifest,
   verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest,
@@ -18,6 +25,7 @@ import {
   verifyIntermediateManifestAgainstCompileUnitManifest,
   verifyCompileUnitManifestAgainstCompileRequest,
   verifyLoweringPlanAgainstWorkItemsManifest,
+  verifyTinyGoHostProbeManifestAgainstDriverMetadata,
   verifyWorkItemsManifestAgainstLoweringManifest,
 } from '../src/compile-unit.ts'
 
@@ -80,6 +88,11 @@ test('verifyCompileUnitManifestAgainstCompileRequest accepts compile requests th
       target: 'wasm',
       artifactOutputPath: '/working/out.wasm',
     },
+    compileUnits: [
+      { kind: 'program', importPath: 'command-line-arguments', modulePath: '', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+      { kind: 'imported', importPath: 'example.com/app/lib', modulePath: '', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+      { kind: 'stdlib', importPath: 'fmt', modulePath: '', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+    ],
     sourceSelection: {
       allCompile: [
         '/working/.tinygo-root/src/fmt/print.go',
@@ -96,6 +109,11 @@ test('verifyCompileUnitManifestAgainstCompileRequest accepts compile requests th
   assert.equal(verification.summary.importedCount, 1)
   assert.equal(verification.summary.stdlibCount, 1)
   assert.equal(verification.summary.allCompileCount, 3)
+  assert.deepEqual(verification.compileUnits, [
+    { kind: 'program', importPath: 'command-line-arguments', modulePath: '', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+    { kind: 'imported', importPath: 'example.com/app/lib', modulePath: '', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+    { kind: 'stdlib', importPath: 'fmt', modulePath: '', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+  ])
   assert.deepEqual(verification.toolPlan, [
     {
       argv: [
@@ -215,6 +233,3644 @@ test('verifyCompileUnitManifestAgainstCompileRequest rejects legacy top-level so
   }, {}), /frontend compile unit legacy top-level source-file groups are not supported/)
 })
 
+test('verifyTinyGoHostProbeManifestAgainstDriverMetadata accepts matching real TinyGo target facts', () => {
+  const verification = verifyTinyGoHostProbeManifestAgainstDriverMetadata({
+    artifact: {
+      path: '/working/out.wasm',
+    },
+    command: [
+      '/cache/tinygo/bin/tinygo',
+      'build',
+      '-target',
+      'wasip1',
+      '-opt',
+      'z',
+      '-scheduler',
+      'tasks',
+      '-panic',
+      'trap',
+      '-o',
+      '/working/out.wasm',
+      '/workspace/main.go',
+    ],
+    target: 'wasip1',
+    targetInfo: {
+      buildTags: ['tinygo.wasm', 'tinygo', 'purego', 'gc.precise', 'scheduler.tasks', 'serial.none', 'tinygo.unicore'],
+      gc: 'precise',
+      goarch: 'wasm',
+      goos: 'wasip1',
+      llvmTriple: 'wasm32-unknown-wasi',
+      scheduler: 'tasks',
+    },
+  }, {
+    buildTags: ['tinygo.wasm', 'scheduler.tasks', 'gc.precise', 'serial.none', 'tinygo.unicore'],
+    entry: '/workspace/main.go',
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'wasip1',
+    llvmTarget: 'wasm32-unknown-wasi',
+    optimize: 'z',
+    output: '/working/out.wasm',
+    panicStrategy: 'trap',
+    scheduler: 'tasks',
+    target: 'wasip1',
+  })
+
+  assert.equal(verification.target, 'wasip1')
+  assert.equal(verification.llvmTriple, 'wasm32-unknown-wasi')
+  assert.equal(verification.goos, 'wasip1')
+  assert.equal(verification.goarch, 'wasm')
+  assert.equal(verification.gc, 'precise')
+  assert.equal(verification.scheduler, 'tasks')
+  assert.equal(verification.entryFile, '/workspace/main.go')
+  assert.equal(verification.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.commandArgv.length, 13)
+  assert.deepEqual(verification.driverBuildTags, ['gc.precise', 'scheduler.tasks', 'serial.none', 'tinygo.unicore', 'tinygo.wasm'])
+  assert.deepEqual(verification.hostBuildTags, ['gc.precise', 'purego', 'scheduler.tasks', 'serial.none', 'tinygo', 'tinygo.unicore', 'tinygo.wasm'])
+})
+
+test('verifyTinyGoHostProbeManifestAgainstDriverMetadata rejects missing driver build tags', () => {
+  assert.throws(() => verifyTinyGoHostProbeManifestAgainstDriverMetadata({
+    artifact: {
+      path: '/working/out.wasm',
+    },
+    command: [
+      '/cache/tinygo/bin/tinygo',
+      'build',
+      '-target',
+      'wasip1',
+      '-scheduler',
+      'asyncify',
+      '-o',
+      '/working/out.wasm',
+      '/workspace/main.go',
+    ],
+    target: 'wasip1',
+    targetInfo: {
+      buildTags: ['tinygo.wasm', 'tinygo', 'purego'],
+      gc: 'precise',
+      goarch: 'wasm',
+      goos: 'wasip1',
+      llvmTriple: 'wasm32-unknown-wasi',
+      scheduler: 'asyncify',
+    },
+  }, {
+    buildTags: ['tinygo.wasm', 'scheduler.asyncify', 'gc.precise'],
+    entry: '/workspace/main.go',
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'wasip1',
+    llvmTarget: 'wasm32-unknown-wasi',
+    output: '/working/out.wasm',
+    scheduler: 'asyncify',
+    target: 'wasip1',
+  }), /real TinyGo host probe build tags did not cover driver metadata/)
+})
+
+test('verifyFrontendInputManifestAgainstDriverBridgeManifest accepts matching buildContext and packageGraph facts', () => {
+  const verification = verifyFrontendInputManifestAgainstDriverBridgeManifest({
+    buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    modulePath: 'example.com/app',
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasm',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      allCompile: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+        '/working/.tinygo-root/src/fmt/print.go',
+      ],
+    },
+    compileUnits: [
+      { kind: 'program', importPath: 'example.com/app', imports: ['example.com/app/helper'], packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], depOnly: false, standard: false },
+      { kind: 'imported', importPath: 'example.com/app/helper', imports: ['fmt'], packageName: 'helper', packageDir: '/workspace/helper', files: ['/workspace/helper/helper.go'], depOnly: true, standard: false },
+      { kind: 'stdlib', importPath: 'fmt', imports: ['errors'], packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'], depOnly: true, standard: true },
+    ],
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', files: { goFiles: ['main.go'] }, importPath: 'example.com/app', imports: ['example.com/app/helper'], name: 'main', standard: false },
+      { depOnly: true, dir: '/workspace/helper', files: { goFiles: ['helper.go'] }, importPath: 'example.com/app/helper', imports: ['fmt'], name: 'helper', standard: false },
+      { depOnly: true, dir: '/working/.tinygo-root/src/fmt', files: { goFiles: ['print.go'] }, importPath: 'fmt', imports: ['errors'], name: 'fmt', standard: true },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    driverBuildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      name: 'main',
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', goFiles: ['main.go'], importPath: 'example.com/app', imports: ['example.com/app/helper'], name: 'main', standard: false },
+      { depOnly: true, dir: '/workspace/helper', goFiles: ['helper.go'], importPath: 'example.com/app/helper', imports: ['fmt'], name: 'helper', standard: false },
+      { depOnly: true, dir: '/working/.tinygo-root/src/fmt', goFiles: ['print.go'], importPath: 'fmt', imports: ['errors'], name: 'fmt', standard: true },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  })
+
+  assert.equal(verification.target, 'wasm')
+  assert.equal(verification.llvmTarget, 'wasm32-unknown-wasi')
+  assert.equal(verification.scheduler, 'asyncify')
+  assert.equal(verification.modulePath, 'example.com/app')
+  assert.equal(verification.compileUnitCount, 3)
+  assert.equal(verification.graphPackageCount, 3)
+  assert.equal(verification.programImportAlias, 'direct')
+})
+
+test('verifyFrontendInputManifestAgainstDriverBridgeManifest rejects mismatched buildContext facts', () => {
+  assert.throws(() => verifyFrontendInputManifestAgainstDriverBridgeManifest({
+    buildTags: ['gc.precise', 'scheduler.tasks', 'tinygo.wasm'],
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'tasks',
+      buildTags: ['gc.precise', 'scheduler.tasks', 'tinygo.wasm'],
+      modulePath: '',
+    },
+    modulePath: '',
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasm',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      allCompile: ['/workspace/main.go'],
+    },
+    compileUnits: [
+      { kind: 'program', importPath: 'command-line-arguments', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], depOnly: false, standard: false },
+    ],
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', files: { goFiles: ['main.go'] }, importPath: 'command-line-arguments', imports: [], name: 'main', standard: false },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    driverBuildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'command-line-arguments',
+      imports: [],
+      name: 'main',
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', goFiles: ['main.go'], importPath: 'command-line-arguments', imports: [], name: 'main', standard: false },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  }), /build context/)
+})
+
+test('verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest accepts semantic bridge matches', () => {
+  const verification = verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest({
+    buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    modulePath: 'example.com/app',
+    optimizeFlag: '-Oz',
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasm',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      allCompile: [
+        '/working/.tinygo-root/src/fmt/print.go',
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+      ],
+    },
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', files: { goFiles: ['main.go'] }, importPath: 'command-line-arguments', imports: ['example.com/app/helper'], modulePath: 'example.com/app', name: 'main', standard: false },
+      { depOnly: true, dir: '/workspace/helper', files: { goFiles: ['helper.go'] }, importPath: 'example.com/app/helper', imports: ['fmt'], modulePath: 'example.com/app', name: 'helper', standard: false },
+      { depOnly: true, dir: '/working/.tinygo-root/src/fmt', files: { goFiles: ['print.go'] }, importPath: 'fmt', imports: ['errors'], modulePath: '', name: 'fmt', standard: true },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    driverBuildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      depOnly: false,
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      modulePath: 'example.com/app',
+      name: 'main',
+      standard: false,
+    },
+    frontendAnalysisInput: {
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      modulePath: 'example.com/app',
+      optimizeFlag: '-Oz',
+      entryFile: '/workspace/main.go',
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        artifactOutputPath: '/working/out.wasm',
+      },
+      sourceSelection: {
+        allCompile: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+      packageGraph: [
+        { depOnly: false, dir: '/workspace', files: { goFiles: ['main.go'] }, importPath: 'example.com/app', imports: ['example.com/app/helper'], modulePath: 'example.com/app', name: 'main', standard: false },
+        { depOnly: true, dir: '/workspace/helper', files: { goFiles: ['helper.go'] }, importPath: 'example.com/app/helper', imports: ['fmt'], modulePath: 'example.com/app', name: 'helper', standard: false },
+        { depOnly: true, dir: '/working/.tinygo-root/src/fmt', files: { goFiles: ['print.go'] }, importPath: 'fmt', imports: ['errors'], modulePath: '', name: 'fmt', standard: true },
+      ],
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', goFiles: ['main.go'], importPath: 'example.com/app', imports: ['example.com/app/helper'], modulePath: 'example.com/app', name: 'main', standard: false },
+      { depOnly: true, dir: '/workspace/helper', goFiles: ['helper.go'], importPath: 'example.com/app/helper', imports: ['fmt'], modulePath: 'example.com/app', name: 'helper', standard: false },
+      { depOnly: true, dir: '/working/.tinygo-root/src/fmt', goFiles: ['print.go'], importPath: 'fmt', imports: ['errors'], modulePath: '', name: 'fmt', standard: true },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  })
+
+  assert.equal(verification.target, 'wasm')
+  assert.equal(verification.llvmTarget, 'wasm32-unknown-wasi')
+  assert.equal(verification.scheduler, 'asyncify')
+  assert.equal(verification.graphPackageCount, 3)
+})
+
+test('verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest reports a generic mismatch when synthesized frontend input verification fails first', () => {
+  const manifest = {
+    buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    modulePath: 'example.com/app',
+    optimizeFlag: '-Oz',
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasm',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      allCompile: [
+        '/working/.tinygo-root/src/fmt/print.go',
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+      ],
+    },
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', files: { goFiles: ['main.go'] }, importPath: 'command-line-arguments', imports: ['example.com/app/helper'], modulePath: 'example.com/app', name: 'main', standard: false },
+      { depOnly: true, dir: '/workspace/helper', files: { goFiles: ['helper.go'] }, importPath: 'example.com/app/helper', imports: ['fmt'], modulePath: 'example.com/app', name: 'helper', standard: false },
+      { depOnly: true, dir: '/working/.tinygo-root/src/fmt', files: { goFiles: ['print.go'] }, importPath: 'fmt', imports: ['errors'], modulePath: '', name: 'fmt', standard: true },
+    ],
+  }
+  const bridgeManifest = {
+    artifactOutputPath: '/working/out.wasm',
+    driverBuildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      depOnly: false,
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      modulePath: 'example.com/app',
+      name: 'main',
+      standard: false,
+    },
+    frontendAnalysisInput: {
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      buildContext: {
+        target: 'mismatch-target',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      modulePath: 'example.com/app',
+      optimizeFlag: '-Oz',
+      entryFile: '/workspace/main.go',
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        artifactOutputPath: '/working/out.wasm',
+      },
+      sourceSelection: {
+        allCompile: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+      packageGraph: [
+        { depOnly: false, dir: '/workspace', files: { goFiles: ['main.go'] }, importPath: 'example.com/app', imports: ['example.com/app/helper'], modulePath: 'example.com/app', name: 'main', standard: false },
+        { depOnly: true, dir: '/workspace/helper', files: { goFiles: ['helper.go'] }, importPath: 'example.com/app/helper', imports: ['fmt'], modulePath: 'example.com/app', name: 'helper', standard: false },
+        { depOnly: true, dir: '/working/.tinygo-root/src/fmt', files: { goFiles: ['print.go'] }, importPath: 'fmt', imports: ['errors'], modulePath: '', name: 'fmt', standard: true },
+      ],
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', goFiles: ['main.go'], importPath: 'example.com/app', imports: ['example.com/app/helper'], modulePath: 'example.com/app', name: 'main', standard: false },
+      { depOnly: true, dir: '/workspace/helper', goFiles: ['helper.go'], importPath: 'example.com/app/helper', imports: ['fmt'], modulePath: 'example.com/app', name: 'helper', standard: false },
+      { depOnly: true, dir: '/working/.tinygo-root/src/fmt', goFiles: ['print.go'], importPath: 'fmt', imports: ['errors'], modulePath: '', name: 'fmt', standard: true },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  }
+
+  assert.throws(() => verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest(
+    manifest,
+    bridgeManifest,
+  ), /frontend analysis input did not match real TinyGo driver bridge/)
+})
+
+test('verifyFrontendAnalysisAgainstDriverBridgeManifest accepts matching analysis facts', () => {
+  const verification = verifyFrontendAnalysisAgainstDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    entryFile: '/workspace/main.go',
+    frontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+        '/working/.tinygo-root/src/fmt/print.go',
+      ],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/workspace/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: [
+            '/workspace/helper/helper.go',
+            '/workspace/main.go',
+            '/working/.tinygo-root/src/fmt/print.go',
+          ],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+        },
+        {
+          kind: 'imported',
+          importPath: 'example.com/app/helper',
+          packageName: 'helper',
+          packageDir: '/workspace/helper',
+          files: ['/workspace/helper/helper.go'],
+        },
+        {
+          kind: 'stdlib',
+          importPath: 'fmt',
+          packageName: 'fmt',
+          packageDir: '/working/.tinygo-root/src/fmt',
+          files: ['/working/.tinygo-root/src/fmt/print.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          modulePath: 'example.com/app',
+          name: 'main',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/workspace/helper',
+          files: { goFiles: ['helper.go'] },
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          modulePath: 'example.com/app',
+          name: 'helper',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/working/.tinygo-root/src/fmt',
+          files: { goFiles: ['print.go'] },
+          importPath: 'fmt',
+          imports: ['errors'],
+          modulePath: '',
+          name: 'fmt',
+          standard: true,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', goFiles: ['main.go'], importPath: 'example.com/app', imports: ['example.com/app/helper'], name: 'main', standard: false },
+      { depOnly: true, dir: '/workspace/helper', goFiles: ['helper.go'], importPath: 'example.com/app/helper', imports: ['fmt'], name: 'helper', standard: false },
+      { depOnly: true, dir: '/working/.tinygo-root/src/fmt', goFiles: ['print.go'], importPath: 'fmt', imports: ['errors'], name: 'fmt', standard: true },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  })
+
+  assert.equal(verification.entryFile, '/workspace/main.go')
+  assert.equal(verification.compileUnitManifestPath, '/working/tinygo-compile-unit.json')
+  assert.equal(verification.compileGroupCount, 2)
+  assert.equal(verification.compileUnitCount, 3)
+  assert.equal(verification.allCompileCount, 3)
+  assert.equal(verification.graphPackageCount, 3)
+  assert.equal(verification.goos, 'js')
+  assert.equal(verification.goarch, 'wasm')
+  assert.equal(verification.gc, 'precise')
+  assert.equal(verification.scheduler, 'asyncify')
+  assert.equal(verification.target, 'wasm')
+  assert.equal(verification.llvmTarget, 'wasm32-unknown-wasi')
+  assert.equal(verification.programImportAlias, 'direct')
+  assert.equal(verification.programImportPath, 'example.com/app')
+})
+
+test('verifyFrontendAnalysisAgainstDriverBridgeManifest accepts a synthetic program alias when the bridge uses a direct import path', () => {
+  const verification = verifyFrontendAnalysisAgainstDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+      {
+        name: 'all-compile',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        modulePath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'command-line-arguments',
+        imports: [],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      depOnly: false,
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: [],
+      modulePath: 'example.com/app',
+      name: 'main',
+      standard: false,
+    },
+    frontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/workspace/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          modulePath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          modulePath: 'example.com/app',
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: [],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  })
+
+  assert.equal(verification.programImportAlias, 'synthetic')
+  assert.equal(verification.programImportPath, 'command-line-arguments')
+})
+
+test('verifyFrontendAnalysisAgainstDriverBridgeManifest accepts sparse stdlib imports when the bridge frontendAnalysis has richer host imports', () => {
+  const verification = verifyFrontendAnalysisAgainstDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'stdlib', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      { name: 'all-compile', files: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'] },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: [],
+        modulePath: '',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: [],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      depOnly: false,
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['fmt'],
+      modulePath: 'example.com/app',
+      name: 'main',
+      standard: false,
+    },
+    frontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+      compileGroups: [
+        { name: 'program', files: ['/workspace/main.go'] },
+        { name: 'stdlib', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+        { name: 'all-compile', files: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'] },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: ['fmt'],
+          modulePath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+        },
+        {
+          kind: 'stdlib',
+          importPath: 'fmt',
+          imports: ['errors', 'io'],
+          modulePath: '',
+          packageName: 'fmt',
+          packageDir: '/working/.tinygo-root/src/fmt',
+          files: ['/working/.tinygo-root/src/fmt/print.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['fmt'],
+          modulePath: 'example.com/app',
+          name: 'main',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/working/.tinygo-root/src/fmt',
+          files: { goFiles: ['print.go'] },
+          importPath: 'fmt',
+          imports: ['errors', 'io'],
+          modulePath: '',
+          name: 'fmt',
+          standard: true,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        goFiles: ['print.go'],
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  })
+
+  assert.equal(verification.compileUnitCount, 2)
+  assert.equal(verification.graphPackageCount, 2)
+})
+
+test('verifyFrontendAnalysisAgainstDriverBridgeManifest rejects mismatched buildContext facts', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'wasip1',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: [],
+        name: 'main',
+        standard: false,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    frontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', goFiles: ['main.go'], importPath: 'example.com/app', imports: [], name: 'main', standard: false },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  }), /frontend analysis buildContext did not match real TinyGo driver bridge/)
+})
+
+test('verifyFrontendAnalysisAgainstDriverBridgeManifest rejects mismatched packageGraph facts', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        name: 'main',
+        standard: false,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    frontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'js',
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      { depOnly: false, dir: '/workspace', goFiles: ['main.go'], importPath: 'example.com/app', imports: [], name: 'main', standard: false },
+    ],
+    scheduler: 'asyncify',
+    target: 'wasm',
+  }), /frontend analysis packageGraph did not match real TinyGo driver bridge/)
+})
+
+test('verifyFrontendAnalysisAgainstDriverBridgeManifest rejects mismatched compile-unit manifest paths', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-analysis.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    entryFile: '/workspace/main.go',
+    frontendAnalysis: {
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    target: 'wasm',
+  }), /frontend analysis compileUnitManifestPath did not match real TinyGo driver bridge/)
+})
+
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest accepts matching package-focused analysis facts', () => {
+  const verification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      {
+        name: 'target-assets',
+        files: ['/working/.tinygo-root/targets/wasm.json'],
+      },
+      {
+        name: 'runtime-support',
+        files: ['/working/.tinygo-root/src/runtime/runtime.go'],
+      },
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+      {
+        name: 'imported',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        name: 'stdlib',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors'],
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  }, {
+    frontendRealAdapter: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+        '/working/.tinygo-root/src/fmt/print.go',
+      ],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/workspace/main.go'],
+        },
+        {
+          name: 'imported',
+          files: ['/workspace/helper/helper.go'],
+        },
+        {
+          name: 'stdlib',
+          files: ['/working/.tinygo-root/src/fmt/print.go'],
+        },
+        {
+          name: 'all-compile',
+          files: [
+            '/workspace/helper/helper.go',
+            '/workspace/main.go',
+            '/working/.tinygo-root/src/fmt/print.go',
+          ],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          depOnly: false,
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+        {
+          kind: 'imported',
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          depOnly: true,
+          packageName: 'helper',
+          packageDir: '/workspace/helper',
+          files: ['/workspace/helper/helper.go'],
+          standard: false,
+        },
+        {
+          kind: 'stdlib',
+          importPath: 'fmt',
+          imports: ['errors'],
+          depOnly: true,
+          packageName: 'fmt',
+          packageDir: '/working/.tinygo-root/src/fmt',
+          files: ['/working/.tinygo-root/src/fmt/print.go'],
+          standard: true,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          modulePath: 'example.com/app',
+          name: 'main',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/workspace/helper',
+          files: { goFiles: ['helper.go'] },
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          modulePath: 'example.com/app',
+          name: 'helper',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/working/.tinygo-root/src/fmt',
+          files: { goFiles: ['print.go'] },
+          importPath: 'fmt',
+          imports: ['errors'],
+          modulePath: '',
+          name: 'fmt',
+          standard: true,
+        },
+      ],
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  })
+
+  assert.equal(verification.programImportAlias, 'synthetic')
+  assert.equal(verification.compileGroupCount, 4)
+  assert.equal(verification.compileUnitCount, 3)
+  assert.equal(verification.allCompileCount, 3)
+  assert.equal(verification.graphPackageCount, 3)
+  assert.equal(verification.goos, 'js')
+  assert.equal(verification.goarch, 'wasm')
+  assert.equal(verification.gc, 'precise')
+  assert.equal(verification.scheduler, 'asyncify')
+})
+
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest accepts sparse stdlib imports when the real adapter has richer host imports', () => {
+  const verification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'imported', files: [] },
+      { name: 'stdlib', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      { name: 'all-compile', files: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'] },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: [],
+        modulePath: '',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: [],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    frontendRealAdapter: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+      compileGroups: [
+        { name: 'program', files: ['/workspace/main.go'] },
+        { name: 'imported', files: [] },
+        { name: 'stdlib', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+        { name: 'all-compile', files: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'] },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: ['fmt'],
+          modulePath: 'example.com/app',
+          depOnly: false,
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+        {
+          kind: 'stdlib',
+          importPath: 'fmt',
+          imports: ['errors', 'io'],
+          modulePath: '',
+          depOnly: true,
+          packageName: 'fmt',
+          packageDir: '/working/.tinygo-root/src/fmt',
+          files: ['/working/.tinygo-root/src/fmt/print.go'],
+          standard: true,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['fmt'],
+          modulePath: 'example.com/app',
+          name: 'main',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/working/.tinygo-root/src/fmt',
+          files: { goFiles: ['print.go'] },
+          importPath: 'fmt',
+          imports: ['errors', 'io'],
+          modulePath: '',
+          name: 'fmt',
+          standard: true,
+        },
+      ],
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  })
+
+  assert.equal(verification.compileUnitCount, 2)
+  assert.equal(verification.graphPackageCount, 2)
+})
+
+test('verifyFrontendRealAdapterAgainstFrontendAnalysis accepts package-focused normalization from analysis', () => {
+  const verification = verifyFrontendRealAdapterAgainstFrontendAnalysis({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'imported', files: ['/workspace/helper/helper.go'] },
+      { name: 'stdlib', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        depOnly: false,
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+        standard: false,
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        depOnly: true,
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+        standard: false,
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors'],
+        depOnly: true,
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+        standard: true,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  }, {
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      {
+        name: 'target-assets',
+        files: ['/working/.tinygo-root/targets/wasm.json'],
+      },
+      {
+        name: 'runtime-support',
+        files: ['/working/.tinygo-root/src/runtime/runtime.go'],
+      },
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+      {
+        name: 'imported',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        name: 'stdlib',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors'],
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  })
+
+  assert.equal(verification.programImportAlias, 'synthetic')
+  assert.equal(verification.compileGroupCount, 4)
+  assert.equal(verification.compileUnitCount, 3)
+  assert.equal(verification.allCompileCount, 3)
+})
+
+test('verifyFrontendRealAdapterAgainstFrontendAnalysis derives selected compileGroups from compileUnits when they are omitted', () => {
+  const verification = verifyFrontendRealAdapterAgainstFrontendAnalysis({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        depOnly: false,
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+        standard: false,
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        depOnly: true,
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+        standard: false,
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors'],
+        depOnly: true,
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+        standard: true,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  }, {
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      { name: 'target-assets', files: ['/working/.tinygo-root/targets/wasm.json'] },
+      { name: 'runtime-support', files: ['/working/.tinygo-root/src/runtime/runtime.go'] },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors'],
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  })
+
+  assert.equal(verification.programImportAlias, 'synthetic')
+  assert.equal(verification.compileGroupCount, 4)
+  assert.equal(verification.compileUnitCount, 3)
+  assert.equal(verification.allCompileCount, 3)
+})
+
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest accepts alias-only realFrontendAnalysis bridge manifests', () => {
+  const verification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'imported', files: ['/workspace/helper/helper.go'] },
+      { name: 'stdlib', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors'],
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/helper'],
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  }, {
+    realFrontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+        '/working/.tinygo-root/src/fmt/print.go',
+      ],
+      compileGroups: [
+        { name: 'program', files: ['/workspace/main.go'] },
+        { name: 'imported', files: ['/workspace/helper/helper.go'] },
+        { name: 'stdlib', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+        {
+          name: 'all-compile',
+          files: [
+            '/workspace/helper/helper.go',
+            '/workspace/main.go',
+            '/working/.tinygo-root/src/fmt/print.go',
+          ],
+        },
+      ],
+      compileUnits: [
+        {
+          depOnly: false,
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+        {
+          depOnly: true,
+          kind: 'imported',
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          packageName: 'helper',
+          packageDir: '/workspace/helper',
+          files: ['/workspace/helper/helper.go'],
+          standard: false,
+        },
+        {
+          depOnly: true,
+          kind: 'stdlib',
+          importPath: 'fmt',
+          imports: ['errors'],
+          packageName: 'fmt',
+          packageDir: '/working/.tinygo-root/src/fmt',
+          files: ['/working/.tinygo-root/src/fmt/print.go'],
+          standard: true,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          name: 'main',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/workspace/helper',
+          files: { goFiles: ['helper.go'] },
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          name: 'helper',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/working/.tinygo-root/src/fmt',
+          files: { goFiles: ['print.go'] },
+          importPath: 'fmt',
+          imports: ['errors'],
+          name: 'fmt',
+          standard: true,
+        },
+      ],
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  })
+
+  assert.equal(verification.target, 'wasm')
+  assert.equal(verification.programImportAlias, 'synthetic')
+})
+
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest rejects mismatched imported files', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+    ],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+      {
+        name: 'imported',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    frontendRealAdapter: {
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: [
+        '/workspace/main.go',
+        '/workspace/other/helper.go',
+      ],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/workspace/main.go'],
+        },
+        {
+          name: 'imported',
+          files: ['/workspace/other/helper.go'],
+        },
+        {
+          name: 'all-compile',
+          files: [
+            '/workspace/main.go',
+            '/workspace/other/helper.go',
+          ],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          depOnly: false,
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+        {
+          kind: 'imported',
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          depOnly: true,
+          packageName: 'helper',
+          packageDir: '/workspace/other',
+          files: ['/workspace/other/helper.go'],
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  }), /frontend analysis allCompileFiles did not match real TinyGo analysis adapter/)
+})
+
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest rejects mismatched buildContext facts', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'imported', files: [] },
+      { name: 'stdlib', files: [] },
+      { name: 'all-compile', files: ['/workspace/main.go'] },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: [],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: [],
+        name: 'main',
+        standard: false,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    frontendRealAdapter: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'wasip1',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        { name: 'program', files: ['/workspace/main.go'] },
+        { name: 'imported', files: [] },
+        { name: 'stdlib', files: [] },
+        { name: 'all-compile', files: ['/workspace/main.go'] },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: [],
+          depOnly: false,
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  }), /frontend analysis buildContext did not match real TinyGo analysis adapter/)
+})
+
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest rejects mismatched packageGraph facts', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'imported', files: [] },
+      { name: 'stdlib', files: [] },
+      { name: 'all-compile', files: ['/workspace/main.go'] },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: [],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'command-line-arguments',
+        imports: [],
+        name: 'main',
+        standard: false,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  }, {
+    frontendRealAdapter: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        { name: 'program', files: ['/workspace/main.go'] },
+        { name: 'imported', files: [] },
+        { name: 'stdlib', files: [] },
+        { name: 'all-compile', files: ['/workspace/main.go'] },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: [],
+          depOnly: false,
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['fmt'],
+          modulePath: '',
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  }), /frontend analysis packageGraph did not match real TinyGo analysis adapter/)
+})
+
+test('verifyCompileUnitManifestAgainstDriverBridgeManifest accepts matching entry package facts', () => {
+  const verification = verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasip1',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+    },
+    compileUnits: [
+      {
+        depOnly: false,
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+        standard: false,
+      },
+      {
+        depOnly: true,
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+        standard: true,
+      },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      depOnly: false,
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['fmt'],
+      name: 'main',
+      standard: false,
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/host/goroot/src/fmt',
+        goFiles: ['print.go'],
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    target: 'wasip1',
+  })
+
+  assert.equal(verification.target, 'wasip1')
+  assert.equal(verification.llvmTarget, 'wasm32-unknown-wasi')
+  assert.equal(verification.entryFile, '/workspace/main.go')
+  assert.equal(verification.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.programPackageName, 'main')
+  assert.equal(verification.programPackageDir, '/workspace')
+  assert.deepEqual(verification.programFiles, ['/workspace/main.go'])
+  assert.equal(verification.programImportPath, 'example.com/app')
+  assert.equal(verification.bridgeEntryImportPath, 'example.com/app')
+  assert.equal(verification.bridgeEntryPackageName, 'main')
+  assert.equal(verification.bridgeEntryPackageDir, '/workspace')
+  assert.deepEqual(verification.bridgeEntryGoFiles, ['/workspace/main.go'])
+  assert.deepEqual(verification.bridgeEntryImports, ['fmt'])
+  assert.deepEqual(verification.bridgePackageGraphImportPaths, ['fmt'])
+  assert.deepEqual(verification.compileUnitImportPaths, ['fmt'])
+  assert.equal(verification.compileUnitCount, 2)
+  assert.equal(verification.compileUnitFileCount, 2)
+  assert.equal(verification.graphPackageCount, 2)
+  assert.equal(verification.coveredPackageCount, 1)
+  assert.equal(verification.bridgeFileCount, 2)
+  assert.equal(verification.coveredFileCount, 2)
+  assert.equal(verification.bridgePackageCount, 1)
+  assert.equal(verification.depOnlyPackageCount, 1)
+  assert.equal(verification.standardPackageCount, 1)
+  assert.equal(verification.localPackageCount, 1)
+  assert.equal(verification.programImportAlias, 'direct')
+})
+
+test('verifyCompileUnitManifestAgainstDriverBridgeManifest accepts matching package graph facts for local imports', () => {
+  const verification = verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasip1',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+        '/working/.tinygo-root/src/fmt/print.go',
+      ],
+    },
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      name: 'main',
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        name: 'main',
+      },
+      {
+        dir: '/workspace/helper',
+        goFiles: ['helper.go'],
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        name: 'helper',
+      },
+      {
+        dir: '/host/goroot/src/fmt',
+        goFiles: ['print.go'],
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        name: 'fmt',
+      },
+    ],
+    target: 'wasip1',
+  })
+
+  assert.deepEqual(verification.bridgeEntryImports, ['example.com/app/helper'])
+  assert.deepEqual(verification.bridgePackageGraphImportPaths, ['example.com/app/helper', 'fmt'])
+  assert.deepEqual(verification.compileUnitImportPaths, ['example.com/app/helper', 'fmt'])
+  assert.equal(verification.compileUnitFileCount, 3)
+  assert.equal(verification.bridgeFileCount, 3)
+  assert.equal(verification.coveredFileCount, 3)
+})
+
+test('verifyCompileUnitManifestAgainstDriverBridgeManifest reports a synthetic alias when the program compile unit uses command-line-arguments', () => {
+  const verification = verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasip1',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+    },
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['fmt'],
+      name: 'main',
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        name: 'main',
+      },
+      {
+        dir: '/host/goroot/src/fmt',
+        goFiles: ['print.go'],
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        name: 'fmt',
+      },
+    ],
+    target: 'wasip1',
+  })
+
+  assert.equal(verification.programImportAlias, 'synthetic')
+  assert.equal(verification.compileUnitCount, 2)
+  assert.equal(verification.compileUnitFileCount, 2)
+  assert.equal(verification.graphPackageCount, 2)
+  assert.equal(verification.coveredPackageCount, 1)
+  assert.equal(verification.bridgeFileCount, 2)
+  assert.equal(verification.coveredFileCount, 2)
+  assert.equal(verification.bridgePackageCount, 1)
+})
+
+test('verifyCompileUnitManifestAgainstDriverBridgeManifest rejects mismatched stdlib package files', () => {
+  assert.throws(() => verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasip1',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+    },
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['fmt'],
+      name: 'main',
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['fmt'],
+        name: 'main',
+      },
+      {
+        dir: '/host/goroot/src/fmt',
+        goFiles: ['format.go'],
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        name: 'fmt',
+      },
+    ],
+    target: 'wasip1',
+  }), /frontend compile unit package graph did not match real TinyGo driver bridge/)
+})
+
+test('verifyCompileUnitManifestAgainstDriverBridgeManifest rejects mismatched direct imports when compile units provide them', () => {
+  assert.throws(() => verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasip1',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+      ],
+    },
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      name: 'main',
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        name: 'main',
+      },
+      {
+        dir: '/workspace/helper',
+        goFiles: ['helper.go'],
+        importPath: 'example.com/app/helper',
+        imports: ['errors'],
+        name: 'helper',
+      },
+    ],
+    target: 'wasip1',
+  }), /frontend compile unit package graph did not match real TinyGo driver bridge/)
+})
+
+test('verifyCompileUnitManifestAgainstDriverBridgeManifest rejects mismatched standard and depOnly package facts when compile units provide them', () => {
+  assert.throws(() => verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasip1',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+        '/working/.tinygo-root/src/fmt/print.go',
+      ],
+    },
+    compileUnits: [
+      {
+        depOnly: false,
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+        standard: false,
+      },
+      {
+        depOnly: false,
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+        standard: true,
+      },
+      {
+        depOnly: true,
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+        standard: false,
+      },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      name: 'main',
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        goFiles: ['helper.go'],
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/host/goroot/src/fmt',
+        goFiles: ['print.go'],
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    target: 'wasip1',
+  }), /frontend compile unit package graph did not match real TinyGo driver bridge/)
+})
+
+test('verifyCompileUnitManifestAgainstDriverBridgeManifest rejects mismatched program depOnly and standard facts when compile units provide them', () => {
+  assert.throws(() => verifyCompileUnitManifestAgainstDriverBridgeManifest({
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasip1',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: ['/workspace/main.go'],
+    },
+    compileUnits: [
+      {
+        depOnly: true,
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+        standard: true,
+      },
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    entryFile: '/workspace/main.go',
+    entryPackage: {
+      depOnly: false,
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      name: 'main',
+      standard: false,
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    target: 'wasip1',
+  }), /frontend compile unit program package did not match real TinyGo driver bridge/)
+})
+
+test('normalizeTinyGoDriverBridgeManifestForBrowser rewrites host paths into browser workspace vocabulary', () => {
+  const verification = normalizeTinyGoDriverBridgeManifestForBrowser({
+    artifactOutputPath: '/tmp/bridge/out.wasm',
+    entryFile: '/tmp/bridge/main.go',
+    entryPackage: {
+      dir: '/tmp/bridge',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      name: 'main',
+    },
+    llvmTriple: 'wasm32-unknown-wasi',
+    packageGraph: [
+      {
+        dir: '/tmp/bridge',
+        goFiles: ['main.go'],
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        name: 'main',
+      },
+      {
+        dir: '/tmp/bridge/helper',
+        goFiles: ['helper.go'],
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        name: 'helper',
+      },
+      {
+        dir: '/tmp/tinygo-root/src/fmt',
+        goFiles: ['print.go'],
+        importPath: 'fmt',
+        imports: ['errors'],
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    frontendAnalysisInput: {
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      modulePath: 'example.com/app',
+      optimizeFlag: '-Oz',
+      entryFile: '/tmp/bridge/main.go',
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        artifactOutputPath: '/tmp/bridge/out.wasm',
+      },
+      sourceSelection: {
+        program: ['/tmp/bridge/main.go'],
+        allCompile: [
+          '/tmp/bridge/helper/helper.go',
+          '/tmp/bridge/main.go',
+          '/tmp/tinygo-root/src/fmt/print.go',
+        ],
+      },
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/tmp/bridge',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          modulePath: 'example.com/app',
+          name: 'main',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/tmp/bridge/helper',
+          files: { goFiles: ['helper.go'] },
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          modulePath: 'example.com/app',
+          name: 'helper',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/tmp/tinygo-root/src/fmt',
+          files: { goFiles: ['print.go'] },
+          importPath: 'fmt',
+          imports: ['errors'],
+          modulePath: '',
+          name: 'fmt',
+          standard: true,
+        },
+      ],
+    },
+    frontendAnalysis: {
+      entryFile: '/tmp/bridge/main.go',
+      compileUnitManifestPath: '/tmp/bridge/tinygo-compile-unit.json',
+      allCompileFiles: [
+        '/tmp/bridge/helper/helper.go',
+        '/tmp/bridge/main.go',
+        '/tmp/tinygo-root/src/fmt/print.go',
+      ],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: [
+            '/tmp/bridge/helper/helper.go',
+            '/tmp/bridge/main.go',
+            '/tmp/tinygo-root/src/fmt/print.go',
+          ],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/tmp/bridge',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          kind: 'imported',
+          importPath: 'example.com/app/helper',
+          packageName: 'helper',
+          packageDir: '/tmp/bridge/helper',
+          files: ['/tmp/bridge/helper/helper.go'],
+        },
+        {
+          kind: 'stdlib',
+          importPath: 'fmt',
+          packageName: 'fmt',
+          packageDir: '/tmp/tinygo-root/src/fmt',
+          files: ['/tmp/tinygo-root/src/fmt/print.go'],
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    frontendRealAdapter: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/tmp/bridge/main.go',
+      compileUnitManifestPath: '/tmp/bridge/tinygo-compile-unit.json',
+      allCompileFiles: [
+        '/tmp/bridge/helper/helper.go',
+        '/tmp/bridge/main.go',
+        '/tmp/tinygo-root/src/fmt/print.go',
+      ],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: [
+            '/tmp/bridge/helper/helper.go',
+            '/tmp/bridge/main.go',
+            '/tmp/tinygo-root/src/fmt/print.go',
+          ],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/tmp/bridge',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          kind: 'imported',
+          importPath: 'example.com/app/helper',
+          packageName: 'helper',
+          packageDir: '/tmp/bridge/helper',
+          files: ['/tmp/bridge/helper/helper.go'],
+        },
+        {
+          kind: 'stdlib',
+          importPath: 'fmt',
+          packageName: 'fmt',
+          packageDir: '/tmp/tinygo-root/src/fmt',
+          files: ['/tmp/tinygo-root/src/fmt/print.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/tmp/bridge',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: ['example.com/app/helper'],
+          name: 'main',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/tmp/bridge/helper',
+          files: { goFiles: ['helper.go'] },
+          importPath: 'example.com/app/helper',
+          imports: ['fmt'],
+          name: 'helper',
+          standard: false,
+        },
+        {
+          depOnly: true,
+          dir: '/tmp/tinygo-root/src/fmt',
+          files: { goFiles: ['print.go'] },
+          importPath: 'fmt',
+          imports: ['errors'],
+          name: 'fmt',
+          standard: true,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    target: 'wasm',
+    toolchain: {
+      rootPath: '/tmp/tinygo-root',
+      version: 'tinygo version 0.40.1',
+    },
+  })
+
+  assert.equal(verification.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.entryFile, '/workspace/main.go')
+  assert.deepEqual(verification.entryPackage, {
+    dir: '/workspace',
+    goFiles: ['main.go'],
+    importPath: 'example.com/app',
+    imports: ['example.com/app/helper'],
+    name: 'main',
+  })
+  assert.deepEqual(verification.packageGraph, [
+    {
+      dir: '/workspace',
+      goFiles: ['main.go'],
+      importPath: 'example.com/app',
+      imports: ['example.com/app/helper'],
+      name: 'main',
+    },
+    {
+      dir: '/workspace/helper',
+      goFiles: ['helper.go'],
+      importPath: 'example.com/app/helper',
+      imports: ['fmt'],
+      name: 'helper',
+    },
+    {
+      dir: '/working/.tinygo-root/src/fmt',
+      goFiles: ['print.go'],
+      importPath: 'fmt',
+      imports: ['errors'],
+      name: 'fmt',
+      standard: true,
+    },
+  ])
+  assert.deepEqual(verification.toolchain, {
+    rootPath: '/working/.tinygo-root',
+    version: 'tinygo version 0.40.1',
+  })
+  assert.deepEqual(verification.frontendAnalysisInput, {
+    buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    modulePath: 'example.com/app',
+    optimizeFlag: '-Oz',
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      program: ['/workspace/main.go'],
+      allCompile: [
+        '/workspace/helper/helper.go',
+        '/workspace/main.go',
+        '/working/.tinygo-root/src/fmt/print.go',
+      ],
+    },
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  })
+  assert.deepEqual(verification.frontendAnalysis, {
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  })
+  assert.deepEqual(verification.frontendRealAdapter, {
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'asyncify',
+      buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: [
+      '/workspace/helper/helper.go',
+      '/workspace/main.go',
+      '/working/.tinygo-root/src/fmt/print.go',
+    ],
+    compileGroups: [
+      {
+        name: 'program',
+        files: ['/workspace/main.go'],
+      },
+      {
+        name: 'all-compile',
+        files: [
+          '/workspace/helper/helper.go',
+          '/workspace/main.go',
+          '/working/.tinygo-root/src/fmt/print.go',
+        ],
+      },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/helper',
+        packageName: 'helper',
+        packageDir: '/workspace/helper',
+        files: ['/workspace/helper/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: ['example.com/app/helper'],
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/helper',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/helper',
+        imports: ['fmt'],
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors'],
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+    },
+  })
+  assert.deepEqual(verification.realFrontendAnalysis, verification.frontendRealAdapter)
+})
+
+test('normalizeTinyGoDriverBridgeManifestForBrowser rejects divergent realFrontendAnalysis aliases when frontendRealAdapter is present', () => {
+  assert.throws(() => normalizeTinyGoDriverBridgeManifestForBrowser({
+    artifactOutputPath: '/tmp/bridge/out.wasm',
+    entryFile: '/tmp/bridge/main.go',
+    frontendRealAdapter: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/tmp/bridge/main.go',
+      compileUnitManifestPath: '/tmp/bridge/tinygo-compile-unit.json',
+      allCompileFiles: ['/tmp/bridge/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/tmp/bridge',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/tmp/bridge',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    realFrontendAnalysis: {
+      buildContext: {
+        target: 'wasip1',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'wasip1',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'tasks',
+        buildTags: ['gc.precise', 'scheduler.tasks', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/tmp/bridge/main.go',
+      compileUnitManifestPath: '/tmp/bridge/tinygo-compile-unit.json',
+      allCompileFiles: ['/tmp/bridge/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/tmp/bridge',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/tmp/bridge',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasip1',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    target: 'wasm',
+    toolchain: {
+      rootPath: '/tmp/tinygo-root',
+      version: 'tinygo version 0.40.1',
+    },
+  }), /frontendRealAdapter did not match realFrontendAnalysis alias/)
+})
+
+test('normalizeTinyGoDriverBridgeManifestForBrowser promotes alias-only realFrontendAnalysis input into frontendRealAdapter', () => {
+  const verification = normalizeTinyGoDriverBridgeManifestForBrowser({
+    artifactOutputPath: '/tmp/bridge/out.wasm',
+    entryFile: '/tmp/bridge/main.go',
+    realFrontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/tmp/bridge/main.go',
+      compileUnitManifestPath: '/tmp/bridge/tinygo-compile-unit.json',
+      allCompileFiles: ['/tmp/bridge/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/tmp/bridge',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/tmp/bridge',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+      },
+    },
+    target: 'wasm',
+    toolchain: {
+      rootPath: '/tmp/tinygo-root',
+      version: 'tinygo version 0.40.1',
+    },
+  })
+
+  assert.deepEqual(verification.frontendRealAdapter, verification.realFrontendAnalysis)
+  assert.equal(verification.frontendRealAdapter?.entryFile, '/workspace/main.go')
+  assert.equal(verification.frontendRealAdapter?.compileUnitManifestPath, '/working/tinygo-compile-unit.json')
+})
+
 test('verifyIntermediateManifestAgainstCompileUnitManifest accepts a resolved intermediate manifest', () => {
   const verification = verifyIntermediateManifestAgainstCompileUnitManifest({
     entryFile: '/workspace/main.go',
@@ -231,6 +3887,11 @@ test('verifyIntermediateManifestAgainstCompileUnitManifest accepts a resolved in
       target: 'wasm',
       artifactOutputPath: '/working/out.wasm',
     },
+    compileUnits: [
+      { kind: 'program', importPath: 'command-line-arguments', modulePath: '', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+      { kind: 'imported', importPath: 'example.com/app/lib', modulePath: '', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+      { kind: 'stdlib', importPath: 'fmt', modulePath: '', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+    ],
     sourceSelection: {
       allCompile: [
         '/working/.tinygo-root/src/fmt/print.go',
@@ -264,9 +3925,9 @@ test('verifyIntermediateManifestAgainstCompileUnitManifest accepts a resolved in
       ],
     },
     compileUnits: [
-      { kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'] },
-      { kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
-      { kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      { kind: 'program', importPath: 'command-line-arguments', modulePath: '', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+      { kind: 'imported', importPath: 'example.com/app/lib', modulePath: '', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+      { kind: 'stdlib', importPath: 'fmt', modulePath: '', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
     ],
   })
 
@@ -275,9 +3936,9 @@ test('verifyIntermediateManifestAgainstCompileUnitManifest accepts a resolved in
   assert.equal(verification.sourceSelection.imported.length, 1)
   assert.equal(verification.sourceSelection.stdlib.length, 1)
   assert.deepEqual(verification.compileUnits, [
-    { kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'] },
-    { kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
-    { kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+    { kind: 'program', importPath: 'command-line-arguments', modulePath: '', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+    { kind: 'imported', importPath: 'example.com/app/lib', modulePath: '', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+    { kind: 'stdlib', importPath: 'fmt', modulePath: '', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
   ])
 })
 
@@ -405,9 +4066,9 @@ test('verifyLoweringManifestAgainstIntermediateManifest accepts a normalized low
       ],
     },
     compileUnits: [
-      { kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'] },
-      { kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
-      { kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      { kind: 'program', importPath: 'command-line-arguments', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+      { kind: 'imported', importPath: 'example.com/app/lib', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+      { kind: 'stdlib', importPath: 'fmt', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
     ],
   }, {
     entryFile: '/workspace/main.go',
@@ -427,9 +4088,9 @@ test('verifyLoweringManifestAgainstIntermediateManifest accepts a normalized low
       runtimeSupport: ['/working/.tinygo-root/src/device/arm/arm.go', '/working/.tinygo-root/src/runtime/runtime.go'],
     },
     compileUnits: [
-      { kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'] },
-      { kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
-      { kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      { kind: 'program', importPath: 'command-line-arguments', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+      { kind: 'imported', importPath: 'example.com/app/lib', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+      { kind: 'stdlib', importPath: 'fmt', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
     ],
   })
 
@@ -467,9 +4128,9 @@ test('verifyLoweringManifestAgainstIntermediateManifest rejects mismatched compi
       ],
     },
     compileUnits: [
-      { kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'] },
-      { kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
-      { kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      { kind: 'program', importPath: 'command-line-arguments', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
+      { kind: 'imported', importPath: 'example.com/app/lib', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+      { kind: 'stdlib', importPath: 'fmt', packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
     ],
   }, {
     entryFile: '/workspace/main.go',
@@ -513,22 +4174,23 @@ test('verifyWorkItemsManifestAgainstLoweringManifest accepts a normalized work-i
       runtimeSupport: ['/working/.tinygo-root/src/device/arm/arm.go', '/working/.tinygo-root/src/runtime/runtime.go'],
     },
     compileUnits: [
-      { kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'] },
-      { kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
-      { kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'] },
+      { kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], modulePath: 'example.com/app', depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], standard: false },
+      { kind: 'imported', importPath: 'example.com/app/lib', imports: ['fmt'], modulePath: 'example.com/app', depOnly: true, packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], standard: false },
+      { kind: 'stdlib', importPath: 'fmt', imports: ['errors', 'io'], modulePath: '', depOnly: true, packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'], standard: true },
     ],
   }, {
     entryFile: '/workspace/main.go',
     optimizeFlag: '-Oz',
     workItems: [
-      { id: 'program-000', kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-000.bc' },
-      { id: 'imported-000', kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc' },
-      { id: 'stdlib-000', kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'], bitcodeOutputPath: '/working/tinygo-work/stdlib-000.bc' },
+      { id: 'program-000', kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], modulePath: 'example.com/app', depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-000.bc', standard: false },
+      { id: 'imported-000', kind: 'imported', importPath: 'example.com/app/lib', imports: ['fmt'], modulePath: 'example.com/app', depOnly: true, packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc', standard: false },
+      { id: 'stdlib-000', kind: 'stdlib', importPath: 'fmt', imports: ['errors', 'io'], modulePath: '', depOnly: true, packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'], bitcodeOutputPath: '/working/tinygo-work/stdlib-000.bc', standard: true },
     ],
   })
 
   assert.equal(verification.workItems.length, 3)
   assert.equal(verification.workItems[0]?.bitcodeOutputPath, '/working/tinygo-work/program-000.bc')
+  assert.equal(verification.workItems[0]?.modulePath, 'example.com/app')
 })
 
 test('verifyWorkItemsManifestAgainstLoweringManifest rejects mismatched work-item graphs', () => {
@@ -550,15 +4212,15 @@ test('verifyWorkItemsManifestAgainstLoweringManifest rejects mismatched work-ite
       runtimeSupport: ['/working/.tinygo-root/src/device/arm/arm.go', '/working/.tinygo-root/src/runtime/runtime.go'],
     },
     compileUnits: [
-      { kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'] },
-      { kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
+      { kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], standard: false },
+      { kind: 'imported', importPath: 'example.com/app/lib', imports: ['fmt'], depOnly: true, packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], standard: false },
     ],
   }, {
     entryFile: '/workspace/main.go',
     optimizeFlag: '-Oz',
     workItems: [
-      { id: 'program-000', kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-001.bc' },
-      { id: 'imported-000', kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc' },
+      { id: 'program-000', kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-001.bc', standard: false },
+      { id: 'imported-000', kind: 'imported', importPath: 'example.com/app/lib', imports: ['fmt'], depOnly: true, packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc', standard: false },
     ],
   }), /frontend work items did not match lowering manifest/)
 })
@@ -578,9 +4240,9 @@ test('verifyLoweringPlanAgainstWorkItemsManifest accepts a normalized lowering p
       artifactOutputPath: '/working/out.wasm',
     },
     workItems: [
-      { id: 'program-000', kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-000.bc' },
-      { id: 'imported-000', kind: 'imported', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc' },
-      { id: 'stdlib-000', kind: 'stdlib', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'], bitcodeOutputPath: '/working/tinygo-work/stdlib-000.bc' },
+      { id: 'program-000', kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], modulePath: 'example.com/app', depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-000.bc', standard: false },
+      { id: 'imported-000', kind: 'imported', importPath: 'example.com/app/lib', imports: ['fmt'], modulePath: 'example.com/app', depOnly: true, packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc', standard: false },
+      { id: 'stdlib-000', kind: 'stdlib', importPath: 'fmt', imports: ['errors', 'io'], modulePath: '', depOnly: true, packageName: 'fmt', packageDir: '/working/.tinygo-root/src/fmt', files: ['/working/.tinygo-root/src/fmt/print.go'], bitcodeOutputPath: '/working/tinygo-work/stdlib-000.bc', standard: true },
     ],
   }, {
     entryFile: '/workspace/main.go',
@@ -589,32 +4251,50 @@ test('verifyLoweringPlanAgainstWorkItemsManifest accepts a normalized lowering p
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/lib'],
+        modulePath: 'example.com/app',
+        depOnly: false,
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
         llvmTarget: 'wasm32-unknown-wasi',
         cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
         optimizeFlag: '-Oz',
+        standard: false,
       },
       {
         id: 'imported-000',
         kind: 'imported',
+        importPath: 'example.com/app/lib',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        depOnly: true,
+        packageName: 'helper',
         packageDir: '/workspace/lib',
         files: ['/workspace/lib/helper.go'],
         bitcodeOutputPath: '/working/tinygo-work/imported-000.bc',
         llvmTarget: 'wasm32-unknown-wasi',
         cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
         optimizeFlag: '-Oz',
+        standard: false,
       },
       {
         id: 'stdlib-000',
         kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        modulePath: '',
+        depOnly: true,
+        packageName: 'fmt',
         packageDir: '/working/.tinygo-root/src/fmt',
         files: ['/working/.tinygo-root/src/fmt/print.go'],
         bitcodeOutputPath: '/working/tinygo-work/stdlib-000.bc',
         llvmTarget: 'wasm32-unknown-wasi',
         cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
         optimizeFlag: '-Oz',
+        standard: true,
       },
     ],
     linkJob: {
@@ -631,6 +4311,7 @@ test('verifyLoweringPlanAgainstWorkItemsManifest accepts a normalized lowering p
 
   assert.equal(verification.compileJobs.length, 3)
   assert.equal(verification.linkJob.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.compileJobs[0]?.modulePath, 'example.com/app')
 })
 
 test('verifyLoweringPlanAgainstWorkItemsManifest rejects mismatched compile jobs', () => {
@@ -648,7 +4329,7 @@ test('verifyLoweringPlanAgainstWorkItemsManifest rejects mismatched compile jobs
       artifactOutputPath: '/working/out.wasm',
     },
     workItems: [
-      { id: 'program-000', kind: 'program', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-000.bc' },
+      { id: 'program-000', kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-000.bc', standard: false },
     ],
   }, {
     entryFile: '/workspace/main.go',
@@ -657,12 +4338,17 @@ test('verifyLoweringPlanAgainstWorkItemsManifest rejects mismatched compile jobs
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/lib'],
+        depOnly: false,
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-001.bc',
         llvmTarget: 'wasm32-unknown-wasi',
         cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
         optimizeFlag: '-Oz',
+        standard: false,
       },
     ],
     linkJob: {
@@ -720,6 +4406,8 @@ test('verifyCommandBatchAgainstLoweringPlanAndLoweredSourcesManifest accepts a n
       {
         id: 'stdlib-000',
         kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
         packageDir: '/working/.tinygo-root/src/fmt',
         sourceFiles: ['/working/.tinygo-root/src/fmt/print.go'],
         loweredSourcePath: '/working/tinygo-lowered/stdlib-000.c',
@@ -754,12 +4442,18 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest acc
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        depOnly: false,
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
         llvmTarget: 'wasm32-unknown-wasi',
         cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
         optimizeFlag: '-Oz',
+        standard: false,
       },
     ],
     linkJob: {
@@ -775,9 +4469,15 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest acc
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        depOnly: false,
+        packageName: 'main',
         packageDir: '/workspace',
         sourceFiles: ['/workspace/main.go'],
         loweredSourcePath: '/working/tinygo-lowered/program-000.c',
+        standard: false,
       },
     ],
   }, {
@@ -787,12 +4487,18 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest acc
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        depOnly: false,
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
         llvmTarget: 'wasm32-unknown-wasi',
         cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
         optimizeFlag: '-Oz',
+        standard: false,
       },
     ],
     linkJob: {
@@ -805,6 +4511,7 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest acc
   assert.equal(verification.compileJobs.length, 1)
   assert.equal(verification.loweredUnits.length, 1)
   assert.equal(verification.linkJob.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.loweredUnits[0]?.modulePath, 'example.com/app')
 })
 
 test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest rejects mismatched derived lowered units', () => {
@@ -815,6 +4522,10 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest rej
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
@@ -836,9 +4547,15 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest rej
       {
         id: 'program-001',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        depOnly: false,
+        packageName: 'main',
         packageDir: '/workspace',
         sourceFiles: ['/workspace/main.go'],
         loweredSourcePath: '/working/tinygo-lowered/program-001.c',
+        standard: false,
       },
     ],
   }, {
@@ -847,12 +4564,18 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest rej
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        depOnly: false,
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
         llvmTarget: 'wasm32-unknown-wasi',
         cflags: ['-mbulk-memory'],
         optimizeFlag: '-Oz',
+        standard: false,
       },
     ],
     linkJob: {
@@ -954,6 +4677,10 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
@@ -981,6 +4708,10 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
             {
               id: 'program-000',
               kind: 'program',
+              importPath: 'command-line-arguments',
+              imports: ['fmt'],
+              modulePath: 'example.com/app',
+              packageName: 'main',
               packageDir: '/workspace',
               sourceFiles: ['/workspace/main.go'],
               loweredSourcePath: '/working/tinygo-lowered/program-000.c',
@@ -1007,6 +4738,8 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
             {
               id: 'program-000',
               kind: 'program',
+              importPath: 'command-line-arguments',
+              modulePath: 'example.com/app',
               packageDir: '/workspace',
               sourceFiles: ['/workspace/main.go'],
               loweredSourcePath: '/working/tinygo-lowered/program-000.c',
@@ -1112,6 +4845,7 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
   })
 
   assert.equal(verification.loweredIR.units[0]?.packageName, 'main')
+  assert.equal(verification.loweredIR.units[0]?.modulePath, 'example.com/app')
   assert.equal(verification.commandArtifact.artifactOutputPath, '/working/out.wasm')
   assert.equal(verification.commandBatch.compileCommands.length, 1)
   assert.equal(verification.generatedFiles[0]?.path, '/working/tinygo-lowered-sources.json')
@@ -1745,6 +5479,8 @@ test('buildLoweredBitcodeCompileCommandsFromLoweringPlanAndLoweredSourcesManifes
       {
         id: 'stdlib-000',
         kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
         packageDir: '/working/.tinygo-root/src/fmt',
         sourceFiles: ['/working/.tinygo-root/src/fmt/print.go'],
         loweredSourcePath: '/working/tinygo-lowered/stdlib-000.c',
@@ -1841,6 +5577,8 @@ test('verifyLoweredBitcodeManifestAgainstLoweringPlanAndLoweredSourcesManifest a
       {
         id: 'stdlib-000',
         kind: 'stdlib',
+        importPath: 'fmt',
+        packageName: 'fmt',
         packageDir: '/working/.tinygo-root/src/fmt',
         sourceFiles: ['/working/.tinygo-root/src/fmt/print.go'],
         loweredSourcePath: '/working/tinygo-lowered/stdlib-000.c',
@@ -1902,6 +5640,10 @@ test('verifyLoweredSourcesManifestAgainstWorkItemsManifest accepts deterministic
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        packageName: 'main',
         packageDir: '/workspace',
         files: ['/workspace/main.go'],
         bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
@@ -1909,6 +5651,10 @@ test('verifyLoweredSourcesManifestAgainstWorkItemsManifest accepts deterministic
       {
         id: 'stdlib-000',
         kind: 'stdlib',
+        importPath: 'fmt',
+        imports: [],
+        modulePath: '',
+        packageName: 'fmt',
         packageDir: '/working/.tinygo-root/src/fmt',
         files: ['/working/.tinygo-root/src/fmt/print.go'],
         bitcodeOutputPath: '/working/tinygo-work/stdlib-000.bc',
@@ -1921,6 +5667,10 @@ test('verifyLoweredSourcesManifestAgainstWorkItemsManifest accepts deterministic
       {
         id: 'program-000',
         kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        packageName: 'main',
         packageDir: '/workspace',
         sourceFiles: ['/workspace/main.go'],
         loweredSourcePath: '/working/tinygo-lowered/program-000.c',
@@ -1928,6 +5678,10 @@ test('verifyLoweredSourcesManifestAgainstWorkItemsManifest accepts deterministic
       {
         id: 'stdlib-000',
         kind: 'stdlib',
+        importPath: 'fmt',
+        imports: [],
+        modulePath: '',
+        packageName: 'fmt',
         packageDir: '/working/.tinygo-root/src/fmt',
         sourceFiles: ['/working/.tinygo-root/src/fmt/print.go'],
         loweredSourcePath: '/working/tinygo-lowered/stdlib-000.c',
@@ -1937,6 +5691,7 @@ test('verifyLoweredSourcesManifestAgainstWorkItemsManifest accepts deterministic
 
   assert.equal(verification.units.length, 2)
   assert.equal(verification.units[1]?.loweredSourcePath, '/working/tinygo-lowered/stdlib-000.c')
+  assert.equal(verification.units[0]?.modulePath, 'example.com/app')
 })
 
 test('verifyLoweredSourcesManifestAgainstWorkItemsManifest rejects mismatched lowered units', () => {
