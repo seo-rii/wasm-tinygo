@@ -11,6 +11,7 @@ import { chromium } from 'playwright'
 import { normalizeTinyGoDriverBridgeManifestForBrowser } from '../src/compile-unit.ts'
 
 const stripAnsi = (value) => value.replace(/\u001B\[[0-9;]*m/g, '')
+const mark = (label) => process.stderr.write(`[browser-smoke] ${label}\n`)
 
 test('browser smoke completes TinyGo bootstrap flow through test hooks', { timeout: 600000 }, async (t) => {
   const browserWorkspaceFiles = {
@@ -571,6 +572,7 @@ func main() {
   assert.match(invalidatedOverrideActivity ?? '', /driver tinygo-style planner validated target=wasm optimize=-Oz scheduler=asyncify panic=trap/)
 
   await page.getByRole('button', { name: 'Reset Log' }).click()
+  mark('ui execute mutation start')
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
@@ -598,8 +600,10 @@ func main() {
   assert.match(uiExecuteMutationPhases.join('\n'), /build driver plan\s+\d+ steps/)
   assert.match(uiExecuteMutationPhases.join('\n'), /build execution\s+[\d,]+ bytes/)
   assert.match(uiExecuteMutationPhases.join('\n'), /front-end verification\s+verified/)
+  mark('ui execute mutation complete')
 
   await page.getByRole('button', { name: 'Reset Log' }).click()
+  mark('repeated execute start')
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
@@ -617,8 +621,10 @@ func main() {
   assert.equal((repeatedExecuteActivity?.match(/frontend analysis input source=bridge/g) ?? []).length, 2)
   assert.equal((repeatedExecuteActivity?.match(/frontend final artifact compiled module=ok/g) ?? []).length, 2)
   assert.doesNotMatch(repeatedExecuteActivity ?? '', /build execution failed: FS error/)
+  mark('repeated execute complete')
 
   await page.getByRole('button', { name: 'Reset Log' }).click()
+  mark('concurrent execute start')
   const concurrentExecuteStatuses = await page.evaluate(async ({ workspaceFiles, manifest }) => {
     window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' })
     window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles)
@@ -641,8 +647,10 @@ func main() {
   assert.match(concurrentExecutePhases.join('\n'), /build execution\s+[\d,]+ bytes/)
   assert.match(concurrentExecutePhases.join('\n'), /front-end verification\s+verified/)
   assert.doesNotMatch(concurrentExecuteActivity ?? '', /build execution failed: FS error/)
+  mark('concurrent execute complete')
 
   await page.getByRole('button', { name: 'Reset Log' }).click()
+  mark('delayed invalidation start')
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
