@@ -31,7 +31,7 @@ It reads `/workspace/tinygo-request.json`, validates the request, loads package 
 
 The planner owns the first browser-facing contract: which files must be materialized, which target profile applies, and which entry/source set the next stage must consume.
 
-That contract now includes explicit `compileUnits`, so the front-end no longer has to reconstruct package grouping from a flat compile-file list.
+That contract now includes explicit `compileUnits`, a normalized `packageGraph`, and a `buildContext`, so the front-end no longer has to reconstruct package grouping or target facts from a flat compile-file list plus implicit profile state.
 
 ### 4. Front-end stage
 
@@ -46,7 +46,7 @@ That contract now includes explicit `compileUnits`, so the front-end no longer h
 
 This stage keeps bootstrap compilation and the next lowering steps explicit and deterministic, even before a real TinyGo compiler front-end is wired in.
 
-At this point the front-end still synthesizes the next manifests, but it consumes planner-owned package grouping directly instead of rediscovering it from file paths alone.
+At this point the front-end still synthesizes the next manifests, but it consumes planner-owned package grouping and target facts directly instead of rediscovering them from file paths and implicit profile defaults alone.
 
 ### 5. Backend stage
 
