@@ -12,9 +12,13 @@ test('materializeGeneratedFile creates missing parent directories before writing
   const existingDirectories = new Set(['/working'])
 
   await materializeGeneratedFile({
+    exists: async () => false,
     mkdir: async (path) => {
       calls.push(`mkdir ${path}`)
       existingDirectories.add(path)
+    },
+    unlink: async (path) => {
+      calls.push(`unlink ${path}`)
     },
     writeFile: async (path, contents) => {
       calls.push(`write ${path} ${contents}`)
@@ -37,8 +41,12 @@ test('materializeGeneratedFiles does not recreate the same parent directories tw
   const calls: string[] = []
 
   await materializeGeneratedFiles({
+    exists: async () => false,
     mkdir: async (path) => {
       calls.push(`mkdir ${path}`)
+    },
+    unlink: async (path) => {
+      calls.push(`unlink ${path}`)
     },
     writeFile: async (path) => {
       calls.push(`write ${path}`)
@@ -68,8 +76,12 @@ test('materializeBootstrapDispatchFiles follows bootstrapDispatch materialized o
   const calls: string[] = []
 
   await materializeBootstrapDispatchFiles({
+    exists: async () => false,
     mkdir: async (path) => {
       calls.push(`mkdir ${path}`)
+    },
+    unlink: async (path) => {
+      calls.push(`unlink ${path}`)
     },
     writeFile: async (path) => {
       calls.push(`write ${path}`)
@@ -101,7 +113,9 @@ test('materializeBootstrapDispatchFiles follows bootstrapDispatch materialized o
 test('materializeBootstrapDispatchFiles rejects missing generated files referenced by dispatch', async () => {
   await assert.rejects(
     () => materializeBootstrapDispatchFiles({
+      exists: async () => false,
       mkdir: async () => {},
+      unlink: async () => {},
       writeFile: async () => {},
     }, [], '{"bootstrapDispatch":{"materializedFiles":["/working/tinygo-bootstrap.c"]}}'),
     /dispatch requested missing generated file: \/working\/tinygo-bootstrap.c/,
@@ -111,7 +125,9 @@ test('materializeBootstrapDispatchFiles rejects missing generated files referenc
 test('materializeBootstrapDispatchFiles rejects generated files outside bootstrapDispatch', async () => {
   await assert.rejects(
     () => materializeBootstrapDispatchFiles({
+      exists: async () => false,
       mkdir: async () => {},
+      unlink: async () => {},
       writeFile: async () => {},
     }, [
       {
@@ -125,4 +141,33 @@ test('materializeBootstrapDispatchFiles rejects generated files outside bootstra
     ], '{"bootstrapDispatch":{"materializedFiles":["/working/tinygo-bootstrap.json"]}}'),
     /generated file missing from bootstrapDispatch.materializedFiles: \/working\/tinygo-bootstrap.c/,
   )
+})
+
+test('materializeGeneratedFile retries after unlinking a stale path when emception writeFile returns FS error', async () => {
+  const calls: string[] = []
+  let writeAttempts = 0
+
+  await materializeGeneratedFile({
+    exists: async () => false,
+    mkdir: async () => {},
+    unlink: async (path) => {
+      calls.push(`unlink ${path}`)
+    },
+    writeFile: async (path) => {
+      writeAttempts += 1
+      calls.push(`write ${path} #${writeAttempts}`)
+      if (writeAttempts === 1) {
+        throw new Error('FS error')
+      }
+    },
+  }, {
+    path: '/working/tinygo-bootstrap.json',
+    contents: '{}',
+  })
+
+  assert.deepEqual(calls, [
+    'write /working/tinygo-bootstrap.json #1',
+    'unlink /working/tinygo-bootstrap.json',
+    'write /working/tinygo-bootstrap.json #2',
+  ])
 })
