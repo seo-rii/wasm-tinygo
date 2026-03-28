@@ -3,6 +3,7 @@ package tinygoplanner
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -22,10 +23,23 @@ type Request struct {
 	ModulePath           string
 	PackageFiles         []string
 	ImportedPackageFiles []string
+	CompileUnits         []CompileUnit
 	Imports              []string
 	StdlibImports        []string
 	BuildTags            []string
 	Profile              tinygotarget.Profile
+}
+
+type CompileUnit struct {
+	Kind        string
+	ImportPath  string
+	Imports     []string
+	ModulePath  string
+	DepOnly     bool
+	PackageName string
+	PackageDir  string
+	Files       []string
+	Standard    bool
 }
 
 type GeneratedFile struct {
@@ -138,12 +152,12 @@ func PlanBuild(request Request) (Result, error) {
 				pendingStdlibPackages = append(pendingStdlibPackages, dependency)
 			}
 		}
-		stdlibPackageFiles := make([]string, 0, len(stdlibPackageFileSet))
+		stdlibCompileFiles := make([]string, 0, len(stdlibPackageFileSet))
 		for path := range stdlibPackageFileSet {
-			stdlibPackageFiles = append(stdlibPackageFiles, path)
+			stdlibCompileFiles = append(stdlibCompileFiles, path)
 			wantedTinyGoRootPaths[strings.TrimPrefix(path, tinygoroot.RootDir)] = struct{}{}
 		}
-		sort.Strings(stdlibPackageFiles)
+		sort.Strings(stdlibCompileFiles)
 		for _, file := range tinygoroot.Files() {
 			relativePath := strings.TrimPrefix(file.Path, tinygoroot.RootDir)
 			if _, ok := wantedTinyGoRootPaths[relativePath]; !ok {
@@ -183,7 +197,7 @@ func PlanBuild(request Request) (Result, error) {
 		for _, path := range importedPackageFiles {
 			allCompileFileSet[path] = struct{}{}
 		}
-		for _, path := range stdlibPackageFiles {
+		for _, path := range stdlibCompileFiles {
 			allCompileFileSet[path] = struct{}{}
 		}
 		allCompileFiles := make([]string, 0, len(allCompileFileSet))
@@ -195,15 +209,47 @@ func PlanBuild(request Request) (Result, error) {
 		sort.Strings(targetAssetFiles)
 		sort.Strings(runtimeSupportFiles)
 		sort.Strings(allCompileFiles)
+		buildTags := append([]string{}, request.BuildTags...)
+		sort.Strings(buildTags)
 		frontendInput := struct {
+			BuildTags    []string `json:"buildTags"`
+			BuildContext struct {
+				Target     string   `json:"target"`
+				LLVMTarget string   `json:"llvmTarget"`
+				GOOS       string   `json:"goos"`
+				GOARCH     string   `json:"goarch"`
+				GC         string   `json:"gc"`
+				Scheduler  string   `json:"scheduler"`
+				BuildTags  []string `json:"buildTags"`
+				ModulePath string   `json:"modulePath"`
+			} `json:"buildContext"`
+			ModulePath   string `json:"modulePath"`
+			PackageGraph []struct {
+				DepOnly bool   `json:"depOnly"`
+				Dir     string `json:"dir"`
+				Files   struct {
+					GoFiles []string `json:"goFiles"`
+				} `json:"files"`
+				ImportPath string   `json:"importPath"`
+				Imports    []string `json:"imports"`
+				ModulePath string   `json:"modulePath"`
+				Name       string   `json:"name"`
+				Standard   bool     `json:"standard"`
+			} `json:"packageGraph"`
 			OptimizeFlag string `json:"optimizeFlag"`
 			EntryFile    string `json:"entryFile"`
 			CompileUnits []struct {
-				Kind       string   `json:"kind"`
-				PackageDir string   `json:"packageDir"`
-				Files      []string `json:"files"`
+				Kind        string   `json:"kind"`
+				ImportPath  string   `json:"importPath"`
+				Imports     []string `json:"imports,omitempty"`
+				ModulePath  string   `json:"modulePath"`
+				DepOnly     bool     `json:"depOnly"`
+				PackageName string   `json:"packageName"`
+				PackageDir  string   `json:"packageDir"`
+				Files       []string `json:"files"`
+				Standard    bool     `json:"standard"`
 			} `json:"compileUnits"`
-			Toolchain    struct {
+			Toolchain struct {
 				Target              string   `json:"target"`
 				LLVMTarget          string   `json:"llvmTarget,omitempty"`
 				Linker              string   `json:"linker,omitempty"`
@@ -221,12 +267,32 @@ func PlanBuild(request Request) (Result, error) {
 				AllCompile     []string `json:"allCompile"`
 			} `json:"sourceSelection"`
 		}{
+			BuildTags:  buildTags,
+			ModulePath: request.ModulePath,
+			PackageGraph: []struct {
+				DepOnly bool   `json:"depOnly"`
+				Dir     string `json:"dir"`
+				Files   struct {
+					GoFiles []string `json:"goFiles"`
+				} `json:"files"`
+				ImportPath string   `json:"importPath"`
+				Imports    []string `json:"imports"`
+				ModulePath string   `json:"modulePath"`
+				Name       string   `json:"name"`
+				Standard   bool     `json:"standard"`
+			}{},
 			OptimizeFlag: request.OptimizeFlag,
 			EntryFile:    request.EntryPath,
 			CompileUnits: []struct {
-				Kind       string   `json:"kind"`
-				PackageDir string   `json:"packageDir"`
-				Files      []string `json:"files"`
+				Kind        string   `json:"kind"`
+				ImportPath  string   `json:"importPath"`
+				Imports     []string `json:"imports,omitempty"`
+				ModulePath  string   `json:"modulePath"`
+				DepOnly     bool     `json:"depOnly"`
+				PackageName string   `json:"packageName"`
+				PackageDir  string   `json:"packageDir"`
+				Files       []string `json:"files"`
+				Standard    bool     `json:"standard"`
 			}{},
 			Toolchain: struct {
 				Target              string   `json:"target"`
@@ -251,45 +317,146 @@ func PlanBuild(request Request) (Result, error) {
 				AllCompile: allCompileFiles,
 			},
 		}
-		if len(packageFiles) != 0 {
-			frontendInput.CompileUnits = append(frontendInput.CompileUnits, struct {
-				Kind       string   `json:"kind"`
-				PackageDir string   `json:"packageDir"`
-				Files      []string `json:"files"`
-			}{
-				Kind:       "program",
-				PackageDir: filepath.Dir(request.EntryPath),
-				Files:      append([]string{}, packageFiles...),
-			})
-		}
-		for _, group := range []struct {
-			kind  string
-			files []string
-		}{
-			{kind: "imported", files: importedPackageFiles},
-			{kind: "stdlib", files: stdlibPackageFiles},
-		} {
-			groupedFiles := map[string][]string{}
-			for _, path := range group.files {
-				packageDir := filepath.Dir(path)
-				groupedFiles[packageDir] = append(groupedFiles[packageDir], path)
-			}
-			packageDirs := make([]string, 0, len(groupedFiles))
-			for packageDir := range groupedFiles {
-				packageDirs = append(packageDirs, packageDir)
-			}
-			sort.Strings(packageDirs)
-			for _, packageDir := range packageDirs {
+		frontendInput.BuildContext.Target = request.Target
+		frontendInput.BuildContext.LLVMTarget = request.Profile.LLVMTarget
+		frontendInput.BuildContext.GOOS = request.Profile.GOOS
+		frontendInput.BuildContext.GOARCH = request.Profile.GOARCH
+		frontendInput.BuildContext.GC = request.Profile.GC
+		frontendInput.BuildContext.Scheduler = request.Scheduler
+		frontendInput.BuildContext.BuildTags = append([]string{}, buildTags...)
+		frontendInput.BuildContext.ModulePath = request.ModulePath
+		if len(request.CompileUnits) != 0 {
+			for _, compileUnit := range request.CompileUnits {
+				unitFiles := append([]string{}, compileUnit.Files...)
+				sort.Strings(unitFiles)
+				unitImports := append([]string{}, compileUnit.Imports...)
+				sort.Strings(unitImports)
 				frontendInput.CompileUnits = append(frontendInput.CompileUnits, struct {
-					Kind       string   `json:"kind"`
-					PackageDir string   `json:"packageDir"`
-					Files      []string `json:"files"`
+					Kind        string   `json:"kind"`
+					ImportPath  string   `json:"importPath"`
+					Imports     []string `json:"imports,omitempty"`
+					ModulePath  string   `json:"modulePath"`
+					DepOnly     bool     `json:"depOnly"`
+					PackageName string   `json:"packageName"`
+					PackageDir  string   `json:"packageDir"`
+					Files       []string `json:"files"`
+					Standard    bool     `json:"standard"`
 				}{
-					Kind:       group.kind,
-					PackageDir: packageDir,
-					Files:      append([]string{}, groupedFiles[packageDir]...),
+					Kind:        compileUnit.Kind,
+					ImportPath:  compileUnit.ImportPath,
+					Imports:     unitImports,
+					ModulePath:  compileUnit.ModulePath,
+					DepOnly:     compileUnit.DepOnly,
+					PackageName: compileUnit.PackageName,
+					PackageDir:  compileUnit.PackageDir,
+					Files:       unitFiles,
+					Standard:    compileUnit.Standard,
 				})
 			}
+		} else if len(importedPackageFiles) != 0 {
+			return Result{}, fmt.Errorf("compile units are required when imported package files are present")
+		} else if len(packageFiles) != 0 {
+			programImports := append([]string{}, request.Imports...)
+			sort.Strings(programImports)
+			frontendInput.CompileUnits = append(frontendInput.CompileUnits, struct {
+				Kind        string   `json:"kind"`
+				ImportPath  string   `json:"importPath"`
+				Imports     []string `json:"imports,omitempty"`
+				ModulePath  string   `json:"modulePath"`
+				DepOnly     bool     `json:"depOnly"`
+				PackageName string   `json:"packageName"`
+				PackageDir  string   `json:"packageDir"`
+				Files       []string `json:"files"`
+				Standard    bool     `json:"standard"`
+			}{
+				Kind:        "program",
+				ImportPath:  "command-line-arguments",
+				Imports:     programImports,
+				ModulePath:  request.ModulePath,
+				DepOnly:     false,
+				PackageName: "main",
+				PackageDir:  filepath.Dir(request.EntryPath),
+				Files:       append([]string{}, packageFiles...),
+				Standard:    false,
+			})
+		}
+		resolvedStdlibImports := make([]string, 0, len(seenStdlibPackages))
+		for packagePath := range seenStdlibPackages {
+			resolvedStdlibImports = append(resolvedStdlibImports, packagePath)
+		}
+		sort.Strings(resolvedStdlibImports)
+		for _, packagePath := range resolvedStdlibImports {
+			unitFiles := append([]string{}, stdlibPackageFiles[packagePath]...)
+			sort.Strings(unitFiles)
+			if len(unitFiles) == 0 {
+				continue
+			}
+			frontendInput.CompileUnits = append(frontendInput.CompileUnits, struct {
+				Kind        string   `json:"kind"`
+				ImportPath  string   `json:"importPath"`
+				Imports     []string `json:"imports,omitempty"`
+				ModulePath  string   `json:"modulePath"`
+				DepOnly     bool     `json:"depOnly"`
+				PackageName string   `json:"packageName"`
+				PackageDir  string   `json:"packageDir"`
+				Files       []string `json:"files"`
+				Standard    bool     `json:"standard"`
+			}{
+				Kind:        "stdlib",
+				ImportPath:  packagePath,
+				ModulePath:  "",
+				DepOnly:     true,
+				PackageName: path.Base(packagePath),
+				PackageDir:  filepath.Dir(unitFiles[0]),
+				Files:       unitFiles,
+				Standard:    true,
+			})
+		}
+		compileUnitModulePaths := map[string]string{}
+		for _, compileUnit := range request.CompileUnits {
+			compileUnitModulePaths[compileUnit.ImportPath] = compileUnit.ModulePath
+		}
+		for _, compileUnit := range frontendInput.CompileUnits {
+			goFiles := make([]string, 0, len(compileUnit.Files))
+			for _, file := range compileUnit.Files {
+				if compileUnit.PackageDir != "" && strings.HasPrefix(file, compileUnit.PackageDir+"/") {
+					goFiles = append(goFiles, strings.TrimPrefix(file, compileUnit.PackageDir+"/"))
+					continue
+				}
+				goFiles = append(goFiles, filepath.Base(file))
+			}
+			sort.Strings(goFiles)
+			frontendInput.PackageGraph = append(frontendInput.PackageGraph, struct {
+				DepOnly bool   `json:"depOnly"`
+				Dir     string `json:"dir"`
+				Files   struct {
+					GoFiles []string `json:"goFiles"`
+				} `json:"files"`
+				ImportPath string   `json:"importPath"`
+				Imports    []string `json:"imports"`
+				ModulePath string   `json:"modulePath"`
+				Name       string   `json:"name"`
+				Standard   bool     `json:"standard"`
+			}{
+				DepOnly: compileUnit.DepOnly,
+				Dir:     compileUnit.PackageDir,
+				Files: struct {
+					GoFiles []string `json:"goFiles"`
+				}{GoFiles: goFiles},
+				ImportPath: compileUnit.ImportPath,
+				Imports:    append([]string{}, compileUnit.Imports...),
+				ModulePath: func() string {
+					if compileUnit.Standard {
+						return ""
+					}
+					if modulePath, ok := compileUnitModulePaths[compileUnit.ImportPath]; ok {
+						return modulePath
+					}
+					return request.ModulePath
+				}(),
+				Name:     compileUnit.PackageName,
+				Standard: compileUnit.Standard,
+			})
 		}
 		frontendInputSource, err := json.Marshal(frontendInput)
 		if err != nil {
@@ -341,7 +508,7 @@ func PlanBuild(request Request) (Result, error) {
 				EntryFile:            request.EntryPath,
 				PackageFiles:         packageFiles,
 				ImportedPackageFiles: importedPackageFiles,
-				StdlibPackageFiles:   stdlibPackageFiles,
+				StdlibPackageFiles:   stdlibCompileFiles,
 			},
 			BootstrapDispatch: struct {
 				TargetAssetFiles    []string `json:"targetAssetFiles"`

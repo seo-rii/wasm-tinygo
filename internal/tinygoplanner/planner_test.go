@@ -218,17 +218,46 @@ func TestPlanBuildReturnsTinyGoBootstrapPlan(t *testing.T) {
 	}
 
 	var frontendInput struct {
+		BuildTags    []string `json:"buildTags"`
+		BuildContext struct {
+			Target     string   `json:"target"`
+			LLVMTarget string   `json:"llvmTarget"`
+			GOOS       string   `json:"goos"`
+			GOARCH     string   `json:"goarch"`
+			GC         string   `json:"gc"`
+			Scheduler  string   `json:"scheduler"`
+			BuildTags  []string `json:"buildTags"`
+			ModulePath string   `json:"modulePath"`
+		} `json:"buildContext"`
+		ModulePath   string `json:"modulePath"`
+		PackageGraph []struct {
+			DepOnly bool   `json:"depOnly"`
+			Dir     string `json:"dir"`
+			Files   struct {
+				GoFiles []string `json:"goFiles"`
+			} `json:"files"`
+			ImportPath string   `json:"importPath"`
+			Imports    []string `json:"imports"`
+			Name       string   `json:"name"`
+			Standard   bool     `json:"standard"`
+		} `json:"packageGraph"`
 		Scheduler         string   `json:"scheduler"`
 		PanicStrategy     string   `json:"panicStrategy"`
 		OptimizeFlag      string   `json:"optimizeFlag"`
 		EntryFile         string   `json:"entryFile"`
 		MaterializedFiles []string `json:"materializedFiles"`
 		CompileUnits      []struct {
-			Kind       string   `json:"kind"`
-			PackageDir string   `json:"packageDir"`
-			Files      []string `json:"files"`
+			DepOnly     bool     `json:"depOnly"`
+			Kind        string   `json:"kind"`
+			ImportPath  string   `json:"importPath"`
+			Imports     []string `json:"imports"`
+			ModulePath  string   `json:"modulePath"`
+			PackageName string   `json:"packageName"`
+			PackageDir  string   `json:"packageDir"`
+			Files       []string `json:"files"`
+			Standard    bool     `json:"standard"`
 		} `json:"compileUnits"`
-		Toolchain         struct {
+		Toolchain struct {
 			Target              string   `json:"target"`
 			LLVMTarget          string   `json:"llvmTarget"`
 			Linker              string   `json:"linker"`
@@ -254,6 +283,16 @@ func TestPlanBuildReturnsTinyGoBootstrapPlan(t *testing.T) {
 		frontendInput.PanicStrategy != "" ||
 		frontendInput.OptimizeFlag != "-O2" ||
 		frontendInput.EntryFile != "/workspace/cmd/app/main.go" ||
+		frontendInput.BuildContext.Target != "wasm" ||
+		frontendInput.BuildContext.LLVMTarget != "wasm32-unknown-wasi" ||
+		frontendInput.BuildContext.GOOS != "js" ||
+		frontendInput.BuildContext.GOARCH != "wasm" ||
+		frontendInput.BuildContext.GC != "precise" ||
+		frontendInput.BuildContext.Scheduler != "tasks" ||
+		frontendInput.BuildContext.ModulePath != "example.com/app" ||
+		!slices.Equal(frontendInput.BuildContext.BuildTags, []string{"scheduler.tasks", "tinygo.wasm"}) ||
+		frontendInput.ModulePath != "example.com/app" ||
+		!slices.Equal(frontendInput.BuildTags, []string{"scheduler.tasks", "tinygo.wasm"}) ||
 		frontendInput.Toolchain.ArtifactOutputPath != "/working/out.wasm" ||
 		frontendInput.Toolchain.LLVMTarget != "" ||
 		frontendInput.Toolchain.Linker != "" ||
@@ -261,16 +300,52 @@ func TestPlanBuildReturnsTinyGoBootstrapPlan(t *testing.T) {
 		frontendInput.Toolchain.CFlags != nil ||
 		frontendInput.Toolchain.LDFlags != nil ||
 		!reflect.DeepEqual(frontendInput.CompileUnits, []struct {
-			Kind       string   `json:"kind"`
-			PackageDir string   `json:"packageDir"`
-			Files      []string `json:"files"`
+			DepOnly     bool     `json:"depOnly"`
+			Kind        string   `json:"kind"`
+			ImportPath  string   `json:"importPath"`
+			Imports     []string `json:"imports"`
+			ModulePath  string   `json:"modulePath"`
+			PackageName string   `json:"packageName"`
+			PackageDir  string   `json:"packageDir"`
+			Files       []string `json:"files"`
+			Standard    bool     `json:"standard"`
 		}{
-			{Kind: "program", PackageDir: "/workspace/cmd/app", Files: []string{"/workspace/cmd/app/helper.go", "/workspace/cmd/app/main.go"}},
-			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/errors", Files: []string{"/working/.tinygo-root/src/errors/errors.go"}},
-			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
-			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/io", Files: []string{"/working/.tinygo-root/src/io/io.go"}},
-			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/runtime", Files: []string{"/working/.tinygo-root/src/runtime/runtime.go"}},
-			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/unsafe", Files: []string{"/working/.tinygo-root/src/unsafe/unsafe.go"}},
+			{DepOnly: false, Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/internal/helper", "fmt"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace/cmd/app", Files: []string{"/workspace/cmd/app/helper.go", "/workspace/cmd/app/main.go"}, Standard: false},
+			{DepOnly: true, Kind: "stdlib", ImportPath: "errors", Imports: nil, ModulePath: "", PackageName: "errors", PackageDir: "/working/.tinygo-root/src/errors", Files: []string{"/working/.tinygo-root/src/errors/errors.go"}, Standard: true},
+			{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: nil, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+			{DepOnly: true, Kind: "stdlib", ImportPath: "io", Imports: nil, ModulePath: "", PackageName: "io", PackageDir: "/working/.tinygo-root/src/io", Files: []string{"/working/.tinygo-root/src/io/io.go"}, Standard: true},
+			{DepOnly: true, Kind: "stdlib", ImportPath: "runtime", Imports: nil, ModulePath: "", PackageName: "runtime", PackageDir: "/working/.tinygo-root/src/runtime", Files: []string{"/working/.tinygo-root/src/runtime/runtime.go"}, Standard: true},
+			{DepOnly: true, Kind: "stdlib", ImportPath: "unsafe", Imports: nil, ModulePath: "", PackageName: "unsafe", PackageDir: "/working/.tinygo-root/src/unsafe", Files: []string{"/working/.tinygo-root/src/unsafe/unsafe.go"}, Standard: true},
+		}) ||
+		!reflect.DeepEqual(frontendInput.PackageGraph, []struct {
+			DepOnly bool   `json:"depOnly"`
+			Dir     string `json:"dir"`
+			Files   struct {
+				GoFiles []string `json:"goFiles"`
+			} `json:"files"`
+			ImportPath string   `json:"importPath"`
+			Imports    []string `json:"imports"`
+			Name       string   `json:"name"`
+			Standard   bool     `json:"standard"`
+		}{
+			{DepOnly: false, Dir: "/workspace/cmd/app", Files: struct {
+				GoFiles []string `json:"goFiles"`
+			}{GoFiles: []string{"helper.go", "main.go"}}, ImportPath: "command-line-arguments", Imports: []string{"example.com/app/internal/helper", "fmt"}, Name: "main", Standard: false},
+			{DepOnly: true, Dir: "/working/.tinygo-root/src/errors", Files: struct {
+				GoFiles []string `json:"goFiles"`
+			}{GoFiles: []string{"errors.go"}}, ImportPath: "errors", Imports: []string{}, Name: "errors", Standard: true},
+			{DepOnly: true, Dir: "/working/.tinygo-root/src/fmt", Files: struct {
+				GoFiles []string `json:"goFiles"`
+			}{GoFiles: []string{"print.go"}}, ImportPath: "fmt", Imports: []string{}, Name: "fmt", Standard: true},
+			{DepOnly: true, Dir: "/working/.tinygo-root/src/io", Files: struct {
+				GoFiles []string `json:"goFiles"`
+			}{GoFiles: []string{"io.go"}}, ImportPath: "io", Imports: []string{}, Name: "io", Standard: true},
+			{DepOnly: true, Dir: "/working/.tinygo-root/src/runtime", Files: struct {
+				GoFiles []string `json:"goFiles"`
+			}{GoFiles: []string{"runtime.go"}}, ImportPath: "runtime", Imports: []string{}, Name: "runtime", Standard: true},
+			{DepOnly: true, Dir: "/working/.tinygo-root/src/unsafe", Files: struct {
+				GoFiles []string `json:"goFiles"`
+			}{GoFiles: []string{"unsafe.go"}}, ImportPath: "unsafe", Imports: []string{}, Name: "unsafe", Standard: true},
 		}) ||
 		frontendInput.SourceSelection.Program != nil ||
 		frontendInput.SourceSelection.Imported != nil ||
@@ -289,11 +364,27 @@ func TestPlanBuildReturnsTinyGoBootstrapPlan(t *testing.T) {
 	if err := json.Unmarshal([]byte(frontendInputSource), &frontendInputMap); err != nil {
 		t.Fatalf("json.Unmarshal(frontendInputMap): %v", err)
 	}
-	if _, ok := frontendInputMap["modulePath"]; ok {
-		t.Fatalf("expected frontend input to omit modulePath, got %#v", frontendInputMap)
+	if frontendInputMap["modulePath"] != "example.com/app" {
+		t.Fatalf("expected frontend input to include modulePath, got %#v", frontendInputMap)
+	}
+	if !reflect.DeepEqual(frontendInputMap["buildTags"], []any{"scheduler.tasks", "tinygo.wasm"}) {
+		t.Fatalf("expected frontend input to include buildTags, got %#v", frontendInputMap)
+	}
+	if buildContext, ok := frontendInputMap["buildContext"].(map[string]any); !ok {
+		t.Fatalf("expected frontend input to include buildContext, got %#v", frontendInputMap)
+	} else {
+		if buildContext["target"] != "wasm" || buildContext["llvmTarget"] != "wasm32-unknown-wasi" ||
+			buildContext["goos"] != "js" || buildContext["goarch"] != "wasm" ||
+			buildContext["gc"] != "precise" || buildContext["scheduler"] != "tasks" ||
+			buildContext["modulePath"] != "example.com/app" {
+			t.Fatalf("unexpected buildContext: %#v", frontendInputMap)
+		}
 	}
 	if _, ok := frontendInputMap["tinygoRoot"]; ok {
 		t.Fatalf("expected frontend input to omit tinygoRoot, got %#v", frontendInputMap)
+	}
+	if packageGraph, ok := frontendInputMap["packageGraph"].([]any); !ok || len(packageGraph) != 6 {
+		t.Fatalf("expected frontend input to include packageGraph, got %#v", frontendInputMap)
 	}
 	compileUnitsAny, ok := frontendInputMap["compileUnits"].([]any)
 	if !ok {
@@ -380,9 +471,34 @@ func TestPlanBuildOmitsImportedSelectionFromFrontendInput(t *testing.T) {
 		Output:               "/working/out.wasm",
 		OptimizeFlag:         "-Oz",
 		EntryPath:            "/workspace/cmd/app/main.go",
+		ModulePath:           "example.com/app",
 		PackageFiles:         []string{"/workspace/cmd/app/main.go"},
 		ImportedPackageFiles: []string{"/workspace/internal/helper/helper.go"},
-		Profile:              profile,
+		CompileUnits: []CompileUnit{
+			{
+				Kind:        "program",
+				ImportPath:  "command-line-arguments",
+				Imports:     []string{"example.com/app/internal/helper"},
+				ModulePath:  "example.com/app",
+				DepOnly:     false,
+				PackageName: "main",
+				PackageDir:  "/workspace/cmd/app",
+				Files:       []string{"/workspace/cmd/app/main.go"},
+				Standard:    false,
+			},
+			{
+				Kind:        "imported",
+				ImportPath:  "example.com/app/internal/helper",
+				Imports:     nil,
+				ModulePath:  "example.com/app",
+				DepOnly:     true,
+				PackageName: "helper",
+				PackageDir:  "/workspace/internal/helper",
+				Files:       []string{"/workspace/internal/helper/helper.go"},
+				Standard:    false,
+			},
+		},
+		Profile: profile,
 	})
 	if err != nil {
 		t.Fatalf("PlanBuild returned error: %v", err)
@@ -434,5 +550,26 @@ func TestPlanBuildOmitsImportedSelectionFromFrontendInput(t *testing.T) {
 		"/workspace/internal/helper/helper.go",
 	}) {
 		t.Fatalf("unexpected allCompile in %#v", frontendInputMap)
+	}
+}
+
+func TestPlanBuildRequiresCompileUnitsWhenImportedPackagesArePresent(t *testing.T) {
+	profile, err := tinygotarget.Resolve("wasm")
+	if err != nil {
+		t.Fatalf("tinygotarget.Resolve: %v", err)
+	}
+
+	_, err = PlanBuild(Request{
+		Planner:              "tinygo",
+		Target:               "wasm",
+		Output:               "/working/out.wasm",
+		OptimizeFlag:         "-Oz",
+		EntryPath:            "/workspace/cmd/app/main.go",
+		PackageFiles:         []string{"/workspace/cmd/app/main.go"},
+		ImportedPackageFiles: []string{"/workspace/internal/helper/helper.go"},
+		Profile:              profile,
+	})
+	if err == nil || !strings.Contains(err.Error(), "compile units are required when imported package files are present") {
+		t.Fatalf("expected compile-unit requirement error, got %v", err)
 	}
 }
