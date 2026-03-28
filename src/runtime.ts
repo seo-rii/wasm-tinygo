@@ -1,0 +1,1354 @@
+import { ConsoleStdout, Directory, File, OpenFile, PreopenDirectory, WASI, WASIProcExit } from '@bjorn3/browser_wasi_shim'
+import * as Comlink from 'comlink'
+import {
+  readTinyGoBootstrapManifest,
+  verifyTinyGoBootstrapArtifactExpectation,
+} from './bootstrap-exports'
+import {
+  materializeGeneratedFiles,
+  selectBootstrapDispatchFiles,
+  type EmceptionWritableFileSystem,
+  type GeneratedFile,
+} from './emception-files'
+import {
+  verifyTinyGoLoweredArtifactExports,
+  verifyTinyGoLoweredBitcodeFiles,
+  verifyTinyGoFinalArtifactFile,
+  verifyTinyGoLoweredObjectFiles,
+} from './lowered-exports'
+import {
+  verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest,
+  verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest,
+  verifyCompileUnitManifestAgainstDriverBridgeManifest,
+  verifyFrontendAnalysisAgainstDriverBridgeManifest,
+  verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest,
+  verifyFrontendAnalysisAgainstRealDriverBridgeManifest,
+  verifyFrontendRealAdapterAgainstFrontendAnalysis,
+  verifyFrontendInputManifestAgainstDriverBridgeManifest,
+  verifyLoweredBitcodeManifestAgainstLoweringPlanAndLoweredSourcesManifest,
+  verifyLoweredSourcesManifestAgainstWorkItemsManifest,
+  verifyLoweringManifestAgainstIntermediateManifest,
+  verifyLoweringPlanAgainstWorkItemsManifest,
+  verifyIntermediateManifestAgainstCompileUnitManifest,
+  verifyCompileUnitManifestAgainstCompileRequest,
+  verifyWorkItemsManifestAgainstLoweringManifest,
+  type TinyGoBackendInputManifest,
+  type TinyGoBackendResultManifest,
+  type TinyGoCompileUnitManifest,
+  type TinyGoDriverBridgeManifest,
+  type TinyGoFrontendAnalysisManifest,
+  type TinyGoFrontendInputManifest,
+  type TinyGoIntermediateManifest,
+  type TinyGoLoweredBitcodeManifest,
+  type TinyGoLoweringManifest,
+  type TinyGoLoweredSourcesManifest,
+  type TinyGoLoweringPlanManifest,
+  type TinyGoWorkItemsManifest,
+} from './compile-unit'
+
+export type EmceptionRunResult = {
+  returncode: number
+  stdout: string
+  stderr: string
+}
+
+export type TinyGoBuildRequest = {
+  command: 'build'
+  planner?: 'bootstrap' | 'tinygo'
+  entry: string
+  output: string
+  target: 'wasm'
+  optimize?: string
+  scheduler?: 'none' | 'tasks' | 'asyncify'
+  panic?: 'print' | 'trap'
+}
+
+export type TinyGoBuildRequestOverrides = Partial<Pick<TinyGoBuildRequest, 'optimize' | 'panic' | 'scheduler' | 'target'>>
+
+export type TinyGoBuildPlanInputs = {
+  buildRequestOverrides: TinyGoBuildRequestOverrides | null
+  workspaceFiles: Record<string, string> | null
+}
+
+type TinyGoRuntimeAction = 'booting' | 'planning' | 'executing'
+
+export type ToolInvocation = {
+  argv: string[]
+  cwd: string
+}
+
+export type TinyGoBuildResult = {
+  ok: boolean
+  mode?: string
+  artifact?: string
+  plan: ToolInvocation[]
+  files: GeneratedFile[]
+  diagnostics: string[]
+}
+
+type TinyGoFrontEndResult = {
+  ok: boolean
+  generatedFiles?: GeneratedFile[]
+  diagnostics: string[]
+}
+
+type TinyGoFrontEndAnalysisResult = {
+  ok: boolean
+  analysis?: TinyGoFrontendAnalysisManifest
+  diagnostics: string[]
+}
+
+type TinyGoFrontEndAdapterResult = {
+  ok: boolean
+  adapter?: TinyGoFrontendAnalysisManifest
+  diagnostics: string[]
+}
+
+type EmceptionFileSystemBridge = {
+  exists(path: string): Promise<boolean>
+  readFile(path: string, options?: { encoding?: string }): Promise<string | Uint8Array>
+  unlink(path: string): Promise<void>
+  writeFile(path: string, contents: string): Promise<void>
+}
+
+type EmceptionBridge = {
+  init(): Promise<void>
+  mkdir(path: string): Promise<void>
+  run(command: string): Promise<EmceptionRunResult>
+  _run_process_impl(argv: string[], options?: { cwd?: string }): Promise<EmceptionRunResult>
+  fileSystem: EmceptionFileSystemBridge
+  onstdout: unknown
+  onstderr: unknown
+  onprocessstart: unknown
+}
+
+export type PhaseTone = 'idle' | 'running' | 'success' | 'error'
+export type TinyGoRuntimePhase = 'toolchain' | 'smoke' | 'probe' | 'verify'
+
+export type TinyGoTestHooks = {
+  boot(): Promise<void>
+  plan(): Promise<TinyGoBuildResult>
+  execute(): Promise<void>
+  reset(): void
+  readActivityLog(): string
+  readBuildArtifact(): { path: string; bytes: Uint8Array } | null
+  readFrontendAnalysisInputManifest(): TinyGoFrontendInputManifest | null
+  setBuildRequestOverrides(overrides: TinyGoBuildRequestOverrides | null): void
+  setDriverBridgeManifest(manifest: TinyGoDriverBridgeManifest | null): void
+  setWorkspaceFiles(files: Record<string, string> | null): void
+}
+
+export type TinyGoRuntime = TinyGoTestHooks & {
+  dispose(): void
+}
+
+type TinyGoRuntimeLogEntry = {
+  line: string
+  message: string
+  tone: Exclude<PhaseTone, 'idle'> | 'idle'
+}
+
+export type TinyGoRuntimeOptions = {
+  assetBaseUrl: string
+  bootstrapGoEntrySource?: string
+  initialLogMessages?: Array<{ message: string; tone?: Exclude<PhaseTone, 'idle'> | 'idle' }>
+  onControlsLockedChange?: (locked: boolean) => void
+  onLogAppended?: (entry: TinyGoRuntimeLogEntry) => void
+  onLogReset?: () => void
+  onPhaseChange?: (phase: TinyGoRuntimePhase, label: string, tone: PhaseTone) => void
+  now?: () => Date
+}
+
+export type TinyGoBrowserRuntime = TinyGoRuntime
+
+export type TinyGoBrowserRuntimeOptions = {
+  baseUrl: string
+  bootstrapGoEntrySource?: string
+  initialLogs?: string[]
+  onActivityLogChange?: (activityLog: string, tone: Exclude<PhaseTone, 'idle'> | 'idle') => void
+  onControlsLockedChange?: (locked: boolean) => void
+  onPhaseChange?: (phase: TinyGoRuntimePhase, label: string, tone: PhaseTone) => void
+  now?: () => Date
+}
+
+export const DEFAULT_TINYGO_BOOTSTRAP_GO_ENTRY_SOURCE = `package main
+
+func main() {}
+`
+
+const cloneJsonValue = <T>(value: T) => JSON.parse(JSON.stringify(value)) as T
+
+const buildDirectoryContentsFromTextEntries = (entries: Record<string, string>, textEncoder: TextEncoder) => {
+  const root = new Map<string, File | Directory>()
+  for (const [relativePath, contents] of Object.entries(entries)) {
+    const parts = relativePath.split('/').filter(Boolean)
+    let currentDirectory = root
+    for (const [index, part] of parts.entries()) {
+      if (index === parts.length - 1) {
+        currentDirectory.set(part, new File(textEncoder.encode(contents)))
+        continue
+      }
+      const existing = currentDirectory.get(part)
+      if (existing instanceof Directory) {
+        currentDirectory = existing.contents as unknown as Map<string, File | Directory>
+        continue
+      }
+      const directory = new Directory(new Map())
+      currentDirectory.set(part, directory)
+      currentDirectory = directory.contents as unknown as Map<string, File | Directory>
+    }
+  }
+  return root
+}
+
+const normalizeAssetBaseUrl = (assetBaseUrl: string) =>
+  assetBaseUrl.endsWith('/') ? assetBaseUrl : `${assetBaseUrl}/`
+
+export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntime => {
+  const assetBaseUrl = normalizeAssetBaseUrl(options.assetBaseUrl)
+  const textEncoder = new TextEncoder()
+  const textDecoder = new TextDecoder()
+  const bootstrapGoEntrySource = options.bootstrapGoEntrySource ?? DEFAULT_TINYGO_BOOTSTRAP_GO_ENTRY_SOURCE
+
+  let emceptionWorker: Worker | null = null
+  let emception: EmceptionBridge | null = null
+  let bootPromise: Promise<EmceptionBridge> | null = null
+  let runtimeWorkingTreeDirty = false
+  let lastBuildResult: TinyGoBuildResult | null = null
+  let lastBuildArtifactPath: string | null = null
+  let lastBuildArtifactBytes: Uint8Array | null = null
+  let lastFrontendAnalysisInputManifest: TinyGoFrontendInputManifest | null = null
+  let injectedBuildRequestOverrides: TinyGoBuildRequestOverrides | null = null
+  let injectedDriverBridgeManifest: TinyGoDriverBridgeManifest | null = null
+  let injectedWorkspaceFiles: Record<string, string> | null = null
+  let activeAction: TinyGoRuntimeAction | null = null
+  let buildStateVersion = 0
+  let activityLog = ''
+
+  const setControlsLocked = (locked: boolean) => {
+    options.onControlsLockedChange?.(locked)
+  }
+
+  const setPhase = (phase: TinyGoRuntimePhase, label: string, tone: PhaseTone) => {
+    options.onPhaseChange?.(phase, label, tone)
+  }
+
+  const appendLog = (message: string, tone: Exclude<PhaseTone, 'idle'> | 'idle' = 'idle') => {
+    const stamp = (options.now?.() ?? new Date()).toLocaleTimeString('ko-KR', { hour12: false })
+    const line = `[${stamp}] ${message}\n`
+    activityLog += line
+    options.onLogAppended?.({ line, message, tone })
+  }
+
+  const clearActivityLog = () => {
+    activityLog = ''
+    options.onLogReset?.()
+  }
+
+  const resolveAssetUrl = (assetPath: string) => new URL(assetPath, assetBaseUrl).toString()
+
+  const disposeEmceptionRuntime = () => {
+    emceptionWorker?.terminate()
+    emceptionWorker = null
+    emception = null
+    bootPromise = null
+    runtimeWorkingTreeDirty = false
+  }
+
+  const invalidateCachedBuildState = () => {
+    buildStateVersion += 1
+    lastBuildResult = null
+    lastBuildArtifactPath = null
+    lastBuildArtifactBytes = null
+    lastFrontendAnalysisInputManifest = null
+  }
+
+  const resetPhasesToIdle = () => {
+    setPhase('toolchain', 'idle', 'idle')
+    setPhase('probe', 'idle', 'idle')
+    setPhase('smoke', 'idle', 'idle')
+    setPhase('verify', 'idle', 'idle')
+  }
+
+  const ensureActionIdle = () => {
+    if (activeAction !== null) {
+      throw new Error(`wasm-tinygo test hook action already running: ${activeAction}`)
+    }
+  }
+
+  const runWithAction = async <T>(action: TinyGoRuntimeAction, run: () => Promise<T>) => {
+    ensureActionIdle()
+    activeAction = action
+    try {
+      return await run()
+    } finally {
+      activeAction = null
+    }
+  }
+
+  const ensureEmception = async () => {
+    if (emception) {
+      return emception
+    }
+
+    if (bootPromise) {
+      return bootPromise
+    }
+
+    bootPromise = (async () => {
+      setControlsLocked(true)
+      setPhase('toolchain', 'booting', 'running')
+      appendLog('Fetching patched emception worker', 'running')
+
+      const workerUrl = resolveAssetUrl('vendor/emception/emception.worker.js')
+      emceptionWorker = new Worker(workerUrl, { type: 'classic', name: 'emception-worker' })
+      emception = Comlink.wrap<unknown>(emceptionWorker) as unknown as EmceptionBridge
+
+      ;(emception as unknown as Record<string, unknown>).onstdout = Comlink.proxy(async (line: string) => {
+        appendLog(line, 'running')
+      })
+      ;(emception as unknown as Record<string, unknown>).onstderr = Comlink.proxy(async (line: string) => {
+        appendLog(line, 'error')
+      })
+      ;(emception as unknown as Record<string, unknown>).onprocessstart = Comlink.proxy(async (argv: string[]) => {
+        appendLog(`spawn ${argv.join(' ')}`, 'running')
+      })
+      await emception.init()
+      runtimeWorkingTreeDirty = false
+      setPhase('toolchain', 'ready', 'success')
+      appendLog('emception toolchain is ready', 'success')
+      setControlsLocked(false)
+
+      return emception
+    })().catch((error) => {
+      setPhase('toolchain', 'failed', 'error')
+      setControlsLocked(false)
+      disposeEmceptionRuntime()
+      appendLog(`emception boot failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      throw error
+    })
+
+    return bootPromise
+  }
+
+  const planBuild = async (
+    inputs: TinyGoBuildPlanInputs = {
+      buildRequestOverrides: injectedBuildRequestOverrides,
+      workspaceFiles: injectedWorkspaceFiles,
+    },
+  ) => {
+    const buildStateVersionAtStart = buildStateVersion
+    try {
+      setPhase('probe', 'planning', 'running')
+      appendLog('Writing /workspace/tinygo-request.json', 'running')
+
+      const request: TinyGoBuildRequest = {
+        command: 'build',
+        planner: 'tinygo',
+        entry: '/workspace/main.go',
+        output: '/working/out.wasm',
+        target: 'wasm',
+        optimize: 'z',
+        scheduler: 'tasks',
+        panic: 'trap',
+        ...(inputs.buildRequestOverrides ?? {}),
+      }
+      const workspaceFiles = {
+        ...(inputs.workspaceFiles ?? { 'main.go': bootstrapGoEntrySource }),
+        'tinygo-request.json': JSON.stringify(request),
+      }
+      const workspace = new PreopenDirectory('/workspace', buildDirectoryContentsFromTextEntries(workspaceFiles, textEncoder))
+      const stdout = ConsoleStdout.lineBuffered((line) => appendLog(`driver ${line}`, 'running'))
+      const stderr = ConsoleStdout.lineBuffered((line) => appendLog(`driver ${line}`, 'error'))
+      const wasi = new WASI(
+        ['tinygo-driver'],
+        ['WASM_TINYGO_MODE=driver'],
+        [new OpenFile(new File([])), stdout, stderr, workspace],
+      )
+      const response = await fetch(resolveAssetUrl('tools/go-probe.wasm'))
+
+      if (!response.ok) {
+        throw new Error(`go-probe fetch failed: ${response.status}`)
+      }
+
+      const moduleBytes = await response.arrayBuffer()
+      const { instance } = await WebAssembly.instantiate(moduleBytes, {
+        wasi_snapshot_preview1: wasi.wasiImport,
+      })
+
+      let driverExitCode = 0
+      try {
+        driverExitCode = wasi.start(instance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+      } catch (error) {
+        if (error instanceof WASIProcExit) {
+          driverExitCode = error.code
+        } else {
+          throw error
+        }
+      }
+
+      const resultNode = workspace.dir.contents.get('tinygo-result.json')
+      if (!(resultNode instanceof File)) {
+        throw new Error(`tinygo driver did not write /workspace/tinygo-result.json (exit ${driverExitCode})`)
+      }
+
+      const result = JSON.parse(textDecoder.decode(resultNode.data)) as TinyGoBuildResult
+      if (!result.ok) {
+        throw new Error(result.diagnostics.join('; ') || `tinygo driver returned a failed result (exit ${driverExitCode})`)
+      }
+
+      if (buildStateVersionAtStart === buildStateVersion) {
+        lastBuildResult = result
+        setPhase('probe', `${result.plan.length} steps`, 'success')
+        appendLog(`driver mode ${result.mode ?? 'unknown'}`, 'idle')
+        appendLog(`driver planned ${result.plan.length} step(s) for ${result.artifact ?? '/working/out.wasm'}`, 'success')
+        appendLog(`driver workspace files=${Object.keys(workspaceFiles).length - 1}`, 'idle')
+        for (const diagnostic of result.diagnostics) {
+          appendLog(`driver ${diagnostic}`, 'idle')
+        }
+      }
+
+      return result
+    } catch (error) {
+      if (buildStateVersionAtStart === buildStateVersion) {
+        setPhase('probe', 'failed', 'error')
+        appendLog(`build driver failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      }
+      throw error
+    }
+  }
+
+  const executeBuildPlan = async () => {
+    if (emception && runtimeWorkingTreeDirty) {
+      disposeEmceptionRuntime()
+    }
+    const runtime = await ensureEmception()
+    runtimeWorkingTreeDirty = false
+    const buildStateVersionAtStart = buildStateVersion
+
+    try {
+      setControlsLocked(true)
+      lastBuildArtifactPath = null
+      lastBuildArtifactBytes = null
+      lastFrontendAnalysisInputManifest = null
+      const buildRequestOverrides =
+        injectedBuildRequestOverrides === null ? null : cloneJsonValue(injectedBuildRequestOverrides)
+      const driverBridgeManifest =
+        injectedDriverBridgeManifest === null ? null : cloneJsonValue(injectedDriverBridgeManifest)
+      const workspaceFiles = injectedWorkspaceFiles === null ? null : cloneJsonValue(injectedWorkspaceFiles)
+      const result =
+        lastBuildResult ??
+        await planBuild({
+          buildRequestOverrides,
+          workspaceFiles,
+        })
+      const fileSystem = runtime.fileSystem
+      const writableFileSystem: EmceptionWritableFileSystem = {
+        exists: (path) => fileSystem.exists(path),
+        mkdir: (path) => runtime.mkdir(path),
+        unlink: (path) => fileSystem.unlink(path),
+        writeFile: (path, contents) => fileSystem.writeFile(path, contents),
+      }
+      const plannerManifestSource = result.files.find((file) => file.path === '/working/tinygo-bootstrap.json')?.contents
+      const frontendInputSource = result.files.find((file) => file.path === '/working/tinygo-frontend-input.json')?.contents
+      const filesToMaterialize = plannerManifestSource
+        ? selectBootstrapDispatchFiles(result.files, plannerManifestSource)
+        : result.files
+      let frontendResult: TinyGoFrontEndResult | null = null
+      let frontendBootstrapArtifactExpectationSource: string | null = null
+      let frontendToolPlan: ToolInvocation[] | null = null
+      let frontendLoweredSourcesManifest: TinyGoLoweredSourcesManifest | null = null
+      let frontendLoweredIRVerification: ReturnType<typeof verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest>['loweredIR'] | null = null
+      let frontendLoweredArtifactVerification: ReturnType<typeof verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest>['loweredArtifact'] | null = null
+      let frontendLoweredBitcodeManifestVerification: ReturnType<typeof verifyLoweredBitcodeManifestAgainstLoweringPlanAndLoweredSourcesManifest> | null = null
+      let frontendCommandArtifactVerification: ReturnType<typeof verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest>['commandArtifact'] | null = null
+      let frontendLoweredBitcodeCompileCommands: ToolInvocation[] | null = null
+
+      setPhase('smoke', 'executing', 'running')
+      setPhase('verify', 'probing', 'running')
+      for (const file of filesToMaterialize) {
+        appendLog(`materialize ${file.path}`, 'running')
+      }
+      await materializeGeneratedFiles(writableFileSystem, filesToMaterialize)
+      if (frontendInputSource) {
+        const parsedFrontendInputManifest = JSON.parse(frontendInputSource) as TinyGoFrontendInputManifest
+        const { compileUnits: _frontendAnalysisCompileUnits, ...frontendAnalysisInputManifestBase } = parsedFrontendInputManifest
+        let frontendAnalysisInputManifest: TinyGoFrontendInputManifest = {
+          ...frontendAnalysisInputManifestBase,
+        }
+        if (driverBridgeManifest) {
+          const frontendInputVerification = verifyFrontendInputManifestAgainstDriverBridgeManifest(
+            parsedFrontendInputManifest,
+            driverBridgeManifest,
+          )
+          appendLog(
+            `frontend input bridge verified target=${frontendInputVerification.target} llvm=${frontendInputVerification.llvmTarget} scheduler=${frontendInputVerification.scheduler} packages=${frontendInputVerification.graphPackageCount}`,
+            'success',
+          )
+          if (driverBridgeManifest.frontendAnalysisInput) {
+            const frontendAnalysisInputVerification = verifyFrontendAnalysisInputManifestAgainstDriverBridgeManifest(
+              frontendAnalysisInputManifest,
+              driverBridgeManifest,
+            )
+            appendLog(
+              `frontend analysis input bridge verified target=${frontendAnalysisInputVerification.target} llvm=${frontendAnalysisInputVerification.llvmTarget} scheduler=${frontendAnalysisInputVerification.scheduler} packages=${frontendAnalysisInputVerification.graphPackageCount}`,
+              'success',
+            )
+            frontendAnalysisInputManifest = JSON.parse(
+              JSON.stringify(driverBridgeManifest.frontendAnalysisInput),
+            ) as TinyGoFrontendInputManifest
+            appendLog('frontend analysis input source=bridge', 'success')
+          }
+        }
+        if (buildStateVersionAtStart === buildStateVersion) {
+          lastFrontendAnalysisInputManifest = JSON.parse(
+            JSON.stringify(frontendAnalysisInputManifest),
+          ) as TinyGoFrontendInputManifest
+        }
+        appendLog('run frontend handoff consumer', 'running')
+        const workingContents = new Map<string, File | Directory>()
+        for (const file of filesToMaterialize) {
+          if (!file.path.startsWith('/working/')) {
+            continue
+          }
+          const parts = file.path.replace('/working/', '').split('/').filter(Boolean)
+          let currentDirectory = workingContents
+          for (const [index, part] of parts.entries()) {
+            if (index === parts.length - 1) {
+              currentDirectory.set(part, new File(textEncoder.encode(file.contents)))
+              continue
+            }
+            const existing = currentDirectory.get(part)
+            if (existing instanceof Directory) {
+              currentDirectory = existing.contents as unknown as Map<string, File | Directory>
+              continue
+            }
+            const directory = new Directory(new Map())
+            currentDirectory.set(part, directory)
+            currentDirectory = directory.contents as unknown as Map<string, File | Directory>
+          }
+        }
+        const working = new PreopenDirectory('/working', workingContents)
+        working.dir.contents.set(
+          'tinygo-frontend-analysis-input.json',
+          new File(textEncoder.encode(JSON.stringify(frontendAnalysisInputManifest, null, 2))),
+        )
+        const frontendResponse = await fetch(resolveAssetUrl('tools/go-probe.wasm'))
+        if (!frontendResponse.ok) {
+          throw new Error(`go-probe fetch failed: ${frontendResponse.status}`)
+        }
+        const frontendModuleBytes = await frontendResponse.arrayBuffer()
+        const frontendAnalysisStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'running'))
+        const frontendAnalysisStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'error'))
+        const frontendAnalysisWasi = new WASI(
+          ['tinygo-frontend-analysis'],
+          [
+            'WASM_TINYGO_MODE=frontend-analysis',
+            'WASM_TINYGO_FRONTEND_INPUT_PATH=/working/tinygo-frontend-analysis-input.json',
+          ],
+          [new OpenFile(new File([])), frontendAnalysisStdout, frontendAnalysisStderr, working],
+        )
+        const { instance: frontendAnalysisInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+          wasi_snapshot_preview1: frontendAnalysisWasi.wasiImport,
+        })
+        let frontendAnalysisExitCode = 0
+        try {
+          frontendAnalysisExitCode = frontendAnalysisWasi.start(frontendAnalysisInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+        } catch (error) {
+          if (error instanceof WASIProcExit) {
+            frontendAnalysisExitCode = error.code
+          } else {
+            throw error
+          }
+        }
+        const frontendAnalysisResultNode = working.dir.contents.get('tinygo-frontend-analysis.json')
+        if (!(frontendAnalysisResultNode instanceof File)) {
+          throw new Error(`tinygo frontend-analysis did not write /working/tinygo-frontend-analysis.json (exit ${frontendAnalysisExitCode})`)
+        }
+        const frontendAnalysisResult = JSON.parse(textDecoder.decode(frontendAnalysisResultNode.data)) as TinyGoFrontEndAnalysisResult
+        if (!frontendAnalysisResult.ok || !frontendAnalysisResult.analysis) {
+          throw new Error(frontendAnalysisResult.diagnostics.join('; ') || `tinygo frontend-analysis returned a failed result (exit ${frontendAnalysisExitCode})`)
+        }
+        if (frontendAnalysisResult.analysis.toolchain?.target !== parsedFrontendInputManifest.toolchain?.target) {
+          throw new Error('frontend analysis target did not match frontend input')
+        }
+        if (frontendAnalysisResult.analysis.toolchain?.llvmTarget !== parsedFrontendInputManifest.buildContext?.llvmTarget) {
+          throw new Error('frontend analysis llvmTarget did not match frontend input')
+        }
+        if (frontendAnalysisResult.analysis.compileUnitManifestPath !== '/working/tinygo-compile-unit.json') {
+          throw new Error('frontend analysis did not preserve the compile unit manifest path')
+        }
+        if ((frontendAnalysisResult.analysis.compileUnits?.length ?? 0) !== (parsedFrontendInputManifest.compileUnits?.length ?? 0)) {
+          throw new Error('frontend analysis compile unit count did not match frontend input')
+        }
+        if ((frontendAnalysisResult.analysis.allCompileFiles?.length ?? 0) !== (parsedFrontendInputManifest.sourceSelection?.allCompile?.length ?? 0)) {
+          throw new Error('frontend analysis all-compile count did not match frontend input')
+        }
+        appendLog(
+          `frontend analysis verified target=${frontendAnalysisResult.analysis.toolchain?.target ?? 'unknown'} llvm=${frontendAnalysisResult.analysis.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendAnalysisResult.analysis.compileGroups?.length ?? 0} compileUnits=${frontendAnalysisResult.analysis.compileUnits?.length ?? 0} allCompile=${frontendAnalysisResult.analysis.allCompileFiles?.length ?? 0}`,
+          'success',
+        )
+        if (driverBridgeManifest?.frontendAnalysis) {
+          const frontendAnalysisVerification = verifyFrontendAnalysisAgainstDriverBridgeManifest(
+            frontendAnalysisResult.analysis,
+            driverBridgeManifest,
+          )
+          appendLog(
+            `frontend analysis bridge verified target=${frontendAnalysisVerification.target} llvm=${frontendAnalysisVerification.llvmTarget} groups=${frontendAnalysisVerification.compileGroupCount} compileUnits=${frontendAnalysisVerification.compileUnitCount} allCompile=${frontendAnalysisVerification.allCompileCount} alias=${frontendAnalysisVerification.programImportAlias} program=${frontendAnalysisVerification.programImportPath}`,
+            'success',
+          )
+        }
+        const frontendRealAdapterStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend real adapter ${line}`, 'running'))
+        const frontendRealAdapterStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend real adapter ${line}`, 'error'))
+        const frontendRealAdapterWasi = new WASI(
+          ['tinygo-frontend-real-adapter'],
+          ['WASM_TINYGO_MODE=frontend-real-adapter-analysis'],
+          [new OpenFile(new File([])), frontendRealAdapterStdout, frontendRealAdapterStderr, working],
+        )
+        const { instance: frontendRealAdapterInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+          wasi_snapshot_preview1: frontendRealAdapterWasi.wasiImport,
+        })
+        let frontendRealAdapterExitCode = 0
+        try {
+          frontendRealAdapterExitCode = frontendRealAdapterWasi.start(frontendRealAdapterInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+        } catch (error) {
+          if (error instanceof WASIProcExit) {
+            frontendRealAdapterExitCode = error.code
+          } else {
+            throw error
+          }
+        }
+        const frontendRealAdapterResultNode = working.dir.contents.get('tinygo-frontend-real-adapter.json')
+        if (!(frontendRealAdapterResultNode instanceof File)) {
+          throw new Error(`tinygo frontend-real-adapter did not write /working/tinygo-frontend-real-adapter.json (exit ${frontendRealAdapterExitCode})`)
+        }
+        const frontendRealAdapterResult = JSON.parse(textDecoder.decode(frontendRealAdapterResultNode.data)) as TinyGoFrontEndAdapterResult
+        if (!frontendRealAdapterResult.ok || !frontendRealAdapterResult.adapter) {
+          throw new Error(frontendRealAdapterResult.diagnostics.join('; ') || `tinygo frontend-real-adapter returned a failed result (exit ${frontendRealAdapterExitCode})`)
+        }
+        if (frontendRealAdapterResult.adapter.toolchain?.target !== parsedFrontendInputManifest.toolchain?.target) {
+          throw new Error('frontend real adapter target did not match frontend input')
+        }
+        if (frontendRealAdapterResult.adapter.toolchain?.llvmTarget !== parsedFrontendInputManifest.buildContext?.llvmTarget) {
+          throw new Error('frontend real adapter llvmTarget did not match frontend input')
+        }
+        if (frontendRealAdapterResult.adapter.compileUnitManifestPath !== '/working/tinygo-compile-unit.json') {
+          throw new Error('frontend real adapter did not preserve the compile unit manifest path')
+        }
+        if ((frontendRealAdapterResult.adapter.compileUnits?.length ?? 0) !== (parsedFrontendInputManifest.compileUnits?.length ?? 0)) {
+          throw new Error('frontend real adapter compile unit count did not match frontend input')
+        }
+        if ((frontendRealAdapterResult.adapter.allCompileFiles?.length ?? 0) !== (parsedFrontendInputManifest.sourceSelection?.allCompile?.length ?? 0)) {
+          throw new Error('frontend real adapter all-compile count did not match frontend input')
+        }
+        appendLog(
+          `frontend real adapter verified target=${frontendRealAdapterResult.adapter.toolchain?.target ?? 'unknown'} llvm=${frontendRealAdapterResult.adapter.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendRealAdapterResult.adapter.compileGroups?.length ?? 0} compileUnits=${frontendRealAdapterResult.adapter.compileUnits?.length ?? 0} allCompile=${frontendRealAdapterResult.adapter.allCompileFiles?.length ?? 0}`,
+          'success',
+        )
+        const frontendRealAdapterSeamVerification = verifyFrontendRealAdapterAgainstFrontendAnalysis(
+          frontendRealAdapterResult.adapter,
+          frontendAnalysisResult.analysis,
+        )
+        appendLog(
+          `frontend real adapter seam verified target=${frontendRealAdapterSeamVerification.target} llvm=${frontendRealAdapterSeamVerification.llvmTarget} groups=${frontendRealAdapterSeamVerification.compileGroupCount} compileUnits=${frontendRealAdapterSeamVerification.compileUnitCount} allCompile=${frontendRealAdapterSeamVerification.allCompileCount} alias=${frontendRealAdapterSeamVerification.programImportAlias}`,
+          'success',
+        )
+        if (driverBridgeManifest?.frontendRealAdapter || driverBridgeManifest?.realFrontendAnalysis) {
+          const realFrontendAnalysisSource = driverBridgeManifest?.frontendRealAdapter ? 'canonical' : 'compat-alias'
+          const realFrontendAnalysisVerification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest(
+            frontendRealAdapterResult.adapter,
+            driverBridgeManifest,
+          )
+          appendLog(
+            `frontend real adapter bridge verified target=${realFrontendAnalysisVerification.target} llvm=${realFrontendAnalysisVerification.llvmTarget} groups=${realFrontendAnalysisVerification.compileGroupCount} compileUnits=${realFrontendAnalysisVerification.compileUnitCount} allCompile=${realFrontendAnalysisVerification.allCompileCount} alias=${realFrontendAnalysisVerification.programImportAlias} source=${realFrontendAnalysisSource}`,
+            'success',
+          )
+        }
+        const frontendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'running'))
+        const frontendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'error'))
+        appendLog('frontend build mode=frontend', 'success')
+        appendLog('frontend build source=real-adapter', 'success')
+        const frontendWasi = new WASI(
+          ['tinygo-frontend'],
+          ['WASM_TINYGO_MODE=frontend'],
+          [new OpenFile(new File([])), frontendStdout, frontendStderr, working],
+        )
+        const { instance: frontendInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+          wasi_snapshot_preview1: frontendWasi.wasiImport,
+        })
+        let frontendExitCode = 0
+        try {
+          frontendExitCode = frontendWasi.start(frontendInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+        } catch (error) {
+          if (error instanceof WASIProcExit) {
+            frontendExitCode = error.code
+          } else {
+            throw error
+          }
+        }
+        const frontendResultNode = working.dir.contents.get('tinygo-frontend-result.json')
+        if (!(frontendResultNode instanceof File)) {
+          throw new Error(`tinygo frontend did not write /working/tinygo-frontend-result.json (exit ${frontendExitCode})`)
+        }
+        frontendResult = JSON.parse(textDecoder.decode(frontendResultNode.data)) as TinyGoFrontEndResult
+        if (!frontendResult.ok) {
+          throw new Error(frontendResult.diagnostics.join('; ') || `tinygo frontend returned a failed result (exit ${frontendExitCode})`)
+        }
+        if (frontendResult.generatedFiles?.length) {
+          for (const file of frontendResult.generatedFiles) {
+            appendLog(`frontend materialize ${file.path}`, 'running')
+          }
+          await materializeGeneratedFiles(writableFileSystem, frontendResult.generatedFiles)
+        }
+        const compileUnitManifest = frontendResult.generatedFiles?.find((file) => file.path === '/working/tinygo-compile-unit.json')
+        if (!compileUnitManifest) {
+          throw new Error('frontend generated files did not include /working/tinygo-compile-unit.json')
+        }
+        const intermediateManifest = frontendResult.generatedFiles?.find((file) => file.path === '/working/tinygo-intermediate.json')
+        if (!intermediateManifest) {
+          throw new Error('frontend generated files did not include /working/tinygo-intermediate.json')
+        }
+        const loweringManifest = frontendResult.generatedFiles?.find((file) => file.path === '/working/tinygo-lowering-input.json')
+        if (!loweringManifest) {
+          throw new Error('frontend generated files did not include /working/tinygo-lowering-input.json')
+        }
+        const workItemsManifest = frontendResult.generatedFiles?.find((file) => file.path === '/working/tinygo-work-items.json')
+        if (!workItemsManifest) {
+          throw new Error('frontend generated files did not include /working/tinygo-work-items.json')
+        }
+        const loweringPlanManifest = frontendResult.generatedFiles?.find((file) => file.path === '/working/tinygo-lowering-plan.json')
+        if (!loweringPlanManifest) {
+          throw new Error('frontend generated files did not include /working/tinygo-lowering-plan.json')
+        }
+        const backendInputManifest = frontendResult.generatedFiles?.find((file) => file.path === '/working/tinygo-backend-input.json')
+        if (!backendInputManifest) {
+          throw new Error('frontend generated files did not include /working/tinygo-backend-input.json')
+        }
+        appendLog(`frontend request manifest=${compileUnitManifest.path}`, 'idle')
+        const parsedCompileUnitManifest = JSON.parse(compileUnitManifest.contents) as TinyGoCompileUnitManifest
+        const compileUnitVerification = verifyCompileUnitManifestAgainstCompileRequest(parsedCompileUnitManifest, {})
+        const parsedIntermediateManifest = JSON.parse(intermediateManifest.contents) as TinyGoIntermediateManifest
+        const intermediateVerification = verifyIntermediateManifestAgainstCompileUnitManifest(
+          parsedCompileUnitManifest,
+          parsedIntermediateManifest,
+        )
+        const parsedLoweringManifest = JSON.parse(loweringManifest.contents) as TinyGoLoweringManifest
+        const loweringVerification = verifyLoweringManifestAgainstIntermediateManifest(
+          parsedIntermediateManifest,
+          parsedLoweringManifest,
+        )
+        const parsedWorkItemsManifest = JSON.parse(workItemsManifest.contents) as TinyGoWorkItemsManifest
+        const workItemsVerification = verifyWorkItemsManifestAgainstLoweringManifest(
+          parsedLoweringManifest,
+          parsedWorkItemsManifest,
+        )
+        const parsedLoweredSourcesManifest: TinyGoLoweredSourcesManifest = {
+          entryFile: parsedWorkItemsManifest.entryFile,
+          optimizeFlag: parsedWorkItemsManifest.optimizeFlag,
+          units: (parsedWorkItemsManifest.workItems ?? []).map((workItem) => ({
+            ...(() => {
+              const kind = workItem.kind ?? ''
+              if (kind === 'program') {
+                return { depOnly: false, standard: false }
+              }
+              if (kind === 'imported') {
+                return { depOnly: true, standard: false }
+              }
+              if (kind === 'stdlib') {
+                return { depOnly: true, standard: true }
+              }
+              return {
+                ...(typeof workItem.depOnly === 'boolean' ? { depOnly: workItem.depOnly } : {}),
+                ...(typeof workItem.standard === 'boolean' ? { standard: workItem.standard } : {}),
+              }
+            })(),
+            id: workItem.id ?? '',
+            kind: workItem.kind ?? '',
+            importPath: workItem.importPath ?? '',
+            imports: Array.isArray(workItem.imports) ? [...workItem.imports] : [],
+            modulePath: workItem.modulePath ?? '',
+            packageName: workItem.packageName ?? '',
+            packageDir: workItem.packageDir ?? '',
+            sourceFiles: workItem.files ?? [],
+            loweredSourcePath: `/working/tinygo-lowered/${workItem.id ?? ''}.c`,
+          })),
+        }
+        frontendLoweredSourcesManifest = parsedLoweredSourcesManifest
+        const loweredSourcesVerification = verifyLoweredSourcesManifestAgainstWorkItemsManifest(
+          parsedWorkItemsManifest,
+          parsedLoweredSourcesManifest,
+        )
+        const parsedLoweringPlanManifest = JSON.parse(loweringPlanManifest.contents) as TinyGoLoweringPlanManifest
+        const loweringPlanVerification = verifyLoweringPlanAgainstWorkItemsManifest(
+          parsedWorkItemsManifest,
+          parsedLoweringPlanManifest,
+        )
+        const parsedBackendInputManifest = JSON.parse(backendInputManifest.contents) as TinyGoBackendInputManifest
+        const backendInputVerification = verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest(
+          parsedLoweringPlanManifest,
+          parsedLoweredSourcesManifest,
+          parsedBackendInputManifest,
+        )
+        frontendBootstrapArtifactExpectationSource = compileUnitManifest.contents
+        appendLog(
+          `frontend intermediate target=${intermediateVerification.toolchain.target} targetAssets=${intermediateVerification.sourceSelection.targetAssets.length} runtime=${intermediateVerification.sourceSelection.runtimeSupport.length} program=${intermediateVerification.sourceSelection.program.length} imported=${intermediateVerification.sourceSelection.imported.length} stdlib=${intermediateVerification.sourceSelection.stdlib.length} compileUnits=${intermediateVerification.compileUnits.length}`,
+          'idle',
+        )
+        appendLog(
+          `frontend lowering targetAssets=${loweringVerification.support.targetAssets.length} runtime=${loweringVerification.support.runtimeSupport.length} compileUnits=${loweringVerification.compileUnits.length}`,
+          'idle',
+        )
+        appendLog(
+          `frontend work items count=${workItemsVerification.workItems.length} last=${workItemsVerification.workItems.length === 0 ? 'none' : workItemsVerification.workItems[workItemsVerification.workItems.length - 1]?.bitcodeOutputPath ?? 'none'}`,
+          'idle',
+        )
+        appendLog(
+          `frontend lowered sources count=${loweredSourcesVerification.units.length} last=${loweredSourcesVerification.units.length === 0 ? 'none' : loweredSourcesVerification.units[loweredSourcesVerification.units.length - 1]?.loweredSourcePath ?? 'none'}`,
+          'idle',
+        )
+        appendLog(
+          `frontend lowering plan compileJobs=${loweringPlanVerification.compileJobs.length} linkInputs=${loweringPlanVerification.linkJob.bitcodeInputs.length}`,
+          'idle',
+        )
+        appendLog(
+          `frontend backend input compileJobs=${backendInputVerification.compileJobs.length} loweredUnits=${backendInputVerification.loweredUnits.length}`,
+          'idle',
+        )
+        if (
+          parsedCompileUnitManifest.toolchain?.translationUnitPath &&
+          !frontendResult.generatedFiles?.some(
+            (file) => file.path === parsedCompileUnitManifest.toolchain?.translationUnitPath,
+          )
+        ) {
+          throw new Error(
+            `frontend generated files did not include ${parsedCompileUnitManifest.toolchain.translationUnitPath}`,
+          )
+        }
+        frontendToolPlan = compileUnitVerification.toolPlan
+        appendLog(
+          `frontend groups program=${compileUnitVerification.summary.programCount} imported=${compileUnitVerification.summary.importedCount} stdlib=${compileUnitVerification.summary.stdlibCount} all=${compileUnitVerification.summary.allCompileCount}`,
+          'idle',
+        )
+        appendLog(
+          `frontend compile unit tu=${parsedCompileUnitManifest.toolchain?.translationUnitPath ?? '/working/tinygo-bootstrap.c'} object=${parsedCompileUnitManifest.toolchain?.objectOutputPath ?? '/working/tinygo-bootstrap.o'} output=${parsedCompileUnitManifest.toolchain?.artifactOutputPath ?? 'unknown'} all=${parsedCompileUnitManifest.sourceSelection?.allCompile?.length ?? 0}`,
+          'idle',
+        )
+        appendLog(
+          `frontend compile unit program=${compileUnitVerification.summary.programCount} imported=${compileUnitVerification.summary.importedCount} stdlib=${compileUnitVerification.summary.stdlibCount} all=${compileUnitVerification.summary.allCompileCount}`,
+          'idle',
+        )
+        if (driverBridgeManifest) {
+          const bridgeVerification = verifyCompileUnitManifestAgainstDriverBridgeManifest(
+            parsedCompileUnitManifest,
+            driverBridgeManifest,
+          )
+          appendLog(
+            `frontend bridge verified target=${bridgeVerification.target} llvm=${bridgeVerification.llvmTarget} program=${bridgeVerification.programPackageName ?? 'unknown'} imports=${bridgeVerification.bridgeEntryImports.length} packages=${bridgeVerification.bridgePackageGraphImportPaths.length}`,
+            'success',
+          )
+          appendLog(
+            `frontend bridge coverage compileUnits=${bridgeVerification.compileUnitCount} graphPackages=${bridgeVerification.graphPackageCount} coveredPackages=${bridgeVerification.coveredPackageCount}/${bridgeVerification.bridgePackageCount} compileUnitFiles=${bridgeVerification.compileUnitFileCount} coveredFiles=${bridgeVerification.coveredFileCount}/${bridgeVerification.bridgeFileCount} depOnly=${bridgeVerification.depOnlyPackageCount} standard=${bridgeVerification.standardPackageCount} local=${bridgeVerification.localPackageCount} alias=${bridgeVerification.programImportAlias}`,
+            'idle',
+          )
+          if ((driverBridgeManifest.toolchain?.version ?? '') !== '') {
+            appendLog(`frontend bridge toolchain version=${driverBridgeManifest.toolchain?.version ?? ''}`, 'idle')
+          }
+        }
+        if (frontendToolPlan?.length) {
+          appendLog(`frontend tool plan ${frontendToolPlan.length} step(s)`, 'idle')
+        }
+        appendLog('run backend handoff consumer', 'running')
+        const backendWorkingContents = new Map<string, File | Directory>()
+        const backendWorkspaceContents = buildDirectoryContentsFromTextEntries(
+          workspaceFiles ?? { 'main.go': bootstrapGoEntrySource },
+          textEncoder,
+        )
+        for (const file of [...filesToMaterialize, ...(frontendResult.generatedFiles ?? [])]) {
+          if (!file.path.startsWith('/working/')) {
+            continue
+          }
+          const parts = file.path.replace('/working/', '').split('/').filter(Boolean)
+          let currentDirectory = backendWorkingContents
+          for (const [index, part] of parts.entries()) {
+            if (index === parts.length - 1) {
+              currentDirectory.set(part, new File(textEncoder.encode(file.contents)))
+              continue
+            }
+            const existing = currentDirectory.get(part)
+            if (existing instanceof Directory) {
+              currentDirectory = existing.contents as unknown as Map<string, File | Directory>
+              continue
+            }
+            const directory = new Directory(new Map())
+            currentDirectory.set(part, directory)
+            currentDirectory = directory.contents as unknown as Map<string, File | Directory>
+          }
+        }
+        const backendWorking = new PreopenDirectory('/working', backendWorkingContents)
+        const backendWorkspace = new PreopenDirectory('/workspace', backendWorkspaceContents)
+        const backendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`backend ${line}`, 'running'))
+        const backendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`backend ${line}`, 'error'))
+        const backendWasi = new WASI(
+          ['tinygo-backend'],
+          ['WASM_TINYGO_MODE=backend'],
+          [new OpenFile(new File([])), backendStdout, backendStderr, backendWorking, backendWorkspace],
+        )
+        const { instance: backendInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+          wasi_snapshot_preview1: backendWasi.wasiImport,
+        })
+        let backendExitCode = 0
+        try {
+          backendExitCode = backendWasi.start(backendInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+        } catch (error) {
+          if (error instanceof WASIProcExit) {
+            backendExitCode = error.code
+          } else {
+            throw error
+          }
+        }
+        const backendResultNode = backendWorking.dir.contents.get('tinygo-backend-result.json')
+        if (!(backendResultNode instanceof File)) {
+          throw new Error(`tinygo backend did not write /working/tinygo-backend-result.json (exit ${backendExitCode})`)
+        }
+        const backendResult = JSON.parse(textDecoder.decode(backendResultNode.data)) as TinyGoBackendResultManifest
+        if (!backendResult.ok) {
+          throw new Error((backendResult.diagnostics ?? []).join('; ') || `tinygo backend returned a failed result (exit ${backendExitCode})`)
+        }
+        const backendResultVerification = verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest(
+          parsedBackendInputManifest,
+          {
+            bitcodeFiles: backendInputVerification.compileJobs.map((compileJob) => compileJob.bitcodeOutputPath ?? ''),
+          } as TinyGoLoweredBitcodeManifest,
+          backendResult,
+        )
+        frontendLoweredBitcodeManifestVerification = backendResultVerification.loweredBitcodeManifest
+        if (backendResultVerification.generatedFiles.length) {
+          for (const file of backendResultVerification.generatedFiles) {
+            appendLog(`backend materialize ${file.path}`, 'running')
+          }
+          await materializeGeneratedFiles(writableFileSystem, backendResultVerification.generatedFiles)
+        }
+        const commandBatchVerification = backendResultVerification.commandBatch
+        const loweredCommandBatchVerification = backendResultVerification.loweredCommandBatch
+        const loweredArtifactVerification = backendResultVerification.loweredArtifact
+        const commandArtifactVerification = backendResultVerification.commandArtifact
+        const loweredIRVerification = backendResultVerification.loweredIR
+        frontendLoweredIRVerification = loweredIRVerification
+        frontendLoweredArtifactVerification = loweredArtifactVerification
+        frontendCommandArtifactVerification = commandArtifactVerification
+        frontendLoweredSourcesManifest = backendResultVerification.loweredSources
+        appendLog(
+          `backend lowered ir units=${loweredIRVerification.units?.length ?? 0} imports=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.imports?.length ?? 0), 0)} functions=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.functions?.length ?? 0), 0)} types=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.types?.length ?? 0), 0)} consts=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.constants?.length ?? 0), 0)} vars=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.variables?.length ?? 0), 0)} decls=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.declarations?.length ?? 0), 0)}`,
+          'idle',
+        )
+        appendLog(
+          `backend lowered command batch compile=${loweredCommandBatchVerification.compileCommands.length} linkArgv=${loweredCommandBatchVerification.linkCommand.argv.length}`,
+          'idle',
+        )
+        appendLog(
+          `backend lowered artifact objects=${loweredArtifactVerification.objectFiles.length} output=${loweredArtifactVerification.artifactOutputPath}`,
+          'idle',
+        )
+        appendLog(
+          `backend command batch compile=${commandBatchVerification.compileCommands.length} linkArgv=${commandBatchVerification.linkCommand.argv.length}`,
+          'idle',
+        )
+        appendLog(
+          `backend command artifact output=${commandArtifactVerification.artifactOutputPath} inputs=${commandArtifactVerification.bitcodeFiles.length}`,
+          'idle',
+        )
+        appendLog(
+          `backend lowered bitcode outputs=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length} last=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length === 0 ? 'none' : backendResultVerification.loweredBitcodeManifest.bitcodeFiles[backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length - 1] ?? 'none'}`,
+          'idle',
+        )
+        const toolPlan = frontendToolPlan ?? result.plan
+        for (const step of toolPlan) {
+          appendLog(`$ ${step.argv.join(' ')}`, 'running')
+          const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
+          if (stepResult.returncode !== 0) {
+            setPhase('smoke', 'failed', 'error')
+            if (stepResult.stdout.trim() !== '') {
+              appendLog(stepResult.stdout.trim(), 'error')
+            }
+            if (stepResult.stderr.trim() !== '') {
+              appendLog(stepResult.stderr.trim(), 'error')
+            }
+            appendLog(`build step failed with exit code ${stepResult.returncode}`, 'error')
+            return
+          }
+        }
+        for (const step of [...loweredCommandBatchVerification.compileCommands, loweredCommandBatchVerification.linkCommand]) {
+          appendLog(`$ ${step.argv.join(' ')}`, 'running')
+          const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
+          if (stepResult.returncode !== 0) {
+            setPhase('smoke', 'failed', 'error')
+            if (stepResult.stdout.trim() !== '') {
+              appendLog(stepResult.stdout.trim(), 'error')
+            }
+            if (stepResult.stderr.trim() !== '') {
+              appendLog(stepResult.stderr.trim(), 'error')
+            }
+            appendLog(`lowered build step failed with exit code ${stepResult.returncode}`, 'error')
+            return
+          }
+        }
+        const loweredBitcodeCompileCommands = commandBatchVerification.compileCommands
+        frontendLoweredBitcodeCompileCommands = loweredBitcodeCompileCommands
+        const loweredBitcodeOutputDirectories = new Set<string>()
+        for (const step of loweredBitcodeCompileCommands) {
+          const outputPath = step.argv[step.argv.length - 1] ?? ''
+          const segments = outputPath.split('/').filter(Boolean)
+          let currentPath = ''
+          for (const [index, segment] of segments.entries()) {
+            currentPath += `/${segment}`
+            if (index === 0 || index === segments.length - 1 || loweredBitcodeOutputDirectories.has(currentPath)) {
+              continue
+            }
+            try {
+              await writableFileSystem.mkdir(currentPath)
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error)
+              if (!message.includes('exists')) {
+                throw error
+              }
+            }
+            loweredBitcodeOutputDirectories.add(currentPath)
+          }
+        }
+        for (const step of loweredBitcodeCompileCommands) {
+          appendLog(`$ ${step.argv.join(' ')}`, 'running')
+          const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
+          if (stepResult.returncode !== 0) {
+            setPhase('smoke', 'failed', 'error')
+            if (stepResult.stdout.trim() !== '') {
+              appendLog(stepResult.stdout.trim(), 'error')
+            }
+            if (stepResult.stderr.trim() !== '') {
+              appendLog(stepResult.stderr.trim(), 'error')
+            }
+            appendLog(`lowered bitcode step failed with exit code ${stepResult.returncode}`, 'error')
+            return
+          }
+        }
+      } else {
+        for (const step of result.plan) {
+          appendLog(`$ ${step.argv.join(' ')}`, 'running')
+          const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
+          if (stepResult.returncode !== 0) {
+            setPhase('smoke', 'failed', 'error')
+            if (stepResult.stdout.trim() !== '') {
+              appendLog(stepResult.stdout.trim(), 'error')
+            }
+            if (stepResult.stderr.trim() !== '') {
+              appendLog(stepResult.stderr.trim(), 'error')
+            }
+            appendLog(`build step failed with exit code ${stepResult.returncode}`, 'error')
+            return
+          }
+        }
+      }
+
+      const artifactPath = frontendCommandArtifactVerification?.artifactOutputPath ?? result.artifact ?? '/working/out.wasm'
+      const artifact = await fileSystem.readFile(artifactPath)
+      const artifactBytes = typeof artifact === 'string' ? textEncoder.encode(artifact) : artifact
+      const size = artifactBytes.byteLength
+      lastBuildArtifactPath = artifactPath
+      lastBuildArtifactBytes = new Uint8Array(artifactBytes)
+      setPhase('smoke', `${size.toLocaleString()} bytes`, 'success')
+      appendLog(`build artifact ready: ${artifactPath} (${size.toLocaleString()} bytes)`, 'success')
+      if (frontendResult) {
+        if (!frontendCommandArtifactVerification) {
+          throw new Error('missing command artifact verification for final artifact output')
+        }
+        const finalArtifactVerification = verifyTinyGoFinalArtifactFile(frontendCommandArtifactVerification, {
+          path: artifactPath,
+          bytes: artifact,
+        })
+        appendLog(
+          `frontend final artifact verified format=${finalArtifactVerification.format} output=${finalArtifactVerification.path}`,
+          'success',
+        )
+        if (!frontendLoweredArtifactVerification) {
+          throw new Error('missing lowered artifact verification for lowered object outputs')
+        }
+        const loweredObjectVerification = verifyTinyGoLoweredObjectFiles(
+          frontendLoweredArtifactVerification,
+          await Promise.all(frontendLoweredArtifactVerification.objectFiles.map(async (objectFile) => ({
+            path: objectFile,
+            bytes: await fileSystem.readFile(objectFile),
+          }))),
+        )
+        appendLog(
+          `frontend lowered objects ready count=${loweredObjectVerification.objectFiles.length} total=${loweredObjectVerification.totalBytes.toLocaleString()} bytes`,
+          'success',
+        )
+        appendLog(
+          `frontend lowered objects verified format=wasm count=${loweredObjectVerification.objectFiles.length}`,
+          'success',
+        )
+        if (!frontendLoweredBitcodeCompileCommands) {
+          throw new Error('missing lowered bitcode compile commands for lowered bitcode outputs')
+        }
+        if (!frontendLoweredBitcodeManifestVerification) {
+          throw new Error('missing lowered bitcode manifest verification for lowered bitcode outputs')
+        }
+        const loweredBitcodeVerification = verifyTinyGoLoweredBitcodeFiles(
+          frontendLoweredBitcodeManifestVerification.bitcodeFiles,
+          await Promise.all(frontendLoweredBitcodeManifestVerification.bitcodeFiles.map(async (bitcodeFile) => ({
+            path: bitcodeFile,
+            bytes: await fileSystem.readFile(bitcodeFile),
+          }))),
+        )
+        appendLog(
+          `frontend lowered bitcode ready count=${loweredBitcodeVerification.bitcodeFiles.length} total=${loweredBitcodeVerification.totalBytes.toLocaleString()} bytes`,
+          'success',
+        )
+        appendLog(
+          `frontend lowered bitcode verified format=llvm-bc count=${loweredBitcodeVerification.bitcodeFiles.length}`,
+          'success',
+        )
+        const loweredArtifact = await fileSystem.readFile('/working/tinygo-lowered-out.wasm')
+        const loweredArtifactSize = typeof loweredArtifact === 'string' ? loweredArtifact.length : loweredArtifact.byteLength
+        appendLog(`frontend lowered artifact ready: /working/tinygo-lowered-out.wasm (${loweredArtifactSize.toLocaleString()} bytes)`, 'success')
+      }
+      try {
+        const bootstrapModule =
+          (await WebAssembly.instantiate(
+            artifactBytes as BufferSource,
+            {},
+          )) as WebAssembly.WebAssemblyInstantiatedSource
+        appendLog('frontend final artifact compiled module=ok', 'success')
+        const bootstrapInstance = bootstrapModule.instance
+        const bootstrapVerification = frontendBootstrapArtifactExpectationSource
+          ? verifyTinyGoBootstrapArtifactExpectation(
+              frontendBootstrapArtifactExpectationSource,
+              bootstrapInstance.exports as Record<string, unknown>,
+            )
+          : {
+              ok: false,
+              reason: 'missing frontend bootstrap expectation',
+            }
+        const bootstrapManifest = readTinyGoBootstrapManifest(bootstrapInstance.exports as Record<string, unknown>)
+        if (bootstrapManifest) {
+          const parsedBootstrapManifest = JSON.parse(bootstrapManifest) as {
+            entryFile?: string
+            allFileCount?: number
+            materializedFiles?: string[]
+            sourceSelection?: {
+              allCompile?: string[]
+            }
+          }
+          const bootstrapAllFileCount = Array.isArray(parsedBootstrapManifest.sourceSelection?.allCompile)
+            ? parsedBootstrapManifest.sourceSelection.allCompile.length
+            : parsedBootstrapManifest.allFileCount
+          appendLog(
+            `bootstrap manifest entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
+            'idle',
+          )
+          if (Array.isArray(parsedBootstrapManifest.materializedFiles)) {
+            appendLog(
+              `bootstrap dispatch materialized=${parsedBootstrapManifest.materializedFiles.length}`,
+              'idle',
+            )
+          }
+          if (bootstrapVerification?.ok) {
+            appendLog(
+              `bootstrap roundtrip verified entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
+              'success',
+            )
+            if (frontendResult) {
+              if (!frontendLoweredSourcesManifest) {
+                throw new Error('missing lowered sources manifest for lowered artifact probe')
+              }
+              const loweredSourceFileContents: Record<string, string | Uint8Array> = {}
+              for (const unit of frontendLoweredSourcesManifest.units ?? []) {
+                for (const sourceFile of unit.sourceFiles ?? []) {
+                  if (loweredSourceFileContents[sourceFile] !== undefined) {
+                    continue
+                  }
+                  try {
+                    loweredSourceFileContents[sourceFile] = await fileSystem.readFile(sourceFile)
+                  } catch (error) {
+                    const workspaceRelativePath = sourceFile.startsWith('/workspace/')
+                      ? sourceFile.slice('/workspace/'.length)
+                      : ''
+                    if (
+                      workspaceRelativePath !== '' &&
+                      workspaceFiles !== null &&
+                      workspaceFiles[workspaceRelativePath] !== undefined
+                    ) {
+                      loweredSourceFileContents[sourceFile] = workspaceFiles[workspaceRelativePath]
+                      continue
+                    }
+                    if (sourceFile === '/workspace/main.go') {
+                      loweredSourceFileContents[sourceFile] = bootstrapGoEntrySource
+                      continue
+                    }
+                    throw error
+                  }
+                }
+              }
+              const loweredArtifact = await fileSystem.readFile('/working/tinygo-lowered-out.wasm')
+              const loweredModuleBytes = typeof loweredArtifact === 'string' ? textEncoder.encode(loweredArtifact) : loweredArtifact
+              const loweredModule =
+                (await WebAssembly.instantiate(
+                  loweredModuleBytes as BufferSource,
+                  {},
+                )) as WebAssembly.WebAssemblyInstantiatedSource
+              const loweredVerification = verifyTinyGoLoweredArtifactExports(
+                loweredModule.instance,
+                frontendLoweredSourcesManifest,
+                loweredSourceFileContents,
+                frontendLoweredIRVerification ?? undefined,
+              )
+              appendLog(
+                `frontend lowered probe verified units=${loweredVerification.units.length} kinds=${new Set(loweredVerification.units.map((unit) => unit.kindTag)).size} hashes=${new Set(loweredVerification.units.map((unit) => unit.sourceHash)).size} imports=${new Set(loweredVerification.units.map((unit) => unit.importCount)).size} importPaths=${new Set(loweredVerification.units.map((unit) => unit.importPathHash)).size} blankImports=${new Set(loweredVerification.units.map((unit) => unit.blankImportCount)).size} dotImports=${new Set(loweredVerification.units.map((unit) => unit.dotImportCount)).size} aliasedImports=${new Set(loweredVerification.units.map((unit) => unit.aliasedImportCount)).size} funcs=${new Set(loweredVerification.units.map((unit) => unit.functionCount)).size} funcNameHashes=${new Set(loweredVerification.units.map((unit) => unit.functionNameHash)).size} funcLiterals=${new Set(loweredVerification.units.map((unit) => unit.funcLiteralCount)).size} funcParameters=${new Set(loweredVerification.units.map((unit) => unit.funcParameterCount)).size} funcResults=${new Set(loweredVerification.units.map((unit) => unit.funcResultCount)).size} variadicParameters=${new Set(loweredVerification.units.map((unit) => unit.variadicParameterCount)).size} namedResults=${new Set(loweredVerification.units.map((unit) => unit.namedResultCount)).size} typeParameters=${new Set(loweredVerification.units.map((unit) => unit.typeParameterCount)).size} genericFunctions=${new Set(loweredVerification.units.map((unit) => unit.genericFunctionCount)).size} genericTypes=${new Set(loweredVerification.units.map((unit) => unit.genericTypeCount)).size} calls=${new Set(loweredVerification.units.map((unit) => unit.callExpressionCount)).size} builtinCalls=${new Set(loweredVerification.units.map((unit) => unit.builtinCallCount)).size} appendCalls=${new Set(loweredVerification.units.map((unit) => unit.appendCallCount)).size} lenCalls=${new Set(loweredVerification.units.map((unit) => unit.lenCallCount)).size} makeCalls=${new Set(loweredVerification.units.map((unit) => unit.makeCallCount)).size} capCalls=${new Set(loweredVerification.units.map((unit) => unit.capCallCount)).size} copyCalls=${new Set(loweredVerification.units.map((unit) => unit.copyCallCount)).size} panicCalls=${new Set(loweredVerification.units.map((unit) => unit.panicCallCount)).size} recoverCalls=${new Set(loweredVerification.units.map((unit) => unit.recoverCallCount)).size} newCalls=${new Set(loweredVerification.units.map((unit) => unit.newCallCount)).size} deleteCalls=${new Set(loweredVerification.units.map((unit) => unit.deleteCallCount)).size} compositeLiterals=${new Set(loweredVerification.units.map((unit) => unit.compositeLiteralCount)).size} selectorExpressions=${new Set(loweredVerification.units.map((unit) => unit.selectorExpressionCount)).size} selectorNameHashes=${new Set(loweredVerification.units.map((unit) => unit.selectorNameHash)).size} indexExpressions=${new Set(loweredVerification.units.map((unit) => unit.indexExpressionCount)).size} sliceExpressions=${new Set(loweredVerification.units.map((unit) => unit.sliceExpressionCount)).size} keyValueExpressions=${new Set(loweredVerification.units.map((unit) => unit.keyValueExpressionCount)).size} typeAssertions=${new Set(loweredVerification.units.map((unit) => unit.typeAssertionCount)).size} blankIdentifiers=${new Set(loweredVerification.units.map((unit) => unit.blankIdentifierCount)).size} blankAssignmentTargets=${new Set(loweredVerification.units.map((unit) => unit.blankAssignmentTargetCount)).size} unaryExpressions=${new Set(loweredVerification.units.map((unit) => unit.unaryExpressionCount)).size} binaryExpressions=${new Set(loweredVerification.units.map((unit) => unit.binaryExpressionCount)).size} sends=${new Set(loweredVerification.units.map((unit) => unit.sendStatementCount)).size} receives=${new Set(loweredVerification.units.map((unit) => unit.receiveExpressionCount)).size} assignments=${new Set(loweredVerification.units.map((unit) => unit.assignStatementCount)).size} defines=${new Set(loweredVerification.units.map((unit) => unit.defineStatementCount)).size} increments=${new Set(loweredVerification.units.map((unit) => unit.incStatementCount)).size} decrements=${new Set(loweredVerification.units.map((unit) => unit.decStatementCount)).size} returns=${new Set(loweredVerification.units.map((unit) => unit.returnStatementCount)).size} goStatements=${new Set(loweredVerification.units.map((unit) => unit.goStatementCount)).size} deferStatements=${new Set(loweredVerification.units.map((unit) => unit.deferStatementCount)).size} ifStatements=${new Set(loweredVerification.units.map((unit) => unit.ifStatementCount)).size} rangeStatements=${new Set(loweredVerification.units.map((unit) => unit.rangeStatementCount)).size} switchStatements=${new Set(loweredVerification.units.map((unit) => unit.switchStatementCount)).size} typeSwitchStatements=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchStatementCount)).size} typeSwitchCases=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchCaseClauseCount)).size} typeSwitchGuardNameHashes=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchGuardNameHash)).size} typeSwitchCaseTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchCaseTypeHash)).size} selectStatements=${new Set(loweredVerification.units.map((unit) => unit.selectStatementCount)).size} switchCases=${new Set(loweredVerification.units.map((unit) => unit.switchCaseClauseCount)).size} selectClauses=${new Set(loweredVerification.units.map((unit) => unit.selectCommClauseCount)).size} forStatements=${new Set(loweredVerification.units.map((unit) => unit.forStatementCount)).size} breakStatements=${new Set(loweredVerification.units.map((unit) => unit.breakStatementCount)).size} breakLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.breakLabelNameHash)).size} continueStatements=${new Set(loweredVerification.units.map((unit) => unit.continueStatementCount)).size} continueLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.continueLabelNameHash)).size} labels=${new Set(loweredVerification.units.map((unit) => unit.labeledStatementCount)).size} labelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.labelNameHash)).size} gotos=${new Set(loweredVerification.units.map((unit) => unit.gotoStatementCount)).size} gotoLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.gotoLabelNameHash)).size} fallthroughs=${new Set(loweredVerification.units.map((unit) => unit.fallthroughStatementCount)).size} methods=${new Set(loweredVerification.units.map((unit) => unit.methodCount)).size} methodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.methodNameHash)).size} methodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.methodSignatureHash)).size} exportedMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedMethodNameHash)).size} exportedMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedMethodSignatureHash)).size} exports=${new Set(loweredVerification.units.map((unit) => unit.exportedFunctionCount)).size} exportedFunctionNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedFunctionNameHash)).size} types=${new Set(loweredVerification.units.map((unit) => unit.typeCount)).size} typeNameHashes=${new Set(loweredVerification.units.map((unit) => unit.typeNameHash)).size} exportedTypes=${new Set(loweredVerification.units.map((unit) => unit.exportedTypeCount)).size} exportedTypeNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedTypeNameHash)).size} structs=${new Set(loweredVerification.units.map((unit) => unit.structTypeCount)).size} interfaces=${new Set(loweredVerification.units.map((unit) => unit.interfaceTypeCount)).size} mapTypes=${new Set(loweredVerification.units.map((unit) => unit.mapTypeCount)).size} chanTypes=${new Set(loweredVerification.units.map((unit) => unit.chanTypeCount)).size} sendOnlyChanTypes=${new Set(loweredVerification.units.map((unit) => unit.sendOnlyChanTypeCount)).size} receiveOnlyChanTypes=${new Set(loweredVerification.units.map((unit) => unit.receiveOnlyChanTypeCount)).size} arrayTypes=${new Set(loweredVerification.units.map((unit) => unit.arrayTypeCount)).size} sliceTypes=${new Set(loweredVerification.units.map((unit) => unit.sliceTypeCount)).size} pointerTypes=${new Set(loweredVerification.units.map((unit) => unit.pointerTypeCount)).size} structFields=${new Set(loweredVerification.units.map((unit) => unit.structFieldCount)).size} embeddedStructFields=${new Set(loweredVerification.units.map((unit) => unit.embeddedStructFieldCount)).size} taggedStructFields=${new Set(loweredVerification.units.map((unit) => unit.taggedStructFieldCount)).size} structFieldNameHashes=${new Set(loweredVerification.units.map((unit) => unit.structFieldNameHash)).size} structFieldTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.structFieldTypeHash)).size} embeddedStructFieldTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.embeddedStructFieldTypeHash)).size} taggedStructFieldTagHashes=${new Set(loweredVerification.units.map((unit) => unit.taggedStructFieldTagHash)).size} interfaceMethods=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodCount)).size} interfaceMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodNameHash)).size} interfaceMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodSignatureHash)).size} embeddedInterfaceMethods=${new Set(loweredVerification.units.map((unit) => unit.embeddedInterfaceMethodCount)).size} embeddedInterfaceMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.embeddedInterfaceMethodNameHash)).size} consts=${new Set(loweredVerification.units.map((unit) => unit.constCount)).size} constNameHashes=${new Set(loweredVerification.units.map((unit) => unit.constNameHash)).size} vars=${new Set(loweredVerification.units.map((unit) => unit.varCount)).size} varNameHashes=${new Set(loweredVerification.units.map((unit) => unit.varNameHash)).size} exportedConsts=${new Set(loweredVerification.units.map((unit) => unit.exportedConstCount)).size} exportedConstNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedConstNameHash)).size} exportedVars=${new Set(loweredVerification.units.map((unit) => unit.exportedVarCount)).size} exportedVarNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedVarNameHash)).size} declarationCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationCount)).size} declarationNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationNameHash)).size} declarationSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationSignatureHash)).size} declarationKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationKindHash)).size} declarationExportedCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedCount)).size} declarationExportedNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedNameHash)).size} declarationExportedSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedSignatureHash)).size} declarationExportedKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedKindHash)).size} declarationMethodCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodCount)).size} declarationMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodNameHash)).size} declarationMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodSignatureHash)).size} declarationMethodKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodKindHash)).size} placeholderBlocks=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockCount)).size} placeholderBlockHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockHash)).size} placeholderBlockSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockSignatureHash)).size} placeholderBlockRuntimeHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockRuntimeHash)).size} loweringBlocks=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockCount)).size} loweringBlockHashes=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockHash)).size} loweringBlockRuntimeHashes=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockRuntimeHash)).size} mains=${new Set(loweredVerification.units.map((unit) => unit.mainCount)).size} inits=${new Set(loweredVerification.units.map((unit) => unit.initCount)).size}`,
+                'success',
+              )
+            }
+            setPhase('verify', 'verified', 'success')
+          } else if (bootstrapVerification) {
+            setPhase('verify', 'failed', 'error')
+            appendLog(
+              `bootstrap verification failed: ${bootstrapVerification.reason} entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
+              'error',
+            )
+          }
+        } else if (bootstrapVerification) {
+          setPhase('verify', 'failed', 'error')
+          appendLog(
+            `bootstrap verification failed: ${bootstrapVerification.reason}`,
+            'error',
+          )
+        }
+      } catch (error) {
+        setPhase('verify', 'failed', 'error')
+        appendLog(`artifact probe failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      }
+    } catch (error) {
+      setPhase('smoke', 'failed', 'error')
+      setPhase('verify', 'failed', 'error')
+      appendLog(`build execution failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
+    } finally {
+      runtimeWorkingTreeDirty = true
+      setControlsLocked(false)
+    }
+  }
+
+  const runtime: TinyGoRuntime = {
+    boot: async () => {
+      if (emception) {
+        return
+      }
+      await runWithAction('booting', async () => {
+        await ensureEmception()
+      })
+    },
+    plan: async () =>
+      runWithAction('planning', async () => {
+        try {
+          setControlsLocked(true)
+          return cloneJsonValue(await planBuild())
+        } finally {
+          setControlsLocked(false)
+        }
+      }),
+    execute: async () => {
+      await runWithAction('executing', async () => {
+        await executeBuildPlan()
+      })
+    },
+    reset: () => {
+      ensureActionIdle()
+      disposeEmceptionRuntime()
+      invalidateCachedBuildState()
+      injectedBuildRequestOverrides = null
+      injectedDriverBridgeManifest = null
+      injectedWorkspaceFiles = null
+      clearActivityLog()
+      resetPhasesToIdle()
+      appendLog('log cleared', 'idle')
+    },
+    dispose: () => {
+      disposeEmceptionRuntime()
+      invalidateCachedBuildState()
+      injectedBuildRequestOverrides = null
+      injectedDriverBridgeManifest = null
+      injectedWorkspaceFiles = null
+      clearActivityLog()
+      resetPhasesToIdle()
+    },
+    readActivityLog: () => activityLog,
+    readBuildArtifact: () => {
+      if (lastBuildArtifactPath === null || lastBuildArtifactBytes === null) {
+        return null
+      }
+      return {
+        path: lastBuildArtifactPath,
+        bytes: new Uint8Array(lastBuildArtifactBytes),
+      }
+    },
+    readFrontendAnalysisInputManifest: () => {
+      if (lastFrontendAnalysisInputManifest === null) {
+        return null
+      }
+      return cloneJsonValue(lastFrontendAnalysisInputManifest) as TinyGoFrontendInputManifest
+    },
+    setBuildRequestOverrides: (overrides) => {
+      ensureActionIdle()
+      invalidateCachedBuildState()
+      injectedBuildRequestOverrides = overrides === null ? null : cloneJsonValue(overrides)
+      setPhase('probe', 'idle', 'idle')
+      setPhase('smoke', 'idle', 'idle')
+      setPhase('verify', 'idle', 'idle')
+    },
+    setDriverBridgeManifest: (manifest) => {
+      ensureActionIdle()
+      invalidateCachedBuildState()
+      injectedDriverBridgeManifest = manifest === null ? null : cloneJsonValue(manifest)
+      setPhase('probe', 'idle', 'idle')
+      setPhase('smoke', 'idle', 'idle')
+      setPhase('verify', 'idle', 'idle')
+    },
+    setWorkspaceFiles: (files) => {
+      ensureActionIdle()
+      invalidateCachedBuildState()
+      injectedWorkspaceFiles = files === null ? null : cloneJsonValue(files)
+      setPhase('probe', 'idle', 'idle')
+      setPhase('smoke', 'idle', 'idle')
+      setPhase('verify', 'idle', 'idle')
+    },
+  }
+
+  for (const entry of options.initialLogMessages ?? []) {
+    appendLog(entry.message, entry.tone ?? 'idle')
+  }
+
+  return runtime
+}
+
+export const createTinyGoBrowserRuntime = (options: TinyGoBrowserRuntimeOptions): TinyGoBrowserRuntime => {
+  let lastTone: Exclude<PhaseTone, 'idle'> | 'idle' = 'idle'
+  let activityLog = ''
+
+  const runtime = createTinyGoRuntime({
+    assetBaseUrl: options.baseUrl,
+    bootstrapGoEntrySource: options.bootstrapGoEntrySource,
+    initialLogMessages: (options.initialLogs ?? []).map((message) => ({ message })),
+    onControlsLockedChange: options.onControlsLockedChange,
+    onPhaseChange: options.onPhaseChange,
+    now: options.now,
+    onLogReset: () => {
+      activityLog = ''
+      lastTone = 'idle'
+      options.onActivityLogChange?.('', 'idle')
+    },
+    onLogAppended: (entry) => {
+      activityLog += entry.line
+      lastTone = entry.tone
+      options.onActivityLogChange?.(activityLog, lastTone)
+    },
+  })
+
+  return runtime
+}

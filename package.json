@@ -11,7 +11,7 @@
     "predev": "npm run prepare:assets",
     "prebuild": "npm run prepare:assets",
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build --base ./",
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "test:host": "node --test tests/bootstrap-exports.test.ts tests/build-go-probe.test.mjs tests/compile-unit.test.ts tests/emception-files.test.mjs tests/fetch-emception-worker.test.mjs tests/fetch-tinygo-toolchain.test.mjs tests/lowered-exports.test.ts tests/patch-emception-worker.test.mjs tests/tinygo-driver-bridge-script.test.mjs tests/tinygo-host.test.mjs",
