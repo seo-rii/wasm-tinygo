@@ -10,6 +10,8 @@ import { chromium } from 'playwright'
 
 import { normalizeTinyGoDriverBridgeManifestForBrowser } from '../src/compile-unit.ts'
 
+const stripAnsi = (value) => value.replace(/\u001B\[[0-9;]*m/g, '')
+
 test('browser smoke completes TinyGo bootstrap flow through test hooks', { timeout: 600000 }, async (t) => {
   const browserWorkspaceFiles = {
     'go.mod': `module example.com/browserprobe
@@ -158,14 +160,14 @@ func main() {
   let previewUrl = ''
   preview.stdout.on('data', (chunk) => {
     previewOutput += chunk.toString()
-    const matchedUrl = previewOutput.match(/http:\/\/127\.0\.0\.1:(\d+)\//)
+    const matchedUrl = stripAnsi(previewOutput).match(/http:\/\/127\.0\.0\.1:(\d+)\//)
     if (matchedUrl) {
       previewUrl = matchedUrl[0]
     }
   })
   preview.stderr.on('data', (chunk) => {
     previewOutput += chunk.toString()
-    const matchedUrl = previewOutput.match(/http:\/\/127\.0\.0\.1:(\d+)\//)
+    const matchedUrl = stripAnsi(previewOutput).match(/http:\/\/127\.0\.0\.1:(\d+)\//)
     if (matchedUrl) {
       previewUrl = matchedUrl[0]
     }
@@ -185,11 +187,11 @@ func main() {
       previewOutput.includes('operation not permitted') ||
       previewOutput.includes('Operation not permitted'))
   ) {
-    t.skip(`browser smoke skipped: preview server is not permitted in this sandbox\n${previewOutput}`)
+    t.skip(`browser smoke skipped: preview server is not permitted in this sandbox\n${stripAnsi(previewOutput)}`)
     return
   }
-  assert.equal(previewReady, true, previewOutput)
-  assert.notEqual(previewUrl, '', previewOutput)
+  assert.equal(previewReady, true, stripAnsi(previewOutput))
+  assert.notEqual(previewUrl, '', stripAnsi(previewOutput))
 
   let browser
   try {
