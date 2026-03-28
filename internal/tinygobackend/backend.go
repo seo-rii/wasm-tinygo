@@ -22,12 +22,18 @@ type Input struct {
 type CompileJob struct {
 	ID                string   `json:"id"`
 	Kind              string   `json:"kind"`
+	ImportPath        string   `json:"importPath,omitempty"`
+	Imports           []string `json:"imports"`
+	DepOnly           bool     `json:"depOnly"`
+	ModulePath        string   `json:"modulePath"`
+	PackageName       string   `json:"packageName,omitempty"`
 	PackageDir        string   `json:"packageDir"`
 	Files             []string `json:"files"`
 	BitcodeOutputPath string   `json:"bitcodeOutputPath"`
 	LLVMTarget        string   `json:"llvmTarget"`
 	CFlags            []string `json:"cflags"`
 	OptimizeFlag      string   `json:"optimizeFlag,omitempty"`
+	Standard          bool     `json:"standard"`
 }
 
 type LinkJob struct {
@@ -40,9 +46,15 @@ type LinkJob struct {
 type LoweredUnit struct {
 	ID                string   `json:"id"`
 	Kind              string   `json:"kind"`
+	ImportPath        string   `json:"importPath,omitempty"`
+	Imports           []string `json:"imports"`
+	DepOnly           bool     `json:"depOnly"`
+	ModulePath        string   `json:"modulePath"`
+	PackageName       string   `json:"packageName,omitempty"`
 	PackageDir        string   `json:"packageDir"`
 	SourceFiles       []string `json:"sourceFiles"`
 	LoweredSourcePath string   `json:"loweredSourcePath"`
+	Standard          bool     `json:"standard"`
 }
 
 type LoweredSourcesManifest struct {
@@ -99,6 +111,8 @@ type LoweredIRLoweringBlock struct {
 type LoweredIRUnit struct {
 	ID                string                   `json:"id"`
 	Kind              string                   `json:"kind"`
+	ImportPath        string                   `json:"importPath,omitempty"`
+	ModulePath        string                   `json:"modulePath"`
 	PackageDir        string                   `json:"packageDir"`
 	SourceFiles       []string                 `json:"sourceFiles"`
 	LoweredSourcePath string                   `json:"loweredSourcePath"`
@@ -178,12 +192,31 @@ func Build(input Input) (Result, error) {
 			if len(compileJob.Files) == 0 {
 				return Result{}, fmt.Errorf("source files are required for compile job %s", compileJob.ID)
 			}
+			depOnly := compileJob.DepOnly
+			standard := compileJob.Standard
+			switch compileJob.Kind {
+			case "program":
+				depOnly = false
+				standard = false
+			case "imported":
+				depOnly = true
+				standard = false
+			case "stdlib":
+				depOnly = true
+				standard = true
+			}
 			loweredUnits = append(loweredUnits, LoweredUnit{
 				ID:                compileJob.ID,
 				Kind:              compileJob.Kind,
+				ImportPath:        compileJob.ImportPath,
+				Imports:           append([]string{}, compileJob.Imports...),
+				DepOnly:           depOnly,
+				ModulePath:        compileJob.ModulePath,
+				PackageName:       compileJob.PackageName,
 				PackageDir:        compileJob.PackageDir,
 				SourceFiles:       append([]string{}, compileJob.Files...),
 				LoweredSourcePath: "/working/tinygo-lowered/" + compileJob.ID + ".c",
+				Standard:          standard,
 			})
 		}
 	}
@@ -227,7 +260,7 @@ func Build(input Input) (Result, error) {
 		symbolID := strings.NewReplacer("-", "_", "/", "_", ".", "_").Replace(loweredUnit.ID)
 		sourceHash := uint32(0)
 		sourceHashPosition := uint32(1)
-		packageName := ""
+		packageName := loweredUnit.PackageName
 		importCount := 0
 		importPathHash := uint32(0)
 		importPathHashPosition := uint32(1)
@@ -2301,6 +2334,8 @@ func Build(input Input) (Result, error) {
 		loweredIRUnits = append(loweredIRUnits, LoweredIRUnit{
 			ID:                loweredUnit.ID,
 			Kind:              loweredUnit.Kind,
+			ImportPath:        loweredUnit.ImportPath,
+			ModulePath:        loweredUnit.ModulePath,
 			PackageDir:        loweredUnit.PackageDir,
 			SourceFiles:       append([]string{}, loweredUnit.SourceFiles...),
 			LoweredSourcePath: loweredUnit.LoweredSourcePath,

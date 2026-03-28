@@ -24,10 +24,54 @@ func TestSourceSelectionOmitsLegacyDerivedGroups(t *testing.T) {
 	}
 }
 
-func TestBuildProducesCompileGroups(t *testing.T) {
-	result, err := Build(Input{
+func analysisSplitTestInput() Input {
+	return Input{
+		BuildTags: []string{"tinygo.wasm", "scheduler.tasks"},
+		BuildContext: BuildContext{
+			Target:     "wasm",
+			LLVMTarget: "wasm32-unknown-wasi",
+			GOOS:       "js",
+			GOARCH:     "wasm",
+			GC:         "precise",
+			Scheduler:  "tasks",
+			BuildTags:  []string{"scheduler.tasks", "tinygo.wasm"},
+			ModulePath: "example.com/app",
+		},
 		OptimizeFlag: "-Oz",
 		EntryFile:    "/workspace/main.go",
+		ModulePath:   "example.com/app",
+		PackageGraph: []PackageGraphPackage{
+			{
+				DepOnly:    false,
+				Dir:        "/workspace",
+				Files:      PackageGraphFiles{GoFiles: []string{"main.go"}},
+				ImportPath: "command-line-arguments",
+				Imports:    []string{"example.com/app/lib"},
+				ModulePath: "example.com/app",
+				Name:       "main",
+				Standard:   false,
+			},
+			{
+				DepOnly:    true,
+				Dir:        "/workspace/lib",
+				Files:      PackageGraphFiles{GoFiles: []string{"helper.go"}},
+				ImportPath: "example.com/app/lib",
+				Imports:    []string{"fmt"},
+				ModulePath: "example.com/app",
+				Name:       "helper",
+				Standard:   false,
+			},
+			{
+				DepOnly:    true,
+				Dir:        "/working/.tinygo-root/src/fmt",
+				Files:      PackageGraphFiles{GoFiles: []string{"print.go"}},
+				ImportPath: "fmt",
+				Imports:    []string{"errors", "io"},
+				ModulePath: "",
+				Name:       "fmt",
+				Standard:   true,
+			},
+		},
 		Toolchain: Toolchain{
 			Target:             "wasm",
 			ArtifactOutputPath: "/working/out.wasm",
@@ -40,9 +84,370 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 			},
 		},
 		CompileUnits: []IntermediateCompileUnit{
-			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
-			{Kind: "imported", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
-			{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+			{Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
+			{Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		},
+	}
+}
+
+func TestAnalyzeNormalizesFrontendBuildState(t *testing.T) {
+	analysis, err := Analyze(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	if analysis.EntryFile != "/workspace/main.go" {
+		t.Fatalf("unexpected analysis entry file: %#v", analysis)
+	}
+	if !reflect.DeepEqual(analysis.BuildTags, []string{"scheduler.tasks", "tinygo.wasm"}) {
+		t.Fatalf("unexpected analysis build tags: %#v", analysis.BuildTags)
+	}
+	if analysis.Toolchain.Target != "wasm" ||
+		analysis.Toolchain.LLVMTarget != "wasm32-unknown-wasi" ||
+		analysis.Toolchain.Linker != "wasm-ld" ||
+		analysis.Toolchain.TranslationUnitPath != "/working/tinygo-bootstrap.c" ||
+		analysis.Toolchain.ObjectOutputPath != "/working/tinygo-bootstrap.o" ||
+		analysis.Toolchain.ArtifactOutputPath != "/working/out.wasm" {
+		t.Fatalf("unexpected analysis toolchain: %#v", analysis.Toolchain)
+	}
+	if !reflect.DeepEqual(analysis.TargetAssets, []string{
+		"/working/.tinygo-root/targets/wasm-undefined.txt",
+		"/working/.tinygo-root/targets/wasm.json",
+	}) {
+		t.Fatalf("unexpected analysis target assets: %#v", analysis.TargetAssets)
+	}
+	if !reflect.DeepEqual(analysis.RuntimeSupport, []string{
+		"/working/.tinygo-root/src/device/arm/arm.go",
+		"/working/.tinygo-root/src/runtime/asm_tinygowasm.S",
+		"/working/.tinygo-root/src/runtime/gc_boehm.c",
+		"/working/.tinygo-root/src/runtime/internal/sys/zversion.go",
+	}) {
+		t.Fatalf("unexpected analysis runtime support: %#v", analysis.RuntimeSupport)
+	}
+	if len(analysis.CompileGroups) != 6 {
+		t.Fatalf("unexpected analysis compile groups: %#v", analysis.CompileGroups)
+	}
+	if !reflect.DeepEqual(analysis.CompileUnits, []IntermediateCompileUnit{
+		{DepOnly: false, Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected analysis compile units: %#v", analysis.CompileUnits)
+	}
+	if !reflect.DeepEqual(analysis.BuildContext, BuildContext{
+		Target:     "wasm",
+		LLVMTarget: "wasm32-unknown-wasi",
+		GOOS:       "js",
+		GOARCH:     "wasm",
+		GC:         "precise",
+		Scheduler:  "tasks",
+		BuildTags:  []string{"scheduler.tasks", "tinygo.wasm"},
+		ModulePath: "example.com/app",
+	}) {
+		t.Fatalf("unexpected analysis build context: %#v", analysis.BuildContext)
+	}
+	if !reflect.DeepEqual(analysis.PackageGraph, []PackageGraphPackage{
+		{DepOnly: false, Dir: "/workspace", Files: PackageGraphFiles{GoFiles: []string{"main.go"}}, ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", Name: "main", Standard: false},
+		{DepOnly: true, Dir: "/workspace/lib", Files: PackageGraphFiles{GoFiles: []string{"helper.go"}}, ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", Name: "helper", Standard: false},
+		{DepOnly: true, Dir: "/working/.tinygo-root/src/fmt", Files: PackageGraphFiles{GoFiles: []string{"print.go"}}, ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", Name: "fmt", Standard: true},
+	}) {
+		t.Fatalf("unexpected analysis package graph: %#v", analysis.PackageGraph)
+	}
+}
+
+func TestAnalyzeNormalizesProgramAliasAgainstPackageGraph(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.CompileUnits[0].Imports = nil
+	input.PackageGraph[0].ImportPath = "example.com/app"
+
+	analysis, err := Analyze(input)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	if got := analysis.CompileUnits[0].ImportPath; got != "example.com/app" {
+		t.Fatalf("unexpected program import path: %q", got)
+	}
+	if !reflect.DeepEqual(analysis.CompileUnits[0].Imports, []string{"example.com/app/lib"}) {
+		t.Fatalf("unexpected program imports: %#v", analysis.CompileUnits[0].Imports)
+	}
+	if got := analysis.PackageGraph[0].ImportPath; got != "example.com/app" {
+		t.Fatalf("unexpected package graph import path: %q", got)
+	}
+}
+
+func TestAnalyzeSynthesizesCompileUnitsFromPackageGraphWhenCompileUnitsAreOmitted(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.CompileUnits = nil
+	input.PackageGraph[0].ImportPath = "example.com/app"
+
+	analysis, err := Analyze(input)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(analysis.CompileUnits, []IntermediateCompileUnit{
+		{DepOnly: false, Kind: "program", ImportPath: "example.com/app", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected synthesized compile units: %#v", analysis.CompileUnits)
+	}
+	if len(analysis.CompileGroups) != 6 {
+		t.Fatalf("unexpected analysis compile groups: %#v", analysis.CompileGroups)
+	}
+	if !reflect.DeepEqual(analysis.AllCompileFiles, []string{
+		"/working/.tinygo-root/src/fmt/print.go",
+		"/workspace/lib/helper.go",
+		"/workspace/main.go",
+	}) {
+		t.Fatalf("unexpected all compile files: %#v", analysis.AllCompileFiles)
+	}
+}
+
+func TestAnalyzePreservesCompileUnitModulePathsFromPackageGraph(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.CompileUnits = nil
+	input.PackageGraph[0].ImportPath = "example.com/app"
+
+	analysis, err := Analyze(input)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(analysis.CompileUnits, []IntermediateCompileUnit{
+		{DepOnly: false, Kind: "program", ImportPath: "example.com/app", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected synthesized compile-unit module paths: %#v", analysis.CompileUnits)
+	}
+}
+
+func TestAdaptRealFillsProgramFactsFromAnalysisPackageGraph(t *testing.T) {
+	analysis, err := Analyze(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	analysis.CompileUnits[0].Imports = nil
+	analysis.CompileUnits[0].PackageName = ""
+
+	adapter, err := AdaptReal(analysis)
+	if err != nil {
+		t.Fatalf("AdaptReal returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(adapter.CompileUnits, []IntermediateCompileUnit{
+		{DepOnly: false, Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected adapter compile units: %#v", adapter.CompileUnits)
+	}
+	if !reflect.DeepEqual(adapter.BuildContext, analysis.BuildContext) {
+		t.Fatalf("unexpected adapter build context: %#v", adapter.BuildContext)
+	}
+	if !reflect.DeepEqual(adapter.PackageGraph, analysis.PackageGraph) {
+		t.Fatalf("unexpected adapter package graph: %#v", adapter.PackageGraph)
+	}
+}
+
+func TestBuildRealAdapterProducesPackageFocusedHandoff(t *testing.T) {
+	adapter, err := BuildRealAdapter(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("BuildRealAdapter returned error: %v", err)
+	}
+
+	if adapter.EntryFile != "/workspace/main.go" {
+		t.Fatalf("unexpected adapter entry file: %#v", adapter)
+	}
+	if adapter.CompileUnitManifestPath != "/working/tinygo-compile-unit.json" {
+		t.Fatalf("unexpected adapter compile unit manifest path: %#v", adapter)
+	}
+	if !reflect.DeepEqual(adapter.AllCompileFiles, []string{
+		"/working/.tinygo-root/src/fmt/print.go",
+		"/workspace/lib/helper.go",
+		"/workspace/main.go",
+	}) {
+		t.Fatalf("unexpected adapter all-compile files: %#v", adapter.AllCompileFiles)
+	}
+	if !reflect.DeepEqual(adapter.CompileGroups, []CompileGroup{
+		{Name: "program", Files: []string{"/workspace/main.go"}},
+		{Name: "imported", Files: []string{"/workspace/lib/helper.go"}},
+		{Name: "stdlib", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		{Name: "all-compile", Files: []string{"/working/.tinygo-root/src/fmt/print.go", "/workspace/lib/helper.go", "/workspace/main.go"}},
+	}) {
+		t.Fatalf("unexpected adapter compile groups: %#v", adapter.CompileGroups)
+	}
+	if !reflect.DeepEqual(adapter.CompileUnits, []IntermediateCompileUnit{
+		{DepOnly: false, Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected adapter compile units: %#v", adapter.CompileUnits)
+	}
+	if !reflect.DeepEqual(adapter.BuildContext, BuildContext{
+		Target:     "wasm",
+		LLVMTarget: "wasm32-unknown-wasi",
+		GOOS:       "js",
+		GOARCH:     "wasm",
+		GC:         "precise",
+		Scheduler:  "tasks",
+		BuildTags:  []string{"scheduler.tasks", "tinygo.wasm"},
+		ModulePath: "example.com/app",
+	}) {
+		t.Fatalf("unexpected adapter build context: %#v", adapter.BuildContext)
+	}
+	if !reflect.DeepEqual(adapter.PackageGraph, []PackageGraphPackage{
+		{DepOnly: false, Dir: "/workspace", Files: PackageGraphFiles{GoFiles: []string{"main.go"}}, ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", Name: "main", Standard: false},
+		{DepOnly: true, Dir: "/workspace/lib", Files: PackageGraphFiles{GoFiles: []string{"helper.go"}}, ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", Name: "helper", Standard: false},
+		{DepOnly: true, Dir: "/working/.tinygo-root/src/fmt", Files: PackageGraphFiles{GoFiles: []string{"print.go"}}, ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", Name: "fmt", Standard: true},
+	}) {
+		t.Fatalf("unexpected adapter package graph: %#v", adapter.PackageGraph)
+	}
+}
+
+func TestBuildRealAdapterFillsMissingCompileUnitFactsFromPackageGraph(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.CompileUnits = []IntermediateCompileUnit{
+		{Kind: "program", ImportPath: "command-line-arguments", Files: []string{"/workspace/main.go"}},
+		{Kind: "imported", ImportPath: "example.com/app/lib", Files: []string{"/workspace/lib/helper.go"}},
+		{Kind: "stdlib", ImportPath: "fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+	}
+
+	adapter, err := BuildRealAdapter(input)
+	if err != nil {
+		t.Fatalf("BuildRealAdapter returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(adapter.CompileUnits, []IntermediateCompileUnit{
+		{DepOnly: false, Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected adapter compile units: %#v", adapter.CompileUnits)
+	}
+}
+
+func TestBuildRealAdapterRejectsMismatchedPackageGraphFacts(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.CompileUnits = []IntermediateCompileUnit{
+		{Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+		{Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"io"}, PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
+		{Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+	}
+
+	_, err := BuildRealAdapter(input)
+	if err == nil {
+		t.Fatal("BuildRealAdapter succeeded without matching package graph facts")
+	}
+	if !strings.Contains(err.Error(), `compile unit "example.com/app/lib" imports do not match package graph`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEmitSyntheticMatchesBuildForAnalyzedInput(t *testing.T) {
+	input := analysisSplitTestInput()
+
+	analysis, err := Analyze(input)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+	resultFromAnalysis, err := EmitSynthetic(analysis)
+	if err != nil {
+		t.Fatalf("EmitSynthetic returned error: %v", err)
+	}
+	resultFromBuild, err := Build(input)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if !reflect.DeepEqual(resultFromAnalysis, resultFromBuild) {
+		t.Fatalf("unexpected emit result diff:\nanalysis=%#v\nbuild=%#v", resultFromAnalysis, resultFromBuild)
+	}
+}
+
+func TestBuildFromAnalysisMatchesBuildForAnalyzedInput(t *testing.T) {
+	input := analysisSplitTestInput()
+
+	analysis, err := Analyze(input)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+	resultFromAnalysis, err := BuildFromAnalysis(analysis)
+	if err != nil {
+		t.Fatalf("BuildFromAnalysis returned error: %v", err)
+	}
+	resultFromBuild, err := Build(input)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if !reflect.DeepEqual(resultFromAnalysis, resultFromBuild) {
+		t.Fatalf("unexpected analysis build result diff:\nanalysis=%#v\nbuild=%#v", resultFromAnalysis, resultFromBuild)
+	}
+}
+
+func TestBuildProducesCompileGroups(t *testing.T) {
+	result, err := Build(Input{
+		BuildTags: []string{"scheduler.tasks", "tinygo.wasm"},
+		BuildContext: BuildContext{
+			Target:     "wasm",
+			LLVMTarget: "wasm32-unknown-wasi",
+			GOOS:       "js",
+			GOARCH:     "wasm",
+			GC:         "precise",
+			Scheduler:  "tasks",
+			BuildTags:  []string{"scheduler.tasks", "tinygo.wasm"},
+			ModulePath: "example.com/app",
+		},
+		OptimizeFlag: "-Oz",
+		EntryFile:    "/workspace/main.go",
+		ModulePath:   "example.com/app",
+		PackageGraph: []PackageGraphPackage{
+			{
+				DepOnly:    false,
+				Dir:        "/workspace",
+				Files:      PackageGraphFiles{GoFiles: []string{"main.go"}},
+				ImportPath: "command-line-arguments",
+				Imports:    []string{"example.com/app/lib"},
+				Name:       "main",
+				Standard:   false,
+			},
+			{
+				DepOnly:    true,
+				Dir:        "/workspace/lib",
+				Files:      PackageGraphFiles{GoFiles: []string{"helper.go"}},
+				ImportPath: "example.com/app/lib",
+				Imports:    []string{"fmt"},
+				Name:       "helper",
+				Standard:   false,
+			},
+			{
+				DepOnly:    true,
+				Dir:        "/working/.tinygo-root/src/fmt",
+				Files:      PackageGraphFiles{GoFiles: []string{"print.go"}},
+				ImportPath: "fmt",
+				Imports:    []string{"errors", "io"},
+				Name:       "fmt",
+				Standard:   true,
+			},
+		},
+		Toolchain: Toolchain{
+			Target:             "wasm",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		SourceSelection: SourceSelection{
+			AllCompile: []string{
+				"/working/.tinygo-root/src/fmt/print.go",
+				"/workspace/lib/helper.go",
+				"/workspace/main.go",
+			},
+		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
+			{Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
 		},
 	})
 	if err != nil {
@@ -68,6 +473,7 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	}
 	if !strings.Contains(result.GeneratedFiles[1].Contents, "\"entryFile\":\"/workspace/main.go\"") ||
 		!strings.Contains(result.GeneratedFiles[1].Contents, "\"toolchain\":{\"target\":\"wasm\",\"artifactOutputPath\":\"/working/out.wasm\"}") ||
+		!strings.Contains(result.GeneratedFiles[1].Contents, "\"compileUnits\":[{\"kind\":\"program\",\"importPath\":\"command-line-arguments\",\"imports\":[\"example.com/app/lib\"],\"modulePath\":\"example.com/app\",\"depOnly\":false,\"packageName\":\"main\",\"packageDir\":\"/workspace\",\"files\":[\"/workspace/main.go\"],\"standard\":false},{\"kind\":\"imported\",\"importPath\":\"example.com/app/lib\",\"imports\":[\"fmt\"],\"modulePath\":\"example.com/app\",\"depOnly\":true,\"packageName\":\"helper\",\"packageDir\":\"/workspace/lib\",\"files\":[\"/workspace/lib/helper.go\"],\"standard\":false},{\"kind\":\"stdlib\",\"importPath\":\"fmt\",\"imports\":[\"errors\",\"io\"],\"modulePath\":\"\",\"depOnly\":true,\"packageName\":\"fmt\",\"packageDir\":\"/working/.tinygo-root/src/fmt\",\"files\":[\"/working/.tinygo-root/src/fmt/print.go\"],\"standard\":true}]") ||
 		!strings.Contains(result.GeneratedFiles[1].Contents, "\"sourceSelection\":{\"allCompile\":[\"/working/.tinygo-root/src/fmt/print.go\",\"/workspace/lib/helper.go\",\"/workspace/main.go\"]}") ||
 		!strings.Contains(result.GeneratedFiles[1].Contents, "\"allCompile\":[\"/working/.tinygo-root/src/fmt/print.go\",\"/workspace/lib/helper.go\",\"/workspace/main.go\"]") ||
 		!strings.Contains(result.GeneratedFiles[1].Contents, "\"materializedFiles\":[\"/working/.tinygo-root/src/device/arm/arm.go\"") {
@@ -174,6 +580,12 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	if intermediateManifest.EntryFile != "/workspace/main.go" {
 		t.Fatalf("unexpected intermediate manifest: %#v", intermediateManifest)
 	}
+	if intermediateManifest.ModulePath != "example.com/app" {
+		t.Fatalf("unexpected intermediate module path: %#v", intermediateManifest)
+	}
+	if !reflect.DeepEqual(intermediateManifest.BuildTags, []string{"scheduler.tasks", "tinygo.wasm"}) {
+		t.Fatalf("unexpected intermediate build tags: %#v", intermediateManifest)
+	}
 	if !strings.Contains(result.GeneratedFiles[2].Contents, "\"sourceSelection\":{\"targetAssets\":[\"/working/.tinygo-root/targets/wasm-undefined.txt\",\"/working/.tinygo-root/targets/wasm.json\"],\"runtimeSupport\":[\"/working/.tinygo-root/src/device/arm/arm.go\",\"/working/.tinygo-root/src/runtime/asm_tinygowasm.S\",\"/working/.tinygo-root/src/runtime/gc_boehm.c\",\"/working/.tinygo-root/src/runtime/internal/sys/zversion.go\"],\"program\":[\"/workspace/main.go\"],\"imported\":[\"/workspace/lib/helper.go\"],\"stdlib\":[\"/working/.tinygo-root/src/fmt/print.go\"],\"allCompile\":[\"/working/.tinygo-root/src/fmt/print.go\",\"/workspace/lib/helper.go\",\"/workspace/main.go\"]}") {
 		t.Fatalf("unexpected intermediate manifest contents: %q", result.GeneratedFiles[2].Contents)
 	}
@@ -181,9 +593,9 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 		t.Fatalf("unexpected intermediate toolchain contents: %q", result.GeneratedFiles[2].Contents)
 	}
 	if !reflect.DeepEqual(intermediateManifest.CompileUnits, []IntermediateCompileUnit{
-		{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
-		{Kind: "imported", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
-		{Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		{DepOnly: false, Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
 	}) {
 		t.Fatalf("unexpected intermediate compile units: %#v", intermediateManifest.CompileUnits)
 	}
@@ -193,6 +605,12 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	}
 	if loweringManifest.EntryFile != "/workspace/main.go" {
 		t.Fatalf("unexpected lowering manifest: %#v", loweringManifest)
+	}
+	if loweringManifest.ModulePath != "example.com/app" {
+		t.Fatalf("unexpected lowering module path: %#v", loweringManifest)
+	}
+	if !reflect.DeepEqual(loweringManifest.BuildTags, []string{"scheduler.tasks", "tinygo.wasm"}) {
+		t.Fatalf("unexpected lowering build tags: %#v", loweringManifest)
 	}
 	if !reflect.DeepEqual(loweringManifest.Support, LoweringSupport{
 		TargetAssets:   []string{"/working/.tinygo-root/targets/wasm-undefined.txt", "/working/.tinygo-root/targets/wasm.json"},
@@ -208,9 +626,9 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 		t.Fatalf("json.Unmarshal(work-items): %v", err)
 	}
 	if !reflect.DeepEqual(workItemsManifest.WorkItems, []WorkItem{
-		{ID: "program-000", Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, BitcodeOutputPath: "/working/tinygo-work/program-000.bc"},
-		{ID: "imported-000", Kind: "imported", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, BitcodeOutputPath: "/working/tinygo-work/imported-000.bc"},
-		{ID: "stdlib-000", Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, BitcodeOutputPath: "/working/tinygo-work/stdlib-000.bc"},
+		{ID: "program-000", Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, DepOnly: false, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, BitcodeOutputPath: "/working/tinygo-work/program-000.bc", Standard: false},
+		{ID: "imported-000", Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, DepOnly: true, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, BitcodeOutputPath: "/working/tinygo-work/imported-000.bc", Standard: false},
+		{ID: "stdlib-000", Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, DepOnly: true, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, BitcodeOutputPath: "/working/tinygo-work/stdlib-000.bc", Standard: true},
 	}) {
 		t.Fatalf("unexpected work items: %#v", workItemsManifest.WorkItems)
 	}
@@ -219,9 +637,9 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 		t.Fatalf("json.Unmarshal(lowering-plan): %v", err)
 	}
 	if !reflect.DeepEqual(loweringPlanManifest.CompileJobs, []LoweringCompileJob{
-		{ID: "program-000", Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, BitcodeOutputPath: "/working/tinygo-work/program-000.bc", LLVMTarget: "wasm32-unknown-wasi", CFlags: []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"}, OptimizeFlag: "-Oz"},
-		{ID: "imported-000", Kind: "imported", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, BitcodeOutputPath: "/working/tinygo-work/imported-000.bc", LLVMTarget: "wasm32-unknown-wasi", CFlags: []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"}, OptimizeFlag: "-Oz"},
-		{ID: "stdlib-000", Kind: "stdlib", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, BitcodeOutputPath: "/working/tinygo-work/stdlib-000.bc", LLVMTarget: "wasm32-unknown-wasi", CFlags: []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"}, OptimizeFlag: "-Oz"},
+		{ID: "program-000", Kind: "program", ImportPath: "command-line-arguments", Imports: []string{"example.com/app/lib"}, DepOnly: false, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, BitcodeOutputPath: "/working/tinygo-work/program-000.bc", LLVMTarget: "wasm32-unknown-wasi", CFlags: []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"}, OptimizeFlag: "-Oz", Standard: false},
+		{ID: "imported-000", Kind: "imported", ImportPath: "example.com/app/lib", Imports: []string{"fmt"}, DepOnly: true, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}, BitcodeOutputPath: "/working/tinygo-work/imported-000.bc", LLVMTarget: "wasm32-unknown-wasi", CFlags: []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"}, OptimizeFlag: "-Oz", Standard: false},
+		{ID: "stdlib-000", Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, DepOnly: true, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, BitcodeOutputPath: "/working/tinygo-work/stdlib-000.bc", LLVMTarget: "wasm32-unknown-wasi", CFlags: []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"}, OptimizeFlag: "-Oz", Standard: true},
 	}) {
 		t.Fatalf("unexpected lowering compile jobs: %#v", loweringPlanManifest.CompileJobs)
 	}
@@ -234,9 +652,9 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 		t.Fatalf("unexpected lowering link job: %#v", loweringPlanManifest.LinkJob)
 	}
 	var backendInputManifest struct {
-		EntryFile    string               `json:"entryFile"`
-		CompileJobs  []LoweringCompileJob `json:"compileJobs"`
-		LinkJob      LoweringLinkJob      `json:"linkJob"`
+		EntryFile   string               `json:"entryFile"`
+		CompileJobs []LoweringCompileJob `json:"compileJobs"`
+		LinkJob     LoweringLinkJob      `json:"linkJob"`
 	}
 	if err := json.Unmarshal([]byte(result.GeneratedFiles[6].Contents), &backendInputManifest); err != nil {
 		t.Fatalf("json.Unmarshal(backend-input): %v", err)
@@ -259,6 +677,132 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsMismatchedBuildContext(t *testing.T) {
+	_, err := Build(Input{
+		BuildTags: []string{"scheduler.tasks", "tinygo.wasm"},
+		BuildContext: BuildContext{
+			Target:     "wasm",
+			LLVMTarget: "wasm32-unknown-wasi",
+			GOOS:       "js",
+			GOARCH:     "wasm",
+			GC:         "precise",
+			Scheduler:  "asyncify",
+			BuildTags:  []string{"scheduler.tasks", "tinygo.wasm"},
+			ModulePath: "example.com/app",
+		},
+		EntryFile:  "/workspace/main.go",
+		ModulePath: "example.com/app",
+		Toolchain: Toolchain{
+			Target:             "wasm",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		SourceSelection: SourceSelection{
+			AllCompile: []string{"/workspace/main.go"},
+		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected build context validation error")
+	}
+	if !strings.Contains(err.Error(), "build context scheduler must match target/profile") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildRejectsMismatchedPackageGraph(t *testing.T) {
+	_, err := Build(Input{
+		BuildTags: []string{"scheduler.tasks", "tinygo.wasm"},
+		BuildContext: BuildContext{
+			Target:     "wasm",
+			LLVMTarget: "wasm32-unknown-wasi",
+			GOOS:       "js",
+			GOARCH:     "wasm",
+			GC:         "precise",
+			Scheduler:  "tasks",
+			BuildTags:  []string{"scheduler.tasks", "tinygo.wasm"},
+			ModulePath: "example.com/app",
+		},
+		EntryFile:  "/workspace/main.go",
+		ModulePath: "example.com/app",
+		PackageGraph: []PackageGraphPackage{
+			{
+				DepOnly:    false,
+				Dir:        "/workspace",
+				Files:      PackageGraphFiles{GoFiles: []string{"other.go"}},
+				ImportPath: "command-line-arguments",
+				Name:       "main",
+				Standard:   false,
+			},
+		},
+		Toolchain: Toolchain{
+			Target:             "wasm",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		SourceSelection: SourceSelection{
+			AllCompile: []string{"/workspace/main.go"},
+		},
+		CompileUnits: []IntermediateCompileUnit{
+			{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected package graph validation error")
+	}
+	if !strings.Contains(err.Error(), "package graph must match compile units") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildPreservesCompileUnitDirectImports(t *testing.T) {
+	result, err := Build(Input{
+		OptimizeFlag: "-Oz",
+		EntryFile:    "/workspace/main.go",
+		Toolchain: Toolchain{
+			Target:             "wasip1",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		SourceSelection: SourceSelection{
+			AllCompile: []string{
+				"/workspace/helper/helper.go",
+				"/workspace/main.go",
+				"/working/.tinygo-root/src/fmt/print.go",
+			},
+		},
+		CompileUnits: []IntermediateCompileUnit{
+			{DepOnly: false, Kind: "program", ImportPath: "example.com/app", Imports: []string{"example.com/app/helper"}, PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+			{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/helper", Imports: []string{"fmt"}, PackageName: "helper", PackageDir: "/workspace/helper", Files: []string{"/workspace/helper/helper.go"}, Standard: false},
+			{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	var compileUnitManifest struct {
+		CompileUnits []IntermediateCompileUnit `json:"compileUnits"`
+	}
+	if err := json.Unmarshal([]byte(result.GeneratedFiles[1].Contents), &compileUnitManifest); err != nil {
+		t.Fatalf("json.Unmarshal(compile-unit): %v", err)
+	}
+	if !reflect.DeepEqual(compileUnitManifest.CompileUnits, []IntermediateCompileUnit{
+		{DepOnly: false, Kind: "program", ImportPath: "example.com/app", Imports: []string{"example.com/app/helper"}, ModulePath: "", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{DepOnly: true, Kind: "imported", ImportPath: "example.com/app/helper", Imports: []string{"fmt"}, ModulePath: "", PackageName: "helper", PackageDir: "/workspace/helper", Files: []string{"/workspace/helper/helper.go"}, Standard: false},
+		{DepOnly: true, Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected compile unit imports: %#v", compileUnitManifest.CompileUnits)
+	}
+
+	var intermediateManifest IntermediateManifest
+	if err := json.Unmarshal([]byte(result.GeneratedFiles[2].Contents), &intermediateManifest); err != nil {
+		t.Fatalf("json.Unmarshal(intermediate): %v", err)
+	}
+	if !reflect.DeepEqual(intermediateManifest.CompileUnits, compileUnitManifest.CompileUnits) {
+		t.Fatalf("unexpected intermediate compile unit imports: %#v", intermediateManifest.CompileUnits)
+	}
+}
+
 func TestBuildRejectsEntryMissingFromProgramFiles(t *testing.T) {
 	_, err := Build(Input{
 		Toolchain: Toolchain{
@@ -274,7 +818,7 @@ func TestBuildRejectsEntryMissingFromProgramFiles(t *testing.T) {
 			},
 		},
 		CompileUnits: []IntermediateCompileUnit{
-			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/helper.go"}},
+			{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/helper.go"}},
 		},
 	})
 	if err == nil {
@@ -300,7 +844,7 @@ func TestBuildDefaultsBootstrapPaths(t *testing.T) {
 			},
 		},
 		CompileUnits: []IntermediateCompileUnit{
-			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
 		},
 	})
 	if err != nil {
@@ -343,7 +887,7 @@ func TestExecutePathsWritesFrontendResult(t *testing.T) {
 			},
 		},
 		CompileUnits: []IntermediateCompileUnit{
-			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
 		},
 	})
 	if err != nil {
@@ -447,6 +991,401 @@ func TestExecutePathsWritesFrontendResult(t *testing.T) {
 	}
 }
 
+func TestExecuteAdapterPathsWritesFrontendAdapter(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-adapter.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+
+	if err := ExecuteAdapterPaths(inputPath, resultPath); err != nil {
+		t.Fatalf("ExecuteAdapterPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result AdapterResult
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if result.Adapter == nil {
+		t.Fatalf("expected adapter result: %#v", result)
+	}
+	if result.Adapter.Toolchain.Target != "wasm" ||
+		result.Adapter.Toolchain.LLVMTarget != "wasm32-unknown-wasi" ||
+		result.Adapter.CompileUnitManifestPath != "/working/tinygo-compile-unit.json" {
+		t.Fatalf("unexpected adapter payload: %#v", result.Adapter)
+	}
+	if len(result.Adapter.CompileGroups) != 4 {
+		t.Fatalf("unexpected adapter compile groups: %#v", result.Adapter.CompileGroups)
+	}
+	if !reflect.DeepEqual(result.Adapter.CompileGroups, []CompileGroup{
+		{Name: "program", Files: []string{"/workspace/main.go"}},
+		{Name: "imported", Files: []string{"/workspace/lib/helper.go"}},
+		{Name: "stdlib", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		{Name: "all-compile", Files: []string{"/working/.tinygo-root/src/fmt/print.go", "/workspace/lib/helper.go", "/workspace/main.go"}},
+	}) {
+		t.Fatalf("unexpected adapter compile groups: %#v", result.Adapter.CompileGroups)
+	}
+	if !reflect.DeepEqual(result.Adapter.AllCompileFiles, []string{
+		"/working/.tinygo-root/src/fmt/print.go",
+		"/workspace/lib/helper.go",
+		"/workspace/main.go",
+	}) {
+		t.Fatalf("unexpected adapter all-compile files: %#v", result.Adapter.AllCompileFiles)
+	}
+	if len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0], "frontend prepared real adapter handoff") {
+		t.Fatalf("unexpected diagnostics: %#v", result.Diagnostics)
+	}
+}
+
+func TestExecuteAdapterAnalysisPathsWritesFrontendAdapter(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	analysisPath := filepath.Join(dir, "tinygo-frontend-analysis.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-adapter.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+	if err := ExecuteAnalysisPaths(inputPath, analysisPath); err != nil {
+		t.Fatalf("ExecuteAnalysisPaths returned error: %v", err)
+	}
+
+	if err := ExecuteAdapterAnalysisPaths(analysisPath, resultPath); err != nil {
+		t.Fatalf("ExecuteAdapterAnalysisPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result AdapterResult
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if result.Adapter == nil {
+		t.Fatalf("expected adapter result: %#v", result)
+	}
+	if len(result.Adapter.CompileGroups) != 4 {
+		t.Fatalf("unexpected adapter compile groups: %#v", result.Adapter.CompileGroups)
+	}
+	if len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0], "frontend prepared real adapter handoff") {
+		t.Fatalf("unexpected diagnostics: %#v", result.Diagnostics)
+	}
+}
+
+func TestExecuteAnalysisBuildPathsWritesFrontendResult(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	analysisPath := filepath.Join(dir, "tinygo-frontend-analysis.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-result.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+	if err := ExecuteAnalysisPaths(inputPath, analysisPath); err != nil {
+		t.Fatalf("ExecuteAnalysisPaths returned error: %v", err)
+	}
+
+	if err := ExecuteAnalysisBuildPaths(analysisPath, resultPath); err != nil {
+		t.Fatalf("ExecuteAnalysisBuildPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result Result
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if len(result.GeneratedFiles) != 7 {
+		t.Fatalf("unexpected generated files: %#v", result.GeneratedFiles)
+	}
+	if len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0], "frontend prepared bootstrap compile request") {
+		t.Fatalf("unexpected diagnostics: %#v", result.Diagnostics)
+	}
+}
+
+func TestExecuteAdapterBuildPathsWritesFrontendResult(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	analysisPath := filepath.Join(dir, "tinygo-frontend-analysis.json")
+	adapterPath := filepath.Join(dir, "tinygo-frontend-real-adapter.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-result.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+	if err := ExecuteAnalysisPaths(inputPath, analysisPath); err != nil {
+		t.Fatalf("ExecuteAnalysisPaths returned error: %v", err)
+	}
+	if err := ExecuteAdapterAnalysisPaths(analysisPath, adapterPath); err != nil {
+		t.Fatalf("ExecuteAdapterAnalysisPaths returned error: %v", err)
+	}
+	adapterData, err := os.ReadFile(adapterPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(adapter): %v", err)
+	}
+	var adapterResult AdapterResult
+	if err := json.Unmarshal(adapterData, &adapterResult); err != nil {
+		t.Fatalf("json.Unmarshal(adapter): %v", err)
+	}
+	if adapterResult.Adapter == nil {
+		t.Fatalf("expected adapter result: %#v", adapterResult)
+	}
+	adapterResult.Adapter.CompileUnits[0].ImportPath = "example.com/app"
+	adapterResult.Adapter.PackageGraph[0].ImportPath = "example.com/app"
+	adapterData, err = json.Marshal(adapterResult)
+	if err != nil {
+		t.Fatalf("json.Marshal(adapter): %v", err)
+	}
+	if err := os.WriteFile(adapterPath, adapterData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(adapter): %v", err)
+	}
+
+	if err := ExecuteAdapterBuildPaths(analysisPath, adapterPath, resultPath); err != nil {
+		t.Fatalf("ExecuteAdapterBuildPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result Result
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if len(result.GeneratedFiles) != 7 {
+		t.Fatalf("unexpected generated files: %#v", result.GeneratedFiles)
+	}
+	if len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0], "frontend prepared bootstrap compile request") {
+		t.Fatalf("unexpected diagnostics: %#v", result.Diagnostics)
+	}
+	compileUnitFileFound := false
+	for _, generatedFile := range result.GeneratedFiles {
+		if generatedFile.Path != "/working/tinygo-compile-unit.json" {
+			continue
+		}
+		compileUnitFileFound = true
+		var compileUnitManifest struct {
+			CompileUnits []IntermediateCompileUnit `json:"compileUnits"`
+		}
+		if err := json.Unmarshal([]byte(generatedFile.Contents), &compileUnitManifest); err != nil {
+			t.Fatalf("json.Unmarshal(compileUnitManifest): %v", err)
+		}
+		if len(compileUnitManifest.CompileUnits) == 0 {
+			t.Fatalf("expected compile units: %#v", compileUnitManifest)
+		}
+		if got := compileUnitManifest.CompileUnits[0].ImportPath; got != "example.com/app" {
+			t.Fatalf("unexpected emitted program import path: %q", got)
+		}
+	}
+	if !compileUnitFileFound {
+		t.Fatalf("expected tinygo-compile-unit.json in generated files: %#v", result.GeneratedFiles)
+	}
+}
+
+func TestExecuteAnalysisPathsWritesFrontendAnalysis(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-analysis.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+
+	if err := ExecuteAnalysisPaths(inputPath, resultPath); err != nil {
+		t.Fatalf("ExecuteAnalysisPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result AnalysisResult
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if result.Analysis == nil {
+		t.Fatalf("expected analysis result: %#v", result)
+	}
+	if result.Analysis.Toolchain.Target != "wasm" ||
+		result.Analysis.Toolchain.LLVMTarget != "wasm32-unknown-wasi" ||
+		result.Analysis.CompileUnitManifestPath != "/working/tinygo-compile-unit.json" {
+		t.Fatalf("unexpected analysis payload: %#v", result.Analysis)
+	}
+	if len(result.Analysis.CompileGroups) != 6 {
+		t.Fatalf("unexpected compile groups: %#v", result.Analysis.CompileGroups)
+	}
+	if !reflect.DeepEqual(result.Analysis.AllCompileFiles, []string{
+		"/working/.tinygo-root/src/fmt/print.go",
+		"/workspace/lib/helper.go",
+		"/workspace/main.go",
+	}) {
+		t.Fatalf("unexpected all compile files: %#v", result.Analysis.AllCompileFiles)
+	}
+}
+
+func TestExecuteAnalysisResultPathsWritesFrontendResult(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	analysisPath := filepath.Join(dir, "tinygo-frontend-analysis.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-result.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+	if err := ExecuteAnalysisPaths(inputPath, analysisPath); err != nil {
+		t.Fatalf("ExecuteAnalysisPaths returned error: %v", err)
+	}
+	if err := os.Remove(inputPath); err != nil {
+		t.Fatalf("os.Remove(input): %v", err)
+	}
+
+	if err := ExecuteAnalysisResultPaths(analysisPath, resultPath); err != nil {
+		t.Fatalf("ExecuteAnalysisResultPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result Result
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if len(result.GeneratedFiles) != 7 {
+		t.Fatalf("unexpected generated files: %#v", result.GeneratedFiles)
+	}
+	if len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0], "frontend prepared bootstrap compile request") {
+		t.Fatalf("unexpected diagnostics: %#v", result.Diagnostics)
+	}
+}
+
+func TestExecuteResultPathsPrefersFrontendRealAdapterWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	analysisPath := filepath.Join(dir, "tinygo-frontend-analysis.json")
+	adapterPath := filepath.Join(dir, "tinygo-frontend-real-adapter.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-result.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+	if err := ExecuteAnalysisPaths(inputPath, analysisPath); err != nil {
+		t.Fatalf("ExecuteAnalysisPaths returned error: %v", err)
+	}
+	if err := ExecuteAdapterAnalysisPaths(analysisPath, adapterPath); err != nil {
+		t.Fatalf("ExecuteAdapterAnalysisPaths returned error: %v", err)
+	}
+	adapterData, err := os.ReadFile(adapterPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(adapter): %v", err)
+	}
+	var adapterResult AdapterResult
+	if err := json.Unmarshal(adapterData, &adapterResult); err != nil {
+		t.Fatalf("json.Unmarshal(adapter): %v", err)
+	}
+	if adapterResult.Adapter == nil {
+		t.Fatalf("expected adapter result: %#v", adapterResult)
+	}
+	adapterResult.Adapter.CompileUnits[0].ImportPath = "example.com/app"
+	adapterResult.Adapter.PackageGraph[0].ImportPath = "example.com/app"
+	adapterData, err = json.Marshal(adapterResult)
+	if err != nil {
+		t.Fatalf("json.Marshal(adapter): %v", err)
+	}
+	if err := os.WriteFile(adapterPath, adapterData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(adapter): %v", err)
+	}
+	if err := os.Remove(inputPath); err != nil {
+		t.Fatalf("os.Remove(input): %v", err)
+	}
+
+	if err := ExecuteResultPaths(inputPath, analysisPath, adapterPath, resultPath); err != nil {
+		t.Fatalf("ExecuteResultPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result Result
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	compileUnitFileFound := false
+	for _, generatedFile := range result.GeneratedFiles {
+		if generatedFile.Path != "/working/tinygo-compile-unit.json" {
+			continue
+		}
+		compileUnitFileFound = true
+		var compileUnitManifest struct {
+			CompileUnits []IntermediateCompileUnit `json:"compileUnits"`
+		}
+		if err := json.Unmarshal([]byte(generatedFile.Contents), &compileUnitManifest); err != nil {
+			t.Fatalf("json.Unmarshal(compileUnitManifest): %v", err)
+		}
+		if len(compileUnitManifest.CompileUnits) == 0 {
+			t.Fatalf("expected compile units: %#v", compileUnitManifest)
+		}
+		if got := compileUnitManifest.CompileUnits[0].ImportPath; got != "example.com/app" {
+			t.Fatalf("unexpected emitted program import path: %q", got)
+		}
+	}
+	if !compileUnitFileFound {
+		t.Fatalf("expected tinygo-compile-unit.json in generated files: %#v", result.GeneratedFiles)
+	}
+}
+
 func TestBuildRejectsLegacyTopLevelSourceGroupsWithoutNestedSourceSelection(t *testing.T) {
 	_, err := Build(Input{
 		Target:              "wasm",
@@ -541,7 +1480,7 @@ func TestBuildRejectsCompileUnitsMissingAllCompileFile(t *testing.T) {
 			},
 		},
 		CompileUnits: []IntermediateCompileUnit{
-			{Kind: "program", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
 		},
 	})
 	if err == nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -22,12 +23,25 @@ type SourceSelection struct {
 	AllCompile []string `json:"allCompile"`
 }
 
+type CompileUnit struct {
+	Kind        string   `json:"kind"`
+	ImportPath  string   `json:"importPath"`
+	Imports     []string `json:"imports"`
+	ModulePath  string   `json:"modulePath"`
+	DepOnly     bool     `json:"depOnly"`
+	PackageName string   `json:"packageName"`
+	PackageDir  string   `json:"packageDir"`
+	Files       []string `json:"files"`
+	Standard    bool     `json:"standard"`
+}
+
 type CompileUnitManifest struct {
 	EntryFile         string          `json:"entryFile"`
 	OptimizeFlag      string          `json:"optimizeFlag,omitempty"`
 	MaterializedFiles []string        `json:"materializedFiles,omitempty"`
 	Toolchain         Toolchain       `json:"toolchain"`
 	SourceSelection   SourceSelection `json:"sourceSelection"`
+	CompileUnits      []CompileUnit   `json:"compileUnits,omitempty"`
 }
 
 type Input struct {
@@ -59,16 +73,82 @@ func Generate(input Input) (Output, error) {
 	stdlibPackageFiles := make([]string, 0, len(allCompileFiles))
 	importedPackageFiles := make([]string, 0, len(allCompileFiles))
 	packageFiles := make([]string, 0, len(allCompileFiles))
-	for _, path := range allCompileFiles {
-		if strings.HasPrefix(path, "/working/.tinygo-root/src/") {
-			stdlibPackageFiles = append(stdlibPackageFiles, path)
-			continue
+	if len(manifest.CompileUnits) != 0 {
+		allCompileFileSet := map[string]struct{}{}
+		for _, path := range allCompileFiles {
+			allCompileFileSet[path] = struct{}{}
 		}
-		if filepath.Dir(path) != entryPackageDir {
-			importedPackageFiles = append(importedPackageFiles, path)
-			continue
+		seenCompileFiles := map[string]struct{}{}
+		for index := range manifest.CompileUnits {
+			compileUnit := manifest.CompileUnits[index]
+			if compileUnit.Kind == "" {
+				return Output{}, fmt.Errorf("compile unit kind is required")
+			}
+			if compileUnit.ImportPath == "" {
+				return Output{}, fmt.Errorf("compile unit importPath is required")
+			}
+			if compileUnit.PackageName == "" {
+				return Output{}, fmt.Errorf("compile unit packageName is required")
+			}
+			if compileUnit.PackageDir == "" {
+				return Output{}, fmt.Errorf("compile unit packageDir is required")
+			}
+			if len(compileUnit.Files) == 0 {
+				return Output{}, fmt.Errorf("compile unit files are required")
+			}
+			unitImports := append([]string{}, compileUnit.Imports...)
+			sort.Strings(unitImports)
+			for _, importPath := range unitImports {
+				if importPath == "" {
+					return Output{}, fmt.Errorf("compile unit imports must not contain empty paths")
+				}
+			}
+			compileUnit.Imports = unitImports
+			for _, path := range compileUnit.Files {
+				if filepath.Dir(path) != compileUnit.PackageDir {
+					return Output{}, fmt.Errorf("compile unit files must stay inside packageDir")
+				}
+				if _, ok := allCompileFileSet[path]; !ok {
+					return Output{}, fmt.Errorf("compile units must only reference allCompile files")
+				}
+				if _, ok := seenCompileFiles[path]; ok {
+					return Output{}, fmt.Errorf("compile units must not repeat files")
+				}
+				seenCompileFiles[path] = struct{}{}
+			}
+			switch compileUnit.Kind {
+			case "program":
+				compileUnit.DepOnly = false
+				compileUnit.Standard = false
+				packageFiles = append(packageFiles, compileUnit.Files...)
+			case "imported":
+				compileUnit.DepOnly = true
+				compileUnit.Standard = false
+				importedPackageFiles = append(importedPackageFiles, compileUnit.Files...)
+			case "stdlib":
+				compileUnit.DepOnly = true
+				compileUnit.Standard = true
+				stdlibPackageFiles = append(stdlibPackageFiles, compileUnit.Files...)
+			default:
+				return Output{}, fmt.Errorf("unsupported compile unit kind %q", compileUnit.Kind)
+			}
+			manifest.CompileUnits[index] = compileUnit
 		}
-		packageFiles = append(packageFiles, path)
+		if len(seenCompileFiles) != len(allCompileFileSet) {
+			return Output{}, fmt.Errorf("compile units must cover every allCompile file")
+		}
+	} else {
+		for _, path := range allCompileFiles {
+			if strings.HasPrefix(path, "/working/.tinygo-root/src/") {
+				stdlibPackageFiles = append(stdlibPackageFiles, path)
+				continue
+			}
+			if filepath.Dir(path) != entryPackageDir {
+				importedPackageFiles = append(importedPackageFiles, path)
+				continue
+			}
+			packageFiles = append(packageFiles, path)
+		}
 	}
 	entrySeen := false
 	for _, path := range packageFiles {
@@ -87,12 +167,14 @@ func Generate(input Input) (Output, error) {
 		MaterializedFiles []string        `json:"materializedFiles"`
 		Toolchain         Toolchain       `json:"toolchain"`
 		SourceSelection   SourceSelection `json:"sourceSelection"`
+		CompileUnits      []CompileUnit   `json:"compileUnits,omitempty"`
 	}{
 		EntryFile:         manifest.EntryFile,
 		OptimizeFlag:      manifest.OptimizeFlag,
 		MaterializedFiles: manifest.MaterializedFiles,
 		Toolchain:         manifest.Toolchain,
 		SourceSelection:   embeddedSourceSelection,
+		CompileUnits:      append([]CompileUnit{}, manifest.CompileUnits...),
 	})
 	if err != nil {
 		return Output{}, err

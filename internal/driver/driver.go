@@ -525,6 +525,7 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 	externalImportSet := map[string]struct{}{}
 	importGraph := map[string]map[string]struct{}{}
 	importGraphInDegree := map[string]int{}
+	entryPackageImportSet := map[string]struct{}{}
 	if entryImportPath != "" {
 		importGraphInDegree[entryImportPath] = 0
 	}
@@ -637,6 +638,7 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 				return Result{}, fmt.Errorf("relative import is not supported yet: %q", path)
 			}
 			importSet[path] = struct{}{}
+			entryPackageImportSet[path] = struct{}{}
 			firstPathElement := path
 			if cut := strings.IndexByte(path, '/'); cut >= 0 {
 				firstPathElement = path[:cut]
@@ -749,6 +751,7 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 	}
 	processedPackageImports := map[string]struct{}{}
 	importedPackageFiles := make([]string, 0, len(pendingPackageImports))
+	importedCompileUnits := make([]tinygoplanner.CompileUnit, 0, len(pendingPackageImports))
 	for len(pendingPackageImports) > 0 {
 		imported := pendingPackageImports[0]
 		pendingPackageImports = pendingPackageImports[1:]
@@ -804,6 +807,8 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 			}
 		}
 		dependencyPackageName := ""
+		dependencyPackageFiles := []string{}
+		dependencyPackageImportSet := map[string]struct{}{}
 		foundDependencyFiles := false
 		foundDependencyCandidateFiles := false
 		excludedDependencyFiles := false
@@ -901,6 +906,7 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 			}
 			foundDependencyFiles = true
 			importedPackageFiles = append(importedPackageFiles, source.Path)
+			dependencyPackageFiles = append(dependencyPackageFiles, source.Path)
 			for _, dependencyImport := range file.Imports {
 				path, unquoteErr := strconv.Unquote(dependencyImport.Path.Value)
 				if unquoteErr != nil {
@@ -910,6 +916,7 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 					return Result{}, fmt.Errorf("relative import is not supported yet: %q", path)
 				}
 				importSet[path] = struct{}{}
+				dependencyPackageImportSet[path] = struct{}{}
 				firstPathElement := path
 				if cut := strings.IndexByte(path, '/'); cut >= 0 {
 					firstPathElement = path[:cut]
@@ -969,6 +976,23 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 			}
 			return Result{}, fmt.Errorf("local module import package not found: %q", imported)
 		}
+		sort.Strings(dependencyPackageFiles)
+		dependencyPackageImports := make([]string, 0, len(dependencyPackageImportSet))
+		for importPath := range dependencyPackageImportSet {
+			dependencyPackageImports = append(dependencyPackageImports, importPath)
+		}
+		sort.Strings(dependencyPackageImports)
+		importedCompileUnits = append(importedCompileUnits, tinygoplanner.CompileUnit{
+			Kind:        "imported",
+			ImportPath:  imported,
+			Imports:     dependencyPackageImports,
+			ModulePath:  dependencyModulePath,
+			DepOnly:     true,
+			PackageName: dependencyPackageName,
+			PackageDir:  dependencyDir,
+			Files:       append([]string{}, dependencyPackageFiles...),
+			Standard:    false,
+		})
 	}
 	nodes := make([]string, 0, len(importGraphInDegree))
 	remainingInDegree := map[string]int{}
@@ -1009,6 +1033,9 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 		return Result{}, fmt.Errorf("import cycle detected among local packages: %s", strings.Join(cyclicImports, ", "))
 	}
 	sort.Strings(importedPackageFiles)
+	sort.Slice(importedCompileUnits, func(i, j int) bool {
+		return importedCompileUnits[i].ImportPath < importedCompileUnits[j].ImportPath
+	})
 	localModuleImports := make([]string, 0, len(localModuleImportSet))
 	for imported := range localModuleImportSet {
 		localModuleImports = append(localModuleImports, imported)
@@ -1037,6 +1064,27 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 	if len(externalImports) > 0 {
 		return Result{}, fmt.Errorf("module resolution is not yet implemented for external imports: %s", strings.Join(externalImports, ", "))
 	}
+	programImportPath := entryImportPath
+	if programImportPath == "" {
+		programImportPath = "command-line-arguments"
+	}
+	programImports := make([]string, 0, len(entryPackageImportSet))
+	for importPath := range entryPackageImportSet {
+		programImports = append(programImports, importPath)
+	}
+	sort.Strings(programImports)
+	compileUnits := []tinygoplanner.CompileUnit{{
+		Kind:        "program",
+		ImportPath:  programImportPath,
+		Imports:     programImports,
+		ModulePath:  modulePath,
+		DepOnly:     false,
+		PackageName: packageName,
+		PackageDir:  entryDir,
+		Files:       append([]string{}, packageFiles...),
+		Standard:    false,
+	}}
+	compileUnits = append(compileUnits, importedCompileUnits...)
 
 	plannerResult, err := tinygoplanner.PlanBuild(tinygoplanner.Request{
 		Planner:              request.Planner,
@@ -1049,6 +1097,7 @@ func BuildPackage(request Request, files []SourceFile) (Result, error) {
 		ModulePath:           modulePath,
 		PackageFiles:         append([]string{}, packageFiles...),
 		ImportedPackageFiles: append([]string{}, importedPackageFiles...),
+		CompileUnits:         compileUnits,
 		Imports:              append([]string{}, imports...),
 		StdlibImports:        append([]string{}, stdlibImports...),
 		BuildTags:            profile.BuildTagsFor(scheduler),

@@ -69,14 +69,19 @@ func TestGenerateEmbedsTypedCompileUnitManifest(t *testing.T) {
 			"/working/tinygo-bootstrap.c",
 			"/working/tinygo-compile-unit.json",
 		},
-			Toolchain: Toolchain{
-				Target:             "wasm",
-				ArtifactOutputPath: "/working/out.wasm",
-			},
-			SourceSelection: SourceSelection{
-				AllCompile: []string{
-					"/working/.tinygo-root/src/fmt/print.go",
-					"/workspace/lib/helper.go",
+		CompileUnits: []CompileUnit{
+			{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "imported", ImportPath: "example.com/app/lib", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
+			{Kind: "stdlib", ImportPath: "fmt", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		},
+		Toolchain: Toolchain{
+			Target:             "wasm",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		SourceSelection: SourceSelection{
+			AllCompile: []string{
+				"/working/.tinygo-root/src/fmt/print.go",
+				"/workspace/lib/helper.go",
 				"/workspace/main.go",
 			},
 		},
@@ -92,6 +97,7 @@ func TestGenerateEmbedsTypedCompileUnitManifest(t *testing.T) {
 
 	if !strings.Contains(result.EmbeddedManifest, "\"entryFile\":\"/workspace/main.go\"") ||
 		!strings.Contains(result.EmbeddedManifest, "\"toolchain\":{\"target\":\"wasm\",\"artifactOutputPath\":\"/working/out.wasm\"}") ||
+		!strings.Contains(result.EmbeddedManifest, "\"compileUnits\":[{\"kind\":\"program\",\"importPath\":\"command-line-arguments\",\"imports\":[],\"modulePath\":\"\",\"depOnly\":false,\"packageName\":\"main\",\"packageDir\":\"/workspace\",\"files\":[\"/workspace/main.go\"],\"standard\":false},{\"kind\":\"imported\",\"importPath\":\"example.com/app/lib\",\"imports\":[],\"modulePath\":\"\",\"depOnly\":true,\"packageName\":\"helper\",\"packageDir\":\"/workspace/lib\",\"files\":[\"/workspace/lib/helper.go\"],\"standard\":false},{\"kind\":\"stdlib\",\"importPath\":\"fmt\",\"imports\":[],\"modulePath\":\"\",\"depOnly\":true,\"packageName\":\"fmt\",\"packageDir\":\"/working/.tinygo-root/src/fmt\",\"files\":[\"/working/.tinygo-root/src/fmt/print.go\"],\"standard\":true}]") ||
 		!strings.Contains(result.EmbeddedManifest, "\"sourceSelection\":{\"allCompile\":[\"/working/.tinygo-root/src/fmt/print.go\",\"/workspace/lib/helper.go\",\"/workspace/main.go\"]}") ||
 		!strings.Contains(result.EmbeddedManifest, "\"materializedFiles\":[\"/working/.tinygo-root/src/fmt/print.go\"") {
 		t.Fatalf("unexpected embedded manifest: %q", result.EmbeddedManifest)
@@ -189,10 +195,88 @@ func TestGenerateEmbedsTypedCompileUnitManifest(t *testing.T) {
 	}
 }
 
+func TestGeneratePreservesCompileUnitDirectImports(t *testing.T) {
+	manifest := CompileUnitManifest{
+		EntryFile: "/workspace/main.go",
+		CompileUnits: []CompileUnit{
+			{Kind: "program", ImportPath: "example.com/app", Imports: []string{"example.com/app/helper"}, PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "imported", ImportPath: "example.com/app/helper", Imports: []string{"fmt"}, PackageName: "helper", PackageDir: "/workspace/helper", Files: []string{"/workspace/helper/helper.go"}},
+			{Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		},
+		Toolchain: Toolchain{
+			Target:             "wasip1",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		SourceSelection: SourceSelection{
+			AllCompile: []string{
+				"/workspace/helper/helper.go",
+				"/workspace/main.go",
+				"/working/.tinygo-root/src/fmt/print.go",
+			},
+		},
+	}
+
+	result, err := Generate(Input{
+		CompileUnitManifest: manifest,
+		OptimizeFlag:        "-Oz",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	var embeddedManifest struct {
+		CompileUnits []CompileUnit `json:"compileUnits"`
+	}
+	if err := json.Unmarshal([]byte(result.EmbeddedManifest), &embeddedManifest); err != nil {
+		t.Fatalf("json.Unmarshal(embeddedManifest): %v", err)
+	}
+	if !reflect.DeepEqual(embeddedManifest.CompileUnits, []CompileUnit{
+		{Kind: "program", ImportPath: "example.com/app", Imports: []string{"example.com/app/helper"}, ModulePath: "", DepOnly: false, PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}, Standard: false},
+		{Kind: "imported", ImportPath: "example.com/app/helper", Imports: []string{"fmt"}, ModulePath: "", DepOnly: true, PackageName: "helper", PackageDir: "/workspace/helper", Files: []string{"/workspace/helper/helper.go"}, Standard: false},
+		{Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", DepOnly: true, PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}, Standard: true},
+	}) {
+		t.Fatalf("unexpected embedded compile unit imports: %#v", embeddedManifest.CompileUnits)
+	}
+}
+
+func TestGenerateEmbedsCompileUnitModulePaths(t *testing.T) {
+	manifest := CompileUnitManifest{
+		EntryFile: "/workspace/main.go",
+		CompileUnits: []CompileUnit{
+			{Kind: "program", ImportPath: "example.com/app", Imports: []string{"example.com/app/helper"}, ModulePath: "example.com/app", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+			{Kind: "imported", ImportPath: "example.com/app/helper", Imports: []string{"fmt"}, ModulePath: "example.com/app", PackageName: "helper", PackageDir: "/workspace/helper", Files: []string{"/workspace/helper/helper.go"}},
+			{Kind: "stdlib", ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+		},
+		Toolchain: Toolchain{
+			Target:             "wasm",
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+		SourceSelection: SourceSelection{
+			AllCompile: []string{
+				"/working/.tinygo-root/src/fmt/print.go",
+				"/workspace/helper/helper.go",
+				"/workspace/main.go",
+			},
+		},
+	}
+
+	result, err := Generate(Input{CompileUnitManifest: manifest, OptimizeFlag: "-Oz"})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	if !strings.Contains(result.EmbeddedManifest, "\"modulePath\":\"example.com/app\"") {
+		t.Fatalf("expected embedded manifest to preserve compile unit modulePath: %q", result.EmbeddedManifest)
+	}
+}
+
 func TestGenerateRejectsAllCompileWithoutEntryFile(t *testing.T) {
 	_, err := Generate(Input{
 		CompileUnitManifest: CompileUnitManifest{
 			EntryFile: "/workspace/main.go",
+			CompileUnits: []CompileUnit{
+				{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/other.go"}},
+			},
 			Toolchain: Toolchain{
 				Target:              "wasm",
 				LLVMTarget:          "wasm32-unknown-wasi",
@@ -221,6 +305,11 @@ func TestGenerateAcceptsNestedOnlySourceSelection(t *testing.T) {
 		CompileUnitManifest: CompileUnitManifest{
 			EntryFile:    "/workspace/main.go",
 			OptimizeFlag: "-Oz",
+			CompileUnits: []CompileUnit{
+				{Kind: "program", ImportPath: "command-line-arguments", PackageName: "main", PackageDir: "/workspace", Files: []string{"/workspace/main.go"}},
+				{Kind: "imported", ImportPath: "example.com/app/lib", PackageName: "helper", PackageDir: "/workspace/lib", Files: []string{"/workspace/lib/helper.go"}},
+				{Kind: "stdlib", ImportPath: "fmt", PackageName: "fmt", PackageDir: "/working/.tinygo-root/src/fmt", Files: []string{"/working/.tinygo-root/src/fmt/print.go"}},
+			},
 			MaterializedFiles: []string{
 				"/working/.tinygo-root/src/fmt/print.go",
 				"/working/.tinygo-root/src/runtime/runtime.go",

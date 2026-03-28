@@ -17,12 +17,18 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 			{
 				ID:                "program-000",
 				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{"fmt"},
+				DepOnly:           false,
+				ModulePath:        "example.com/app",
+				PackageName:       "main",
 				PackageDir:        "/workspace",
 				Files:             []string{"/workspace/main.go"},
 				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
 				LLVMTarget:        "wasm32-unknown-wasi",
 				CFlags:            []string{"-mbulk-memory", "-mnontrapping-fptoint"},
 				OptimizeFlag:      "-Oz",
+				Standard:          false,
 			},
 		},
 		LinkJob: LinkJob{
@@ -52,13 +58,21 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 	}) {
 		t.Fatalf("unexpected generated files: %#v", result.GeneratedFiles)
 	}
-	if !strings.Contains(result.GeneratedFiles[0].Contents, "\"loweredSourcePath\":\"/working/tinygo-lowered/program-000.c\"") {
+	if !strings.Contains(result.GeneratedFiles[0].Contents, "\"loweredSourcePath\":\"/working/tinygo-lowered/program-000.c\"") ||
+		!strings.Contains(result.GeneratedFiles[0].Contents, "\"importPath\":\"command-line-arguments\"") ||
+		!strings.Contains(result.GeneratedFiles[0].Contents, "\"imports\":[\"fmt\"]") ||
+		!strings.Contains(result.GeneratedFiles[0].Contents, "\"depOnly\":false") ||
+		!strings.Contains(result.GeneratedFiles[0].Contents, "\"modulePath\":\"example.com/app\"") ||
+		!strings.Contains(result.GeneratedFiles[0].Contents, "\"packageName\":\"main\"") ||
+		!strings.Contains(result.GeneratedFiles[0].Contents, "\"standard\":false") {
 		t.Fatalf("unexpected lowered sources manifest: %q", result.GeneratedFiles[0].Contents)
 	}
 	var loweredIRManifest struct {
 		Units []struct {
 			ID                string   `json:"id"`
 			Kind              string   `json:"kind"`
+			ImportPath        string   `json:"importPath"`
+			ModulePath        string   `json:"modulePath"`
 			PackageDir        string   `json:"packageDir"`
 			SourceFiles       []string `json:"sourceFiles"`
 			LoweredSourcePath string   `json:"loweredSourcePath"`
@@ -123,6 +137,8 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 	if !reflect.DeepEqual(loweredIRManifest.Units, []struct {
 		ID                string   `json:"id"`
 		Kind              string   `json:"kind"`
+		ImportPath        string   `json:"importPath"`
+		ModulePath        string   `json:"modulePath"`
 		PackageDir        string   `json:"packageDir"`
 		SourceFiles       []string `json:"sourceFiles"`
 		LoweredSourcePath string   `json:"loweredSourcePath"`
@@ -174,10 +190,12 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 		{
 			ID:                "program-000",
 			Kind:              "program",
+			ImportPath:        "command-line-arguments",
+			ModulePath:        "example.com/app",
 			PackageDir:        "/workspace",
 			SourceFiles:       []string{"/workspace/main.go"},
 			LoweredSourcePath: "/working/tinygo-lowered/program-000.c",
-			PackageName:       "",
+			PackageName:       "main",
 			Imports: []struct {
 				Path  string `json:"path"`
 				Alias string `json:"alias,omitempty"`
@@ -978,12 +996,12 @@ func TestBuildWritesLoweringBlocksIntoLoweredIRWhenFilesExist(t *testing.T) {
 
 	var loweredIRManifest struct {
 		Units []struct {
-		PlaceholderBlocks []struct {
-			Stage     string `json:"stage"`
-			Index     int    `json:"index"`
-			Value     string `json:"value"`
-			Signature string `json:"signature"`
-		} `json:"placeholderBlocks"`
+			PlaceholderBlocks []struct {
+				Stage     string `json:"stage"`
+				Index     int    `json:"index"`
+				Value     string `json:"value"`
+				Signature string `json:"signature"`
+			} `json:"placeholderBlocks"`
 			LoweringBlocks []struct {
 				Stage string `json:"stage"`
 				Index int    `json:"index"`
