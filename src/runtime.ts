@@ -125,13 +125,21 @@ type EmceptionBridge = {
 export type PhaseTone = 'idle' | 'running' | 'success' | 'error'
 export type TinyGoRuntimePhase = 'toolchain' | 'smoke' | 'probe' | 'verify'
 
+export type TinyGoBuildArtifact = {
+  path: string
+  bytes: Uint8Array
+  runnable: boolean
+  entrypoint: '_start' | '_initialize' | null
+  reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
+}
+
 export type TinyGoTestHooks = {
   boot(): Promise<void>
   plan(): Promise<TinyGoBuildResult>
   execute(): Promise<void>
   reset(): void
   readActivityLog(): string
-  readBuildArtifact(): { path: string; bytes: Uint8Array } | null
+  readBuildArtifact(): TinyGoBuildArtifact | null
   readFrontendAnalysisInputManifest(): TinyGoFrontendInputManifest | null
   setBuildRequestOverrides(overrides: TinyGoBuildRequestOverrides | null): void
   setDriverBridgeManifest(manifest: TinyGoDriverBridgeManifest | null): void
@@ -217,6 +225,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
   let lastBuildResult: TinyGoBuildResult | null = null
   let lastBuildArtifactPath: string | null = null
   let lastBuildArtifactBytes: Uint8Array | null = null
+  let lastBuildArtifactEntrypoint: '_start' | '_initialize' | null = null
+  let lastBuildArtifactRunnable = false
+  let lastBuildArtifactReason: 'bootstrap-artifact' | 'missing-wasi-entrypoint' | undefined
   let lastFrontendAnalysisInputManifest: TinyGoFrontendInputManifest | null = null
   let injectedBuildRequestOverrides: TinyGoBuildRequestOverrides | null = null
   let injectedDriverBridgeManifest: TinyGoDriverBridgeManifest | null = null
@@ -260,6 +271,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     lastBuildResult = null
     lastBuildArtifactPath = null
     lastBuildArtifactBytes = null
+    lastBuildArtifactEntrypoint = null
+    lastBuildArtifactRunnable = false
+    lastBuildArtifactReason = undefined
     lastFrontendAnalysisInputManifest = null
   }
 
@@ -1052,10 +1066,35 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       const artifact = await fileSystem.readFile(artifactPath)
       const artifactBytes = typeof artifact === 'string' ? textEncoder.encode(artifact) : artifact
       const size = artifactBytes.byteLength
+      const exportNames = WebAssembly.Module.exports(
+        new WebAssembly.Module(new Uint8Array(artifactBytes)),
+      ).map((entry) => entry.name)
+      const hasBootstrapManifestExports =
+        exportNames.includes('tinygo_embedded_manifest_len') &&
+        exportNames.includes('tinygo_embedded_manifest_ptr')
       lastBuildArtifactPath = artifactPath
       lastBuildArtifactBytes = new Uint8Array(artifactBytes)
+      lastBuildArtifactEntrypoint = exportNames.includes('_start')
+        ? '_start'
+        : exportNames.includes('_initialize')
+          ? '_initialize'
+          : null
+      lastBuildArtifactRunnable = lastBuildArtifactEntrypoint !== null
+      lastBuildArtifactReason = lastBuildArtifactRunnable
+        ? undefined
+        : hasBootstrapManifestExports
+          ? 'bootstrap-artifact'
+          : 'missing-wasi-entrypoint'
       setPhase('smoke', `${size.toLocaleString()} bytes`, 'success')
       appendLog(`build artifact ready: ${artifactPath} (${size.toLocaleString()} bytes)`, 'success')
+      if (!lastBuildArtifactRunnable) {
+        appendLog(
+          hasBootstrapManifestExports
+            ? 'build artifact execution blocked: bootstrap artifact has no WASI entrypoint'
+            : 'build artifact execution blocked: final artifact has no supported WASI entrypoint',
+          'idle',
+        )
+      }
       if (frontendResult) {
         if (!frontendCommandArtifactVerification) {
           throw new Error('missing command artifact verification for final artifact output')
@@ -1286,6 +1325,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       return {
         path: lastBuildArtifactPath,
         bytes: new Uint8Array(lastBuildArtifactBytes),
+        runnable: lastBuildArtifactRunnable,
+        entrypoint: lastBuildArtifactEntrypoint,
+        reason: lastBuildArtifactReason,
       }
     },
     readFrontendAnalysisInputManifest: () => {

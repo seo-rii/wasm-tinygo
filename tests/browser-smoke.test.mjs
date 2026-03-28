@@ -270,6 +270,19 @@ func main() {
   const frontendAnalysisInputManifest = await page.evaluate(
     () => window.__wasmTinygoTestHooks.readFrontendAnalysisInputManifest(),
   )
+  const buildArtifact = await page.evaluate(() => {
+    const artifact = window.__wasmTinygoTestHooks.readBuildArtifact()
+    if (!artifact) {
+      return null
+    }
+    return {
+      path: artifact.path,
+      byteLength: artifact.bytes.length,
+      runnable: artifact.runnable,
+      entrypoint: artifact.entrypoint,
+      reason: artifact.reason,
+    }
+  })
   const phases = await page.locator('[data-phase]').allTextContents()
   const activity = await page.locator('#terminal-output').textContent()
   const sourcePreview = await page.locator('.source-panel').first().textContent()
@@ -278,6 +291,11 @@ func main() {
   assert.match(phases.join('\n'), /build driver plan\s+\d+ steps/)
   assert.match(phases.join('\n'), /build execution\s+[\d,]+ bytes/)
   assert.match(phases.join('\n'), /front-end verification\s+verified/)
+  assert.equal(buildArtifact?.path, '/working/out.wasm')
+  assert.equal(buildArtifact?.byteLength > 0, true)
+  assert.equal(buildArtifact?.runnable, false)
+  assert.equal(buildArtifact?.entrypoint, null)
+  assert.equal(buildArtifact?.reason, 'bootstrap-artifact')
   assert.deepEqual(frontendAnalysisInputManifest, driverBridgeManifest.frontendAnalysisInput)
   assert.match(activity ?? '', /bootstrap roundtrip verified/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-sources\.json/)
