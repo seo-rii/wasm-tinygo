@@ -4,6 +4,8 @@
 
 The repository does not run the upstream TinyGo CLI in the browser yet. Instead, it proves the execution model around it: a browser-hosted LLVM toolchain, a Go/WASI planning stage, a browser-side front-end handoff, and a backend lowering/verification pipeline that produces real wasm artifacts.
 
+The repository now also includes a repo-local host probe that downloads the official TinyGo release, runs `tinygo build -target wasip1`, executes the resulting wasm artifact under a WASI shim, and records a normalized driver/host bridge manifest. That is the first real upstream TinyGo execution path in this project, but it still runs on the host side rather than inside the browser pipeline.
+
 Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/seorii/dev/hancomac/wasm-tinygo/COMPATIBILITY.md).
 
 ## Documentation
@@ -19,8 +21,12 @@ Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/s
 - Browser execution path is working end to end.
 - The app boots emception in the browser and executes generated `clang` and `wasm-ld` plans.
 - The Go/WASI probe binary handles driver, front-end, and backend modes.
+- The planner-owned front-end handoff now carries explicit `compileUnits`, `packageGraph`, and `buildContext` sections.
 - The front-end and backend exchange normalized manifests and verify them on the host/browser side.
 - The repository produces and validates both a bootstrap wasm artifact and a lowered wasm artifact.
+- A repo-local TinyGo release can be fetched and used to compile and run a real `wasip1` sample on the host.
+- A normalized `tinygo-driver-bridge.json` manifest can now verify that native `go-probe` driver metadata matches the real host-side TinyGo probe for the same request, and it also records how the synthetic frontend compile-unit handoff lines up with the real entry package facts, package graph, package files, direct imports, and promoted bridge coverage summary fields such as `compileUnitCount`, `compileUnitFileCount`, `graphPackageCount`, `bridgePackageCount`, `bridgeFileCount`, `coveredPackageCount`, `coveredFileCount`, `depOnlyPackageCount`, `standardPackageCount`, `localPackageCount`, and `programImportAlias`.
+- The browser smoke path can now consume the same bridge vocabulary, verify a synthetic frontend compile-unit manifest against normalized TinyGo host facts, and check the emitted `frontend bridge coverage ...` log line.
 - The real upstream TinyGo compiler pipeline is not embedded yet.
 
 ## What this repository demonstrates
@@ -39,9 +45,9 @@ Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/s
 - `internal/driver`
   Request parsing, package loading, import/module analysis, and planner invocation.
 - `internal/tinygoplanner`
-  TinyGo-style target resolution and bootstrap/front-end handoff manifest generation.
+  TinyGo-style target resolution and bootstrap/front-end handoff manifest generation, including planner-owned `packageGraph` and `buildContext`.
 - `internal/tinygofrontend`
-  Front-end handoff consumer, compile-unit generation, and lowering-plan emission.
+  Front-end handoff consumer, handoff validation, compile-unit generation, and lowering-plan emission.
 - `internal/tinygobackend`
   Lowered source generation, lowered IR emission, command batch generation, and final artifact contracts.
 - `src/main.ts`
@@ -81,20 +87,28 @@ npm run build
 
 - `npm run prepare:assets`
   Fetches the emception worker, vendors its runtime assets locally, and rebuilds the Go/WASI probe.
+- `npm run prepare:tinygo`
+  Downloads and extracts the pinned TinyGo release into `.cache/tinygo-toolchain/`.
 - `npm run dev`
   Prepares assets and starts the Vite dev server.
 - `npm run build`
   Prepares assets and builds the production bundle.
 - `npm run check`
   Runs TypeScript checking.
+- `npm run probe:tinygo-host`
+  Downloads the repo-local TinyGo toolchain, builds a real `wasip1` sample, runs the resulting wasm artifact, and writes `tinygo-host-probe.json`.
+- `npm run probe:tinygo-driver-bridge`
+  Downloads the repo-local TinyGo toolchain, runs the native `go-probe` driver and the real TinyGo host probe against the same request, reruns the package-graph-only `frontendAnalysisInput` seam, the synthetic `frontend-analysis` seam, the package-focused `frontend-real-adapter` seam, and the real-adapter-owned frontend build seam, and writes a normalized `tinygo-driver-bridge.json` manifest with verified target facts, package graph facts, canonical `frontendAnalysisInput`, `frontendAnalysis`, canonical `frontendRealAdapter`, compatibility alias `realFrontendAnalysis`, frontend handoff summary, direct import coverage, and the promoted bridge coverage summary fields.
 - `go test ./...`
   Runs the Go package tests.
 - `npm run test:host`
   Runs Node-based host/verifier tests.
+- `npm run test:tinygo-host`
+  Downloads the repo-local TinyGo toolchain, runs the normalized driver/host bridge probe, and then reruns the real TinyGo bridge integration test.
 - `npm run test:wasi`
-  Runs the WASI integration tests against the built probe module.
+  Runs the WASI integration tests against the built probe module, including the path where `frontend` prefers an existing `tinygo-frontend-real-adapter.json`, otherwise reuses `tinygo-frontend-analysis.json`, and only reruns analysis from `tinygo-frontend-input.json` when no verified handoff is present.
 - `npm run test:browser`
-  Runs the headless browser smoke test.
+  Runs the headless browser smoke test, including browser-side verification against an injected normalized TinyGo driver bridge manifest, the `frontend analysis input source=bridge` log, the canonical versus `compat-alias` `frontend real adapter bridge verified ... source=...` path, the `frontend bridge coverage ...` summary line, and the `frontend build source=real-adapter` activity log.
 
 ## Generated assets
 
@@ -106,6 +120,8 @@ These files are generated locally and intentionally ignored by git:
 - `.cache/`
 
 Clone the repository, run the normal npm scripts, and let those assets be regenerated on demand.
+
+The real TinyGo host bridge also writes temporary `tinygo-host-probe.json` and `tinygo-driver-bridge.json` files inside its working directory under `/tmp/`.
 
 ## Scope
 
