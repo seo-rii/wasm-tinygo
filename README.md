@@ -11,6 +11,7 @@ Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/s
 ## Documentation
 
 - [Architecture](/home/seorii/dev/hancomac/wasm-tinygo/docs/architecture.md)
+- [Browser runtime](/home/seorii/dev/hancomac/wasm-tinygo/docs/browser-runtime.md)
 - [Manifest chain](/home/seorii/dev/hancomac/wasm-tinygo/docs/manifests.md)
 - [Development guide](/home/seorii/dev/hancomac/wasm-tinygo/docs/development.md)
 - [Roadmap](/home/seorii/dev/hancomac/wasm-tinygo/docs/roadmap.md)
