@@ -106,7 +106,9 @@ type TinyGoFrontEndAdapterResult = {
 }
 
 type EmceptionFileSystemBridge = {
+  exists(path: string): Promise<boolean>
   readFile(path: string, options?: { encoding?: string }): Promise<string | Uint8Array>
+  unlink(path: string): Promise<void>
   writeFile(path: string, contents: string): Promise<void>
 }
 
@@ -356,6 +358,7 @@ if (!terminal || !bootButton || !planButton || !executeButton || !resetButton) {
 let emceptionWorker: Worker | null = null
 let emception: EmceptionBridge | null = null
 let bootPromise: Promise<EmceptionBridge> | null = null
+let runtimeWorkingTreeDirty = false
 let lastBuildResult: TinyGoBuildResult | null = null
 let lastFrontendAnalysisInputManifest: TinyGoFrontendInputManifest | null = null
 let injectedBuildRequestOverrides: TinyGoBuildRequestOverrides | null = null
@@ -411,6 +414,14 @@ const runWithTestHookAction = async <T>(action: TinyGoTestHookAction, run: () =>
 const runUiAction = (action: TinyGoTestHookAction, run: () => Promise<void>) => {
   // UI actions already surface recoverable failures through the activity log and phase state.
   void runWithTestHookAction(action, run).catch(() => {})
+}
+
+const disposeEmceptionRuntime = () => {
+  emceptionWorker?.terminate()
+  emceptionWorker = null
+  emception = null
+  bootPromise = null
+  runtimeWorkingTreeDirty = false
 }
 
 const invalidateCachedBuildState = () => {
@@ -473,6 +484,7 @@ const ensureEmception = async () => {
       appendLog(`spawn ${argv.join(' ')}`, 'running')
     })
     await emception.init()
+    runtimeWorkingTreeDirty = false
     setPhase('toolchain', 'ready', 'success')
     appendLog('emception toolchain is ready', 'success')
     setControlsLocked(false)
@@ -481,10 +493,7 @@ const ensureEmception = async () => {
   })().catch((error) => {
     setPhase('toolchain', 'failed', 'error')
     setControlsLocked(false)
-    bootPromise = null
-    emception = null
-    emceptionWorker?.terminate()
-    emceptionWorker = null
+    disposeEmceptionRuntime()
     appendLog(`emception boot failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
     throw error
   })
@@ -606,7 +615,11 @@ planButton.addEventListener('click', () => {
 })
 
 const executeBuildPlan = async () => {
+  if (emception && runtimeWorkingTreeDirty) {
+    disposeEmceptionRuntime()
+  }
   const runtime = await ensureEmception()
+  runtimeWorkingTreeDirty = false
   const buildStateVersionAtStart = buildStateVersion
 
   try {
@@ -625,7 +638,9 @@ const executeBuildPlan = async () => {
       })
     const fileSystem = runtime.fileSystem
     const writableFileSystem: EmceptionWritableFileSystem = {
+      exists: (path) => fileSystem.exists(path),
       mkdir: (path) => runtime.mkdir(path),
+      unlink: (path) => fileSystem.unlink(path),
       writeFile: (path, contents) => fileSystem.writeFile(path, contents),
     }
     const plannerManifestSource = result.files.find((file) => file.path === '/working/tinygo-bootstrap.json')?.contents
@@ -1406,6 +1421,7 @@ const executeBuildPlan = async () => {
     setPhase('verify', 'failed', 'error')
     appendLog(`build execution failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
   } finally {
+    runtimeWorkingTreeDirty = true
     setControlsLocked(false)
   }
 }
@@ -1423,10 +1439,7 @@ resetButton.addEventListener('click', () => {
   if (activeTestHookAction !== null || resetButton.disabled) {
     return
   }
-  emceptionWorker?.terminate()
-  emceptionWorker = null
-  emception = null
-  bootPromise = null
+  disposeEmceptionRuntime()
   invalidateCachedBuildState()
   injectedBuildRequestOverrides = null
   injectedDriverBridgeManifest = null

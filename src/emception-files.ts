@@ -4,7 +4,9 @@ export type GeneratedFile = {
 }
 
 export type EmceptionWritableFileSystem = {
+  exists(path: string): Promise<boolean>
   mkdir(path: string): Promise<void>
+  unlink(path: string): Promise<void>
   writeFile(path: string, contents: string): Promise<void>
 }
 
@@ -30,7 +32,23 @@ export const materializeGeneratedFile = async (
     }
     createdDirectories.add(currentPath)
   }
-  await fileSystem.writeFile(file.path, file.contents)
+  if (await fileSystem.exists(file.path)) {
+    await fileSystem.unlink(file.path)
+  }
+  try {
+    await fileSystem.writeFile(file.path, file.contents)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!message.includes('FS error')) {
+      throw error
+    }
+    try {
+      await fileSystem.unlink(file.path)
+    } catch {
+      throw error
+    }
+    await fileSystem.writeFile(file.path, file.contents)
+  }
 }
 
 export const materializeGeneratedFiles = async (

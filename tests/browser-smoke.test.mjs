@@ -115,6 +115,10 @@ func main() {
   )
   const { frontendRealAdapter, ...aliasOnlyDriverBridgeManifest } = driverBridgeManifest
   aliasOnlyDriverBridgeManifest.realFrontendAnalysis = driverBridgeManifest.frontendRealAdapter
+  const driftedAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
+  driftedAnalysisInputBridgeManifest.frontendAnalysisInput.buildContext.target = 'mismatch-target'
+  const driftedDriverBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
+  driftedDriverBridgeManifest.frontendAnalysis.buildContext.target = 'mismatch-target'
   assert.ok((driverBridgeManifest.packageGraph?.length ?? 0) >= 1)
   assert.match(driverBridgeManifest.toolchain?.version ?? '', /0\.40\.1/)
 
@@ -371,6 +375,30 @@ func main() {
   const redundantReadyBootPhases = await page.locator('[data-phase]').allTextContents()
   assert.deepEqual(redundantReadyBootStatuses, ['fulfilled', 'fulfilled'])
   assert.match(redundantReadyBootPhases.join('\n'), /build driver plan\s+\d+ steps/)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
+  const redundantReadyExecuteStatuses = await page.evaluate(async () => {
+    const settled = await Promise.allSettled([
+      window.__wasmTinygoTestHooks.boot(),
+      window.__wasmTinygoTestHooks.execute(),
+    ])
+    return settled.map((result) => {
+      if (result.status === 'fulfilled') {
+        return 'fulfilled'
+      }
+      return result.reason instanceof Error ? result.reason.message : String(result.reason)
+    })
+  })
+  const redundantReadyExecuteFrontendAnalysisInputManifest = await page.evaluate(
+    () => window.__wasmTinygoTestHooks.readFrontendAnalysisInputManifest(),
+  )
+  const redundantReadyExecutePhases = await page.locator('[data-phase]').allTextContents()
+  const redundantReadyExecuteActivity = await page.locator('#terminal-output').textContent()
+  assert.deepEqual(redundantReadyExecuteStatuses, ['fulfilled', 'fulfilled'])
+  assert.deepEqual(redundantReadyExecuteFrontendAnalysisInputManifest, driverBridgeManifest.frontendAnalysisInput)
+  assert.match(redundantReadyExecutePhases.join('\n'), /build execution\s+[\d,]+ bytes/)
+  assert.match(redundantReadyExecutePhases.join('\n'), /front-end verification\s+verified/)
+  assert.match(redundantReadyExecuteActivity ?? '', /frontend analysis input source=bridge/)
 
   await page.getByRole('button', { name: 'Reset Log' }).click()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
@@ -442,6 +470,32 @@ func main() {
   assert.match(failingUiPlanPhases.join('\n'), /build driver plan\s+failed/)
   assert.match(failingUiPlanActivity ?? '', /build driver failed:/)
   assert.match(failingUiPlanActivity ?? '', /local module import package not found/)
+
+  await page.getByRole('button', { name: 'Reset Log' }).click()
+  const failingUiExecutePageErrorStart = pageErrors.length
+  await page.evaluate(() => {
+    window.__codexUnhandledRejections = []
+  })
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
+  await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driftedAnalysisInputBridgeManifest)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => {
+    document.querySelector('[data-action="execute"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await page.waitForFunction(
+    () => !document.querySelector('[data-action="execute"]')?.disabled,
+    null,
+    { timeout: 120000 },
+  )
+  const failingUiExecuteUnhandledRejections = await page.evaluate(() => window.__codexUnhandledRejections)
+  const failingUiExecutePhases = await page.locator('[data-phase]').allTextContents()
+  const failingUiExecuteActivity = await page.locator('#terminal-output').textContent()
+  assert.deepEqual(pageErrors.slice(failingUiExecutePageErrorStart), [])
+  assert.deepEqual(failingUiExecuteUnhandledRejections, [])
+  assert.match(failingUiExecutePhases.join('\n'), /build execution\s+failed/)
+  assert.match(failingUiExecutePhases.join('\n'), /front-end verification\s+failed/)
+  assert.match(failingUiExecuteActivity ?? '', /build execution failed: frontend analysis input did not match real TinyGo driver bridge/)
 
   await page.getByRole('button', { name: 'Reset Log' }).click()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
@@ -542,6 +596,25 @@ func main() {
   assert.match(uiExecuteMutationPhases.join('\n'), /build driver plan\s+\d+ steps/)
   assert.match(uiExecuteMutationPhases.join('\n'), /build execution\s+[\d,]+ bytes/)
   assert.match(uiExecuteMutationPhases.join('\n'), /front-end verification\s+verified/)
+
+  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
+  await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+  const repeatedExecuteFrontendAnalysisInputManifest = await page.evaluate(
+    () => window.__wasmTinygoTestHooks.readFrontendAnalysisInputManifest(),
+  )
+  const repeatedExecutePhases = await page.locator('[data-phase]').allTextContents()
+  const repeatedExecuteActivity = await page.locator('#terminal-output').textContent()
+  assert.deepEqual(repeatedExecuteFrontendAnalysisInputManifest, driverBridgeManifest.frontendAnalysisInput)
+  assert.match(repeatedExecutePhases.join('\n'), /build execution\s+[\d,]+ bytes/)
+  assert.match(repeatedExecutePhases.join('\n'), /front-end verification\s+verified/)
+  assert.equal((repeatedExecuteActivity?.match(/frontend analysis input source=bridge/g) ?? []).length, 2)
+  assert.equal((repeatedExecuteActivity?.match(/frontend final artifact compiled module=ok/g) ?? []).length, 2)
+  assert.doesNotMatch(repeatedExecuteActivity ?? '', /build execution failed: FS error/)
 
   await page.getByRole('button', { name: 'Reset Log' }).click()
   const concurrentExecuteStatuses = await page.evaluate(async ({ workspaceFiles, manifest }) => {
@@ -649,8 +722,6 @@ func main() {
   const aliasOnlyActivity = await page.locator('#terminal-output').textContent()
   assert.match(aliasOnlyActivity ?? '', /frontend real adapter bridge verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct source=compat-alias/)
 
-  const driftedAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
-  driftedAnalysisInputBridgeManifest.frontendAnalysisInput.buildContext.target = 'mismatch-target'
   await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
   await page.waitForFunction(
     () =>
@@ -673,9 +744,23 @@ func main() {
   assert.match(driftedAnalysisInputPhases.join('\n'), /build execution\s+failed/)
   assert.match(driftedAnalysisInputPhases.join('\n'), /front-end verification\s+failed/)
   assert.match(driftedAnalysisInputActivity ?? '', /build execution failed: frontend analysis input did not match real TinyGo driver bridge/)
+  await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+  const recoveredFrontendAnalysisInputManifest = await page.evaluate(
+    () => window.__wasmTinygoTestHooks.readFrontendAnalysisInputManifest(),
+  )
+  const recoveredPhases = await page.locator('[data-phase]').allTextContents()
+  const recoveredActivity = await page.locator('#terminal-output').textContent()
+  assert.deepEqual(
+    recoveredFrontendAnalysisInputManifest,
+    driverBridgeManifest.frontendAnalysisInput,
+    JSON.stringify({ recoveredPhases, recoveredActivity }),
+  )
+  assert.match(recoveredPhases.join('\n'), /build execution\s+[\d,]+ bytes/)
+  assert.match(recoveredPhases.join('\n'), /front-end verification\s+verified/)
+  assert.match(recoveredActivity ?? '', /build execution failed: frontend analysis input did not match real TinyGo driver bridge/)
+  assert.match(recoveredActivity ?? '', /frontend analysis input source=bridge/)
 
-  const driftedDriverBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
-  driftedDriverBridgeManifest.frontendAnalysis.buildContext.target = 'mismatch-target'
   await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
   await page.waitForFunction(
     () =>
