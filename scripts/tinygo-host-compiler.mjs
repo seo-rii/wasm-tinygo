@@ -77,8 +77,25 @@ const spawnTinyGo = ({ argv, commandCwd, goCachePath, paths }) => {
   return result
 }
 
-export const compileTinyGoHostSource = async ({
-  source,
+const writeWorkspaceFiles = async ({ files, workDir }) => {
+  if (!files || typeof files !== 'object' || Array.isArray(files) || Object.keys(files).length === 0) {
+    throw new Error('TinyGo host compile requires at least one workspace file')
+  }
+  for (const [relativePath, contents] of Object.entries(files)) {
+    if (typeof relativePath !== 'string' || relativePath.trim() === '' || relativePath.startsWith('/')) {
+      throw new Error('TinyGo host compile requires relative workspace file paths')
+    }
+    if (typeof contents !== 'string') {
+      throw new Error(`TinyGo host compile requires string file contents for ${relativePath}`)
+    }
+    const absolutePath = path.join(workDir, relativePath)
+    await mkdir(path.dirname(absolutePath), { recursive: true })
+    await writeFile(absolutePath, contents)
+  }
+}
+
+export const compileTinyGoHostWorkspace = async ({
+  files,
   entryFileName = 'main.go',
   optimize = 'z',
   outputPath = '',
@@ -87,10 +104,6 @@ export const compileTinyGoHostSource = async ({
   target = 'wasip1',
   workDir = '',
 }) => {
-  if (typeof source !== 'string' || source.trim() === '') {
-    throw new Error('TinyGo host compile requires a non-empty source string')
-  }
-
   const paths = await ensureTinyGoToolchainReady()
   const resolvedWorkDir = workDir || await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-host-compile-'))
   const entryPath = path.join(resolvedWorkDir, entryFileName)
@@ -100,7 +113,8 @@ export const compileTinyGoHostSource = async ({
   await mkdir(resolvedWorkDir, { recursive: true })
   await mkdir(path.dirname(resolvedOutputPath), { recursive: true })
   await mkdir(goCachePath, { recursive: true })
-  await writeFile(entryPath, source)
+  await writeWorkspaceFiles({ files, workDir: resolvedWorkDir })
+  const commandCwd = await findGoModuleRoot(entryPath)
 
   const buildCommand = [paths.binPath, 'build', '-target', target]
   if (optimize) {
@@ -115,7 +129,7 @@ export const compileTinyGoHostSource = async ({
   buildCommand.push('-o', resolvedOutputPath, entryPath)
   spawnTinyGo({
     argv: buildCommand,
-    commandCwd: resolvedWorkDir,
+    commandCwd,
     goCachePath,
     paths,
   })
@@ -126,7 +140,7 @@ export const compileTinyGoHostSource = async ({
   }
   const tinyGoInfo = spawnTinyGo({
     argv: infoCommand,
-    commandCwd: resolvedWorkDir,
+    commandCwd,
     goCachePath,
     paths,
   })
@@ -151,6 +165,34 @@ export const compileTinyGoHostSource = async ({
     },
     workDir: resolvedWorkDir,
   }
+}
+
+export const compileTinyGoHostSource = async ({
+  source,
+  entryFileName = 'main.go',
+  optimize = 'z',
+  outputPath = '',
+  panic = 'trap',
+  scheduler = 'none',
+  target = 'wasip1',
+  workDir = '',
+}) => {
+  if (typeof source !== 'string' || source.trim() === '') {
+    throw new Error('TinyGo host compile requires a non-empty source string')
+  }
+
+  return await compileTinyGoHostWorkspace({
+    files: {
+      [entryFileName]: source,
+    },
+    entryFileName,
+    optimize,
+    outputPath,
+    panic,
+    scheduler,
+    target,
+    workDir,
+  })
 }
 
 export const findGoModuleRoot = async (entryPath) => {
