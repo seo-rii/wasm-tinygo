@@ -4,10 +4,9 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { pathToFileURL } from 'node:url'
 
 import { resolveTinyGoToolchainPaths, toolchainIsReady } from './tinygo-toolchain-paths.mjs'
-
-const paths = resolveTinyGoToolchainPaths()
 
 const runArchiveExtractor = ({ command, args, description, env }) => {
   const extract = spawnSync(command, args, {
@@ -31,7 +30,7 @@ const runArchiveExtractor = ({ command, args, description, env }) => {
   }
 }
 
-const extractArchive = async () => {
+const extractArchive = async (paths) => {
   await rm(paths.extractDir, { recursive: true, force: true })
   await mkdir(paths.extractDir, { recursive: true })
 
@@ -80,37 +79,50 @@ const extractArchive = async () => {
   throw new Error(`unsupported TinyGo archive type: ${paths.archiveType}`)
 }
 
-await mkdir(paths.cacheDir, { recursive: true })
+export const ensureTinyGoToolchainReady = async () => {
+  const paths = resolveTinyGoToolchainPaths()
 
-if (!(await toolchainIsReady(paths))) {
-  const archiveTempPath = `${paths.archivePath}.download`
-  if (!process.env.WASM_TINYGO_TINYGO_ARCHIVE_PATH) {
-    const response = await fetch(paths.releaseUrl)
-    if (!response.ok || !response.body) {
-      throw new Error(`TinyGo release fetch failed: ${response.status} ${response.statusText}`)
+  await mkdir(paths.cacheDir, { recursive: true })
+
+  if (!(await toolchainIsReady(paths))) {
+    const archiveTempPath = `${paths.archivePath}.download`
+    if (!process.env.WASM_TINYGO_TINYGO_ARCHIVE_PATH) {
+      const response = await fetch(paths.releaseUrl)
+      if (!response.ok || !response.body) {
+        throw new Error(`TinyGo release fetch failed: ${response.status} ${response.statusText}`)
+      }
+      await rm(archiveTempPath, { force: true })
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(archiveTempPath))
+      await rename(archiveTempPath, paths.archivePath)
     }
-    await rm(archiveTempPath, { force: true })
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(archiveTempPath))
-    await rename(archiveTempPath, paths.archivePath)
+
+    await extractArchive(paths)
   }
 
-  await extractArchive()
-}
+  if (!(await toolchainIsReady(paths))) {
+    throw new Error(`TinyGo toolchain is incomplete under ${paths.extractDir}`)
+  }
 
-if (!(await toolchainIsReady(paths))) {
-  throw new Error(`TinyGo toolchain is incomplete under ${paths.extractDir}`)
-}
-
-await writeFile(paths.manifestPath, `${JSON.stringify({
-  archiveType: paths.archiveType,
-  archivePath: paths.archivePath,
-  binPath: paths.binPath,
-  releaseUrl: paths.releaseUrl,
-  rootPath: paths.rootPath,
-  version: paths.version,
-}, null, 2)}
+  await writeFile(paths.manifestPath, `${JSON.stringify({
+    archiveType: paths.archiveType,
+    archivePath: paths.archivePath,
+    binPath: paths.binPath,
+    releaseUrl: paths.releaseUrl,
+    rootPath: paths.rootPath,
+    version: paths.version,
+  }, null, 2)}
 `)
 
-console.log(`Prepared TinyGo ${paths.version}`)
-console.log(`tinygo binary: ${paths.binPath}`)
-console.log(`TINYGOROOT: ${paths.rootPath}`)
+  return paths
+}
+
+const run = async () => {
+  const paths = await ensureTinyGoToolchainReady()
+  console.log(`Prepared TinyGo ${paths.version}`)
+  console.log(`tinygo binary: ${paths.binPath}`)
+  console.log(`TINYGOROOT: ${paths.rootPath}`)
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  await run()
+}
