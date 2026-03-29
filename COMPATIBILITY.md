@@ -256,7 +256,7 @@ The app may work outside Chromium-family browsers, but this has not been verifie
 
 The relevant tests live in:
 
-- [browser-smoke.test.mjs](/home/seorii/dev/hancomac/wasm-tinygo/tests/browser-smoke.test.mjs)
+- [browser-smoke.test.mjs](./tests/browser-smoke.test.mjs)
 
 ### Browser smoke verification
 

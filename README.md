@@ -6,16 +6,16 @@ The repository does not run the upstream TinyGo CLI in the browser yet. Instead,
 
 The repository now also includes a repo-local host probe that downloads the official TinyGo release, runs `tinygo build -target wasip1`, executes the resulting wasm artifact under a WASI shim, and records a normalized driver/host bridge manifest. That is the first real upstream TinyGo execution path in this project, but it still runs on the host side rather than inside the browser pipeline.
 
-Detailed compatibility and verification notes live in [COMPATIBILITY.md](/home/seorii/dev/hancomac/wasm-tinygo/COMPATIBILITY.md).
+Detailed compatibility and verification notes live in [COMPATIBILITY.md](./COMPATIBILITY.md).
 
 ## Documentation
 
-- [Architecture](/home/seorii/dev/hancomac/wasm-tinygo/docs/architecture.md)
-- [Browser runtime](/home/seorii/dev/hancomac/wasm-tinygo/docs/browser-runtime.md)
-- [Manifest chain](/home/seorii/dev/hancomac/wasm-tinygo/docs/manifests.md)
-- [Development guide](/home/seorii/dev/hancomac/wasm-tinygo/docs/development.md)
-- [Roadmap](/home/seorii/dev/hancomac/wasm-tinygo/docs/roadmap.md)
-- [Compatibility matrix](/home/seorii/dev/hancomac/wasm-tinygo/COMPATIBILITY.md)
+- [Architecture](./docs/architecture.md)
+- [Browser runtime](./docs/browser-runtime.md)
+- [Manifest chain](./docs/manifests.md)
+- [Development guide](./docs/development.md)
+- [Roadmap](./docs/roadmap.md)
+- [Compatibility matrix](./COMPATIBILITY.md)
 
 ## Status
 
