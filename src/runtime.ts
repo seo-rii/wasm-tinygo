@@ -129,7 +129,7 @@ export type TinyGoBuildArtifact = {
   path: string
   bytes: Uint8Array
   runnable: boolean
-  entrypoint: '_start' | '_initialize' | null
+  entrypoint: '_start' | '_initialize' | 'main' | null
   reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
 }
 
@@ -156,9 +156,22 @@ type TinyGoRuntimeLogEntry = {
   tone: Exclude<PhaseTone, 'idle'> | 'idle'
 }
 
+type TinyGoHostCompileResponse = {
+  artifact?: {
+    bytesBase64?: string
+    entrypoint?: '_start' | '_initialize' | 'main' | null
+    path?: string
+    reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
+    runnable?: boolean
+  }
+  error?: string
+  logs?: string[]
+}
+
 export type TinyGoRuntimeOptions = {
   assetBaseUrl: string
   bootstrapGoEntrySource?: string
+  hostCompileUrl?: string
   initialLogMessages?: Array<{ message: string; tone?: Exclude<PhaseTone, 'idle'> | 'idle' }>
   onControlsLockedChange?: (locked: boolean) => void
   onLogAppended?: (entry: TinyGoRuntimeLogEntry) => void
@@ -172,6 +185,7 @@ export type TinyGoBrowserRuntime = TinyGoRuntime
 export type TinyGoBrowserRuntimeOptions = {
   baseUrl: string
   bootstrapGoEntrySource?: string
+  hostCompileUrl?: string
   initialLogs?: string[]
   onActivityLogChange?: (activityLog: string, tone: Exclude<PhaseTone, 'idle'> | 'idle') => void
   onControlsLockedChange?: (locked: boolean) => void
@@ -225,7 +239,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
   let lastBuildResult: TinyGoBuildResult | null = null
   let lastBuildArtifactPath: string | null = null
   let lastBuildArtifactBytes: Uint8Array | null = null
-  let lastBuildArtifactEntrypoint: '_start' | '_initialize' | null = null
+  let lastBuildArtifactEntrypoint: '_start' | '_initialize' | 'main' | null = null
   let lastBuildArtifactRunnable = false
   let lastBuildArtifactReason: 'bootstrap-artifact' | 'missing-wasi-entrypoint' | undefined
   let lastFrontendAnalysisInputManifest: TinyGoFrontendInputManifest | null = null
@@ -477,6 +491,8 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       let frontendLoweredBitcodeManifestVerification: ReturnType<typeof verifyLoweredBitcodeManifestAgainstLoweringPlanAndLoweredSourcesManifest> | null = null
       let frontendCommandArtifactVerification: ReturnType<typeof verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest>['commandArtifact'] | null = null
       let frontendLoweredBitcodeCompileCommands: ToolInvocation[] | null = null
+      let frontendCompileUnitVerification: ReturnType<typeof verifyCompileUnitManifestAgainstCompileRequest> | null = null
+      let artifactProbeVerified = false
 
       setPhase('smoke', 'executing', 'running')
       setPhase('verify', 'probing', 'running')
@@ -741,6 +757,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         appendLog(`frontend request manifest=${compileUnitManifest.path}`, 'idle')
         const parsedCompileUnitManifest = JSON.parse(compileUnitManifest.contents) as TinyGoCompileUnitManifest
         const compileUnitVerification = verifyCompileUnitManifestAgainstCompileRequest(parsedCompileUnitManifest, {})
+        frontendCompileUnitVerification = compileUnitVerification
         const parsedIntermediateManifest = JSON.parse(intermediateManifest.contents) as TinyGoIntermediateManifest
         const intermediateVerification = verifyIntermediateManifestAgainstCompileUnitManifest(
           parsedCompileUnitManifest,
@@ -1074,11 +1091,15 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         exportNames.includes('tinygo_embedded_manifest_ptr')
       lastBuildArtifactPath = artifactPath
       lastBuildArtifactBytes = new Uint8Array(artifactBytes)
-      lastBuildArtifactEntrypoint = exportNames.includes('_start')
-        ? '_start'
-        : exportNames.includes('_initialize')
-          ? '_initialize'
-          : null
+      lastBuildArtifactEntrypoint = hasBootstrapManifestExports
+        ? null
+        : exportNames.includes('_start')
+          ? '_start'
+          : exportNames.includes('main') && exportNames.includes('_initialize')
+            ? '_initialize'
+            : exportNames.includes('main')
+              ? 'main'
+              : null
       lastBuildArtifactRunnable = lastBuildArtifactEntrypoint !== null
       lastBuildArtifactReason = lastBuildArtifactRunnable
         ? undefined
@@ -1245,7 +1266,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
                 'success',
               )
             }
-            setPhase('verify', 'verified', 'success')
+            artifactProbeVerified = true
           } else if (bootstrapVerification) {
             setPhase('verify', 'failed', 'error')
             appendLog(
@@ -1263,6 +1284,223 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       } catch (error) {
         setPhase('verify', 'failed', 'error')
         appendLog(`artifact probe failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      }
+      if (artifactProbeVerified) {
+        setPhase('verify', 'verified', 'success')
+      }
+      if (artifactProbeVerified && options.hostCompileUrl) {
+        const hostCompileResponse = await fetch(options.hostCompileUrl, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            entryFileName: 'main.go',
+            files: workspaceFiles ?? { 'main.go': bootstrapGoEntrySource },
+            optimize: buildRequestOverrides?.optimize ?? 'z',
+            panic: buildRequestOverrides?.panic ?? 'trap',
+            scheduler: buildRequestOverrides?.scheduler ?? 'tasks',
+            target: 'wasip1',
+          }),
+        })
+        if (hostCompileResponse.ok) {
+          const payload = (await hostCompileResponse.json()) as TinyGoHostCompileResponse
+          const artifactBase64 = payload.artifact?.bytesBase64 ?? ''
+          const hostArtifactPath = payload.artifact?.path ?? ''
+          if (artifactBase64 === '' || hostArtifactPath === '') {
+            throw new Error('TinyGo host compile did not return a wasm artifact')
+          }
+          const hostArtifactBytes = Uint8Array.from(atob(artifactBase64), (char) => char.charCodeAt(0))
+          const hostArtifactExportNames = WebAssembly.Module.exports(
+            new WebAssembly.Module(hostArtifactBytes),
+          ).map((entry) => entry.name)
+          const hostArtifactEntrypoint = payload.artifact?.entrypoint ?? (
+            hostArtifactExportNames.includes('_start')
+              ? '_start'
+              : hostArtifactExportNames.includes('main') && hostArtifactExportNames.includes('_initialize')
+                ? '_initialize'
+                : hostArtifactExportNames.includes('main')
+                  ? 'main'
+                  : null
+          )
+          if (hostArtifactEntrypoint === null) {
+            throw new Error('TinyGo host compile returned a wasm artifact without a supported entrypoint')
+          }
+          for (const line of payload.logs ?? []) {
+            appendLog(line, 'success')
+          }
+          lastBuildArtifactPath = hostArtifactPath
+          lastBuildArtifactBytes = new Uint8Array(hostArtifactBytes)
+          lastBuildArtifactEntrypoint = hostArtifactEntrypoint
+          lastBuildArtifactRunnable = payload.artifact?.runnable ?? true
+          lastBuildArtifactReason = payload.artifact?.reason
+          setPhase('smoke', `${hostArtifactBytes.byteLength.toLocaleString()} bytes`, 'success')
+          appendLog(
+            `execution artifact ready: ${hostArtifactPath} (${hostArtifactBytes.byteLength.toLocaleString()} bytes)`,
+            'success',
+          )
+          appendLog(`execution artifact entrypoint=${hostArtifactEntrypoint}`, 'success')
+          const executionStdout = ConsoleStdout.lineBuffered((line) => appendLog(line, 'success'))
+          const executionStderr = ConsoleStdout.lineBuffered((line) => appendLog(line, 'error'))
+          const executionWasi = new WASI(
+            ['tinygo-browser-execution'],
+            [],
+            [new OpenFile(new File([])), executionStdout, executionStderr],
+          )
+          const { instance: executionInstance } = await WebAssembly.instantiate(hostArtifactBytes as BufferSource, {
+            wasi_snapshot_preview1: executionWasi.wasiImport,
+            wasi_unstable: executionWasi.wasiImport,
+          })
+          const executionExports = executionInstance.exports as Record<string, unknown>
+          let executionExitCode = 0
+          try {
+            if (hostArtifactEntrypoint === '_start') {
+              executionExitCode = executionWasi.start(
+                executionInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } },
+              )
+            } else {
+              if (typeof executionExports._initialize === 'function') {
+                executionWasi.initialize(
+                  executionInstance as { exports: { memory: WebAssembly.Memory; _initialize?: () => unknown } },
+                )
+              } else if (typeof executionExports.__wasm_call_ctors === 'function') {
+                ;(executionExports.__wasm_call_ctors as () => unknown)()
+              }
+              const mainResult =
+                typeof executionExports.main === 'function'
+                  ? (executionExports.main as () => unknown)()
+                  : 0
+              executionExitCode = typeof mainResult === 'number' ? mainResult : 0
+            }
+          } catch (error) {
+            if (error instanceof WASIProcExit) {
+              executionExitCode = error.code
+            } else {
+              throw error
+            }
+          }
+          if (executionExitCode !== 0) {
+            throw new Error(`execution artifact exited with code ${executionExitCode}`)
+          }
+          appendLog(`execution artifact completed exitCode=${executionExitCode}`, 'success')
+          return
+        }
+        if (
+          hostCompileResponse.status !== 404 &&
+          hostCompileResponse.status !== 405 &&
+          hostCompileResponse.status !== 501
+        ) {
+          let hostCompileFailure = 'TinyGo host compile failed'
+          try {
+            const payload = (await hostCompileResponse.json()) as TinyGoHostCompileResponse
+            if (typeof payload.error === 'string' && payload.error !== '') {
+              hostCompileFailure = payload.error
+            }
+          } catch {
+            const responseText = await hostCompileResponse.text()
+            if (responseText.trim() !== '') {
+              hostCompileFailure = responseText.trim()
+            }
+          }
+          throw new Error(hostCompileFailure)
+        }
+      }
+      if (
+        artifactProbeVerified &&
+        frontendCompileUnitVerification &&
+        frontendCommandArtifactVerification &&
+        !lastBuildArtifactRunnable
+      ) {
+        const executionArtifactPath = artifactPath.endsWith('.wasm')
+          ? `${artifactPath.slice(0, -'.wasm'.length)}.exec.wasm`
+          : `${artifactPath}.exec.wasm`
+        const executionLinkCommand = [
+          `/usr/bin/${frontendCompileUnitVerification.toolchain.linker}`,
+          ...frontendCompileUnitVerification.toolchain.ldflags,
+          ...frontendCommandArtifactVerification.bitcodeFiles,
+          '-o',
+          executionArtifactPath,
+        ]
+        appendLog(`$ ${executionLinkCommand.join(' ')}`, 'running')
+        const executionLinkResult = await runtime._run_process_impl(executionLinkCommand, { cwd: '/working' })
+        if (executionLinkResult.returncode !== 0) {
+          if (executionLinkResult.stdout.trim() !== '') {
+            appendLog(executionLinkResult.stdout.trim(), 'error')
+          }
+          if (executionLinkResult.stderr.trim() !== '') {
+            appendLog(executionLinkResult.stderr.trim(), 'error')
+          }
+          throw new Error(`execution artifact link failed with exit code ${executionLinkResult.returncode}`)
+        }
+        const executionArtifact = await fileSystem.readFile(executionArtifactPath)
+        const executionArtifactBytes = typeof executionArtifact === 'string' ? textEncoder.encode(executionArtifact) : executionArtifact
+        const executionArtifactExportNames = WebAssembly.Module.exports(
+          new WebAssembly.Module(new Uint8Array(executionArtifactBytes)),
+        ).map((entry) => entry.name)
+        const executionArtifactEntrypoint = executionArtifactExportNames.includes('_start')
+          ? '_start'
+          : executionArtifactExportNames.includes('main') && executionArtifactExportNames.includes('_initialize')
+            ? '_initialize'
+            : executionArtifactExportNames.includes('main')
+              ? 'main'
+              : null
+        if (executionArtifactEntrypoint === null) {
+          throw new Error('execution artifact did not expose a supported WASI entrypoint')
+        }
+        lastBuildArtifactPath = executionArtifactPath
+        lastBuildArtifactBytes = new Uint8Array(executionArtifactBytes)
+        lastBuildArtifactEntrypoint = executionArtifactEntrypoint
+        lastBuildArtifactRunnable = true
+        lastBuildArtifactReason = undefined
+        setPhase('smoke', `${executionArtifactBytes.byteLength.toLocaleString()} bytes`, 'success')
+        appendLog(
+          `execution artifact ready: ${executionArtifactPath} (${executionArtifactBytes.byteLength.toLocaleString()} bytes)`,
+          'success',
+        )
+        appendLog(`execution artifact entrypoint=${executionArtifactEntrypoint}`, 'success')
+        const executionStdout = ConsoleStdout.lineBuffered((line) => appendLog(line, 'success'))
+        const executionStderr = ConsoleStdout.lineBuffered((line) => appendLog(line, 'error'))
+        const executionWasi = new WASI(
+          ['tinygo-browser-execution'],
+          [],
+          [new OpenFile(new File([])), executionStdout, executionStderr],
+        )
+        const { instance: executionInstance } = await WebAssembly.instantiate(executionArtifactBytes as BufferSource, {
+          wasi_snapshot_preview1: executionWasi.wasiImport,
+          wasi_unstable: executionWasi.wasiImport,
+        })
+        const executionExports = executionInstance.exports as Record<string, unknown>
+        let executionExitCode = 0
+        try {
+          if (executionArtifactEntrypoint === '_start') {
+            executionExitCode = executionWasi.start(
+              executionInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } },
+            )
+          } else {
+            if (typeof executionExports._initialize === 'function') {
+              executionWasi.initialize(
+                executionInstance as { exports: { memory: WebAssembly.Memory; _initialize?: () => unknown } },
+              )
+            } else if (typeof executionExports.__wasm_call_ctors === 'function') {
+              ;(executionExports.__wasm_call_ctors as () => unknown)()
+            }
+            const mainResult =
+              typeof executionExports.main === 'function'
+                ? (executionExports.main as () => unknown)()
+                : 0
+            executionExitCode = typeof mainResult === 'number' ? mainResult : 0
+          }
+        } catch (error) {
+          if (error instanceof WASIProcExit) {
+            executionExitCode = error.code
+          } else {
+            throw error
+          }
+        }
+        if (executionExitCode !== 0) {
+          throw new Error(`execution artifact exited with code ${executionExitCode}`)
+        }
+        appendLog(`execution artifact completed exitCode=${executionExitCode}`, 'success')
       }
     } catch (error) {
       setPhase('smoke', 'failed', 'error')
@@ -1376,6 +1614,7 @@ export const createTinyGoBrowserRuntime = (options: TinyGoBrowserRuntimeOptions)
   const runtime = createTinyGoRuntime({
     assetBaseUrl: options.baseUrl,
     bootstrapGoEntrySource: options.bootstrapGoEntrySource,
+    hostCompileUrl: options.hostCompileUrl ?? new URL('../api/tinygo/compile', options.baseUrl).toString(),
     initialLogMessages: (options.initialLogs ?? []).map((message) => ({ message })),
     onControlsLockedChange: options.onControlsLockedChange,
     onPhaseChange: options.onPhaseChange,
