@@ -311,8 +311,10 @@ func main() {
   assert.match(activity ?? '', /frontend lowered bitcode verified format=llvm-bc count=\d+/)
   assert.match(activity ?? '', /frontend lowered objects ready count=\d+ total=[\d,]+ bytes/)
   assert.match(activity ?? '', /frontend lowered objects verified format=wasm count=\d+/)
+  assert.match(activity ?? '', /\$ \/usr\/bin\/wasm-ld .*\/working\/tinygo-work\/.*\.bc .* -o \/working\/out\.wasm/)
   assert.match(activity ?? '', /frontend final artifact verified format=wasm output=\/working\/out\.wasm/)
   assert.match(activity ?? '', /frontend final artifact compiled module=ok/)
+  assert.match(activity ?? '', /build artifact execution blocked: final artifact has no supported WASI entrypoint/)
   assert.match(activity ?? '', /tinygo host compile ready: target=wasip1 scheduler=asyncify version=/)
   assert.match(activity ?? '', /tinygo host artifact built: .*main\.wasm \([\d,]+ bytes\)/)
   assert.match(activity ?? '', /execution artifact ready: .*main\.wasm \([\d,]+ bytes\)/)
@@ -334,6 +336,7 @@ func main() {
   assert.match(activity ?? '', /frontend bridge coverage compileUnits=[1-9]\d* graphPackages=[1-9]\d* coveredPackages=[1-9]\d*\/[1-9]\d* compileUnitFiles=[1-9]\d* coveredFiles=[1-9]\d*\/[1-9]\d* depOnly=[1-9]\d* standard=[1-9]\d* local=2 alias=direct/)
   assert.match(activity ?? '', /frontend bridge toolchain version=.*0\.40\.1/)
   assert.match(activity ?? '', /frontend lowered probe verified units=\d+ kinds=\d+ hashes=\d+ imports=\d+ importPaths=\d+ blankImports=\d+ dotImports=\d+ aliasedImports=\d+ funcs=\d+ funcNameHashes=\d+ funcLiterals=\d+ funcParameters=\d+ funcResults=\d+ variadicParameters=\d+ namedResults=\d+ typeParameters=\d+ genericFunctions=\d+ genericTypes=\d+ calls=\d+ builtinCalls=\d+ appendCalls=\d+ lenCalls=\d+ makeCalls=\d+ capCalls=\d+ copyCalls=\d+ panicCalls=\d+ recoverCalls=\d+ newCalls=\d+ deleteCalls=\d+ compositeLiterals=\d+ selectorExpressions=\d+ selectorNameHashes=\d+ indexExpressions=\d+ sliceExpressions=\d+ keyValueExpressions=\d+ typeAssertions=\d+ blankIdentifiers=\d+ blankAssignmentTargets=\d+ unaryExpressions=\d+ binaryExpressions=\d+ sends=\d+ receives=\d+ assignments=\d+ defines=\d+ increments=\d+ decrements=\d+ returns=\d+ goStatements=\d+ deferStatements=\d+ ifStatements=\d+ rangeStatements=\d+ switchStatements=\d+ typeSwitchStatements=\d+ typeSwitchCases=\d+ typeSwitchGuardNameHashes=\d+ typeSwitchCaseTypeHashes=\d+ selectStatements=\d+ switchCases=\d+ selectClauses=\d+ forStatements=\d+ breakStatements=\d+ breakLabelNameHashes=\d+ continueStatements=\d+ continueLabelNameHashes=\d+ labels=\d+ labelNameHashes=\d+ gotos=\d+ gotoLabelNameHashes=\d+ fallthroughs=\d+ methods=\d+ methodNameHashes=\d+ methodSignatureHashes=\d+ exportedMethodNameHashes=\d+ exportedMethodSignatureHashes=\d+ exports=\d+ exportedFunctionNameHashes=\d+ types=\d+ typeNameHashes=\d+ exportedTypes=\d+ exportedTypeNameHashes=\d+ structs=\d+ interfaces=\d+ mapTypes=\d+ chanTypes=\d+ sendOnlyChanTypes=\d+ receiveOnlyChanTypes=\d+ arrayTypes=\d+ sliceTypes=\d+ pointerTypes=\d+ structFields=\d+ embeddedStructFields=\d+ taggedStructFields=\d+ structFieldNameHashes=\d+ structFieldTypeHashes=\d+ embeddedStructFieldTypeHashes=\d+ taggedStructFieldTagHashes=\d+ interfaceMethods=\d+ interfaceMethodNameHashes=\d+ interfaceMethodSignatureHashes=\d+ embeddedInterfaceMethods=\d+ embeddedInterfaceMethodNameHashes=\d+ consts=\d+ constNameHashes=\d+ vars=\d+ varNameHashes=\d+ exportedConsts=\d+ exportedConstNameHashes=\d+ exportedVars=\d+ exportedVarNameHashes=\d+ declarationCounts=\d+ declarationNameHashes=\d+ declarationSignatureHashes=\d+ declarationKindHashes=\d+ declarationExportedCounts=\d+ declarationExportedNameHashes=\d+ declarationExportedSignatureHashes=\d+ declarationExportedKindHashes=\d+ declarationMethodCounts=\d+ declarationMethodNameHashes=\d+ declarationMethodSignatureHashes=\d+ declarationMethodKindHashes=\d+ placeholderBlocks=\d+ placeholderBlockHashes=\d+ placeholderBlockSignatureHashes=\d+ placeholderBlockRuntimeHashes=\d+ loweringBlocks=\d+ loweringBlockHashes=\d+ loweringBlockRuntimeHashes=\d+ mains=\d+ inits=\d+/)
+  assert.doesNotMatch(activity ?? '', /build artifact execution blocked: bootstrap artifact has no WASI entrypoint/)
   assert.doesNotMatch(activity ?? '', /bootstrap exports checksum=/)
   assert.doesNotMatch(activity ?? '', /bootstrap exports manifestBytes=/)
   assert.doesNotMatch(activity ?? '', /frontend input target=/)
@@ -817,4 +820,49 @@ func main() {
   assert.match(driftedPhases.join('\n'), /build execution\s+failed/)
   assert.match(driftedPhases.join('\n'), /front-end verification\s+failed/)
   assert.match(driftedActivity ?? '', /build execution failed: frontend analysis buildContext did not match real TinyGo driver bridge/)
+
+  await page.route('**/api/tinygo/compile', (route) => route.fulfill({ status: 404, body: 'not found' }))
+  await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
+  await page.waitForFunction(
+    () =>
+      typeof window.__wasmTinygoTestHooks?.boot === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.readBuildArtifact === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setBuildRequestOverrides === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setDriverBridgeManifest === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setWorkspaceFiles === 'function',
+    null,
+    { timeout: 120000 },
+  )
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
+  await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+
+  const staticFallbackArtifact = await page.evaluate(() => {
+    const artifact = window.__wasmTinygoTestHooks.readBuildArtifact()
+    if (!artifact) {
+      return null
+    }
+    return {
+      path: artifact.path,
+      runnable: artifact.runnable,
+      entrypoint: artifact.entrypoint,
+      reason: artifact.reason,
+    }
+  })
+  const staticFallbackPhases = await page.locator('[data-phase]').allTextContents()
+  const staticFallbackActivity = await page.locator('#terminal-output').textContent()
+  assert.match(staticFallbackPhases.join('\n'), /build execution\s+failed/)
+  assert.match(staticFallbackPhases.join('\n'), /front-end verification\s+failed/)
+  assert.match(staticFallbackArtifact?.path ?? '', /\/working\/out\.wasm$/)
+  assert.equal(staticFallbackArtifact?.runnable, false)
+  assert.equal(staticFallbackArtifact?.entrypoint, null)
+  assert.equal(staticFallbackArtifact?.reason, 'missing-wasi-entrypoint')
+  assert.match(staticFallbackActivity ?? '', /build artifact execution blocked: final artifact has no supported WASI entrypoint/)
+  assert.match(staticFallbackActivity ?? '', /build execution failed: execution artifact did not expose a supported WASI entrypoint/)
+  assert.match(staticFallbackActivity ?? '', /\$ \/usr\/bin\/wasm-ld .*\/working\/tinygo-work\/.*\.bc .* -o \/working\/out\.wasm/)
+  assert.doesNotMatch(staticFallbackActivity ?? '', /build artifact execution blocked: bootstrap artifact has no WASI entrypoint/)
+  await page.unroute('**/api/tinygo/compile')
 })

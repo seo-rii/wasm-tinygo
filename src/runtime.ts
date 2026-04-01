@@ -492,6 +492,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       let frontendCommandArtifactVerification: ReturnType<typeof verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest>['commandArtifact'] | null = null
       let frontendLoweredBitcodeCompileCommands: ToolInvocation[] | null = null
       let frontendCompileUnitVerification: ReturnType<typeof verifyCompileUnitManifestAgainstCompileRequest> | null = null
+      let frontendBootstrapArtifactBytes: Uint8Array | null = null
       let artifactProbeVerified = false
 
       setPhase('smoke', 'executing', 'running')
@@ -1008,6 +1009,11 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             return
           }
         }
+        const bootstrapArtifact = await fileSystem.readFile(result.artifact ?? '/working/out.wasm')
+        frontendBootstrapArtifactBytes =
+          typeof bootstrapArtifact === 'string'
+            ? textEncoder.encode(bootstrapArtifact)
+            : new Uint8Array(bootstrapArtifact)
         for (const step of [...loweredCommandBatchVerification.compileCommands, loweredCommandBatchVerification.linkCommand]) {
           appendLog(`$ ${step.argv.join(' ')}`, 'running')
           const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
@@ -1060,6 +1066,22 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             appendLog(`lowered bitcode step failed with exit code ${stepResult.returncode}`, 'error')
             return
           }
+        }
+        appendLog(`$ ${commandBatchVerification.linkCommand.argv.join(' ')}`, 'running')
+        const commandLinkResult = await runtime._run_process_impl(
+          commandBatchVerification.linkCommand.argv,
+          { cwd: commandBatchVerification.linkCommand.cwd },
+        )
+        if (commandLinkResult.returncode !== 0) {
+          setPhase('smoke', 'failed', 'error')
+          if (commandLinkResult.stdout.trim() !== '') {
+            appendLog(commandLinkResult.stdout.trim(), 'error')
+          }
+          if (commandLinkResult.stderr.trim() !== '') {
+            appendLog(commandLinkResult.stderr.trim(), 'error')
+          }
+          appendLog(`final artifact link failed with exit code ${commandLinkResult.returncode}`, 'error')
+          return
         }
       } else {
         for (const step of result.plan) {
@@ -1172,9 +1194,10 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         appendLog(`frontend lowered artifact ready: /working/tinygo-lowered-out.wasm (${loweredArtifactSize.toLocaleString()} bytes)`, 'success')
       }
       try {
+        const bootstrapArtifactBytes = frontendBootstrapArtifactBytes ?? new Uint8Array(artifactBytes)
         const bootstrapModule =
           (await WebAssembly.instantiate(
-            artifactBytes as BufferSource,
+            bootstrapArtifactBytes as BufferSource,
             {},
           )) as WebAssembly.WebAssemblyInstantiatedSource
         appendLog('frontend final artifact compiled module=ok', 'success')
@@ -1614,7 +1637,7 @@ export const createTinyGoBrowserRuntime = (options: TinyGoBrowserRuntimeOptions)
   const runtime = createTinyGoRuntime({
     assetBaseUrl: options.baseUrl,
     bootstrapGoEntrySource: options.bootstrapGoEntrySource,
-    hostCompileUrl: options.hostCompileUrl ?? new URL('../api/tinygo/compile', options.baseUrl).toString(),
+    hostCompileUrl: options.hostCompileUrl,
     initialLogMessages: (options.initialLogs ?? []).map((message) => ({ message })),
     onControlsLockedChange: options.onControlsLockedChange,
     onPhaseChange: options.onPhaseChange,
