@@ -5366,11 +5366,19 @@ test('verifyCommandArtifactManifestAgainstBackendInputAndLoweredBitcodeManifest 
     bitcodeFiles: ['/working/tinygo-work/program-000.bc'],
   }, {
     artifactOutputPath: '/working/out.wasm',
+    artifactKind: 'probe',
     bitcodeFiles: ['/working/tinygo-work/program-000.bc'],
+    entrypoint: null,
+    reason: 'missing-wasi-entrypoint',
+    runnable: false,
   })
 
   assert.equal(verification.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.artifactKind, 'probe')
   assert.deepEqual(verification.bitcodeFiles, ['/working/tinygo-work/program-000.bc'])
+  assert.equal(verification.entrypoint, null)
+  assert.equal(verification.reason, 'missing-wasi-entrypoint')
+  assert.equal(verification.runnable, false)
 })
 
 test('verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest accepts a normalized final command artifact', () => {
@@ -5396,17 +5404,25 @@ test('verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest 
     ],
   }, {
     artifactOutputPath: '/working/out.wasm',
+    artifactKind: 'probe',
     bitcodeFiles: [
       '/working/tinygo-work/program-000.bc',
       '/working/tinygo-work/stdlib-000.bc',
     ],
+    entrypoint: null,
+    reason: 'missing-wasi-entrypoint',
+    runnable: false,
   })
 
   assert.equal(verification.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.artifactKind, 'probe')
   assert.deepEqual(verification.bitcodeFiles, [
     '/working/tinygo-work/program-000.bc',
     '/working/tinygo-work/stdlib-000.bc',
   ])
+  assert.equal(verification.entrypoint, null)
+  assert.equal(verification.reason, 'missing-wasi-entrypoint')
+  assert.equal(verification.runnable, false)
 })
 
 test('verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest rejects mismatched final command artifact', () => {
@@ -5828,11 +5844,19 @@ test('verifyLoweredArtifactManifestAgainstLoweredCommandBatchManifest accepts no
     },
   }, {
     artifactOutputPath: '/working/tinygo-lowered-out.wasm',
+    artifactKind: 'probe',
+    entrypoint: null,
     objectFiles: ['/working/tinygo-lowered/program-000.o', '/working/tinygo-lowered/stdlib-000.o'],
+    reason: 'missing-wasi-entrypoint',
+    runnable: false,
   })
 
   assert.equal(verification.artifactOutputPath, '/working/tinygo-lowered-out.wasm')
+  assert.equal(verification.artifactKind, 'probe')
+  assert.equal(verification.entrypoint, null)
   assert.equal(verification.objectFiles.length, 2)
+  assert.equal(verification.reason, 'missing-wasi-entrypoint')
+  assert.equal(verification.runnable, false)
 })
 
 test('verifyLoweredArtifactManifestAgainstLoweredCommandBatchManifest rejects mismatched lowered artifact metadata', () => {

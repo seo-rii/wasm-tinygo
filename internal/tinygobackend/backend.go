@@ -154,12 +154,20 @@ type CommandBatchManifest struct {
 
 type LoweredArtifactManifest struct {
 	ArtifactOutputPath string   `json:"artifactOutputPath"`
+	ArtifactKind       string   `json:"artifactKind,omitempty"`
+	Entrypoint         *string  `json:"entrypoint"`
 	ObjectFiles        []string `json:"objectFiles"`
+	Reason             string   `json:"reason,omitempty"`
+	Runnable           bool     `json:"runnable"`
 }
 
 type CommandArtifactManifest struct {
 	ArtifactOutputPath string   `json:"artifactOutputPath"`
+	ArtifactKind       string   `json:"artifactKind,omitempty"`
 	BitcodeFiles       []string `json:"bitcodeFiles"`
+	Entrypoint         *string  `json:"entrypoint"`
+	Reason             string   `json:"reason,omitempty"`
+	Runnable           bool     `json:"runnable"`
 }
 
 type Result struct {
@@ -2456,14 +2464,22 @@ func Build(input Input) (Result, error) {
 	}
 	loweredArtifactManifestContents, err := json.Marshal(LoweredArtifactManifest{
 		ArtifactOutputPath: "/working/tinygo-lowered-out.wasm",
+		ArtifactKind:       "probe",
+		Entrypoint:         nil,
 		ObjectFiles:        loweredObjectFiles,
+		Reason:             "missing-wasi-entrypoint",
+		Runnable:           false,
 	})
 	if err != nil {
 		return Result{}, err
 	}
 	commandArtifactManifestContents, err := json.Marshal(CommandArtifactManifest{
 		ArtifactOutputPath: input.LinkJob.ArtifactOutputPath,
+		ArtifactKind:       "probe",
 		BitcodeFiles:       append([]string{}, linkBitcodeInputs...),
+		Entrypoint:         nil,
+		Reason:             "missing-wasi-entrypoint",
+		Runnable:           false,
 	})
 	if err != nil {
 		return Result{}, err

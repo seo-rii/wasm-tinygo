@@ -245,7 +245,11 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 	}
 	var commandArtifactManifest struct {
 		ArtifactOutputPath string   `json:"artifactOutputPath"`
+		ArtifactKind       string   `json:"artifactKind"`
 		BitcodeFiles       []string `json:"bitcodeFiles"`
+		Entrypoint         *string  `json:"entrypoint"`
+		Reason             string   `json:"reason"`
+		Runnable           bool     `json:"runnable"`
 	}
 	var loweredCommandBatchManifest struct {
 		CompileCommands []struct {
@@ -285,17 +289,29 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 	}
 	var loweredArtifactManifest struct {
 		ArtifactOutputPath string   `json:"artifactOutputPath"`
+		ArtifactKind       string   `json:"artifactKind"`
+		Entrypoint         *string  `json:"entrypoint"`
 		ObjectFiles        []string `json:"objectFiles"`
+		Reason             string   `json:"reason"`
+		Runnable           bool     `json:"runnable"`
 	}
 	if err := json.Unmarshal([]byte(result.GeneratedFiles[5].Contents), &loweredArtifactManifest); err != nil {
 		t.Fatalf("json.Unmarshal(lowered-artifact): %v", err)
 	}
 	if !reflect.DeepEqual(loweredArtifactManifest, struct {
 		ArtifactOutputPath string   `json:"artifactOutputPath"`
+		ArtifactKind       string   `json:"artifactKind"`
+		Entrypoint         *string  `json:"entrypoint"`
 		ObjectFiles        []string `json:"objectFiles"`
+		Reason             string   `json:"reason"`
+		Runnable           bool     `json:"runnable"`
 	}{
 		ArtifactOutputPath: "/working/tinygo-lowered-out.wasm",
+		ArtifactKind:       "probe",
+		Entrypoint:         nil,
 		ObjectFiles:        []string{"/working/tinygo-lowered/program-000.o"},
+		Reason:             "missing-wasi-entrypoint",
+		Runnable:           false,
 	}) {
 		t.Fatalf("unexpected lowered artifact manifest: %#v", loweredArtifactManifest)
 	}
@@ -304,10 +320,18 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(commandArtifactManifest, struct {
 		ArtifactOutputPath string   `json:"artifactOutputPath"`
+		ArtifactKind       string   `json:"artifactKind"`
 		BitcodeFiles       []string `json:"bitcodeFiles"`
+		Entrypoint         *string  `json:"entrypoint"`
+		Reason             string   `json:"reason"`
+		Runnable           bool     `json:"runnable"`
 	}{
 		ArtifactOutputPath: "/working/out.wasm",
+		ArtifactKind:       "probe",
 		BitcodeFiles:       []string{"/working/tinygo-work/program-000.bc"},
+		Entrypoint:         nil,
+		Reason:             "missing-wasi-entrypoint",
+		Runnable:           false,
 	}) {
 		t.Fatalf("unexpected command artifact manifest: %#v", commandArtifactManifest)
 	}

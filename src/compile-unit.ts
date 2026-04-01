@@ -327,12 +327,20 @@ export type TinyGoLoweredBitcodeManifest = {
 
 export type TinyGoLoweredArtifactManifest = {
   artifactOutputPath?: string
+  artifactKind?: 'probe' | 'bootstrap' | 'execution'
+  entrypoint?: '_start' | '_initialize' | 'main' | null
   objectFiles?: string[]
+  reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
+  runnable?: boolean
 }
 
 export type TinyGoCommandArtifactManifest = {
   artifactOutputPath?: string
+  artifactKind?: 'probe' | 'bootstrap' | 'execution'
   bitcodeFiles?: string[]
+  entrypoint?: '_start' | '_initialize' | 'main' | null
+  reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
+  runnable?: boolean
 }
 
 export type TinyGoLoweringPlanManifest = {
@@ -3073,10 +3081,26 @@ export const verifyLoweredArtifactManifestAgainstLoweredCommandBatchManifest = (
   if (JSON.stringify(objectFiles) !== JSON.stringify(loweredArtifactManifest.objectFiles ?? [])) {
     throw new Error('frontend lowered artifact manifest did not match lowered command batch manifest')
   }
+  if ((loweredArtifactManifest.artifactKind ?? 'probe') !== 'probe') {
+    throw new Error('frontend lowered artifact manifest did not match lowered command batch manifest')
+  }
+  if ((loweredArtifactManifest.entrypoint ?? null) !== null) {
+    throw new Error('frontend lowered artifact manifest did not match lowered command batch manifest')
+  }
+  if ((loweredArtifactManifest.reason ?? 'missing-wasi-entrypoint') !== 'missing-wasi-entrypoint') {
+    throw new Error('frontend lowered artifact manifest did not match lowered command batch manifest')
+  }
+  if ((loweredArtifactManifest.runnable ?? false) !== false) {
+    throw new Error('frontend lowered artifact manifest did not match lowered command batch manifest')
+  }
 
   return {
     artifactOutputPath,
+    artifactKind: 'probe' as const,
+    entrypoint: null,
     objectFiles,
+    reason: 'missing-wasi-entrypoint' as const,
+    runnable: false,
   }
 }
 
@@ -3927,9 +3951,25 @@ export const verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeMa
   if (JSON.stringify(loweredBitcodeManifest.bitcodeFiles ?? []) !== JSON.stringify(commandArtifactManifest.bitcodeFiles ?? [])) {
     throw new Error('frontend command artifact manifest did not match command batch and lowered bitcode manifest')
   }
+  if ((commandArtifactManifest.artifactKind ?? 'probe') !== 'probe') {
+    throw new Error('frontend command artifact manifest did not match command batch and lowered bitcode manifest')
+  }
+  if ((commandArtifactManifest.entrypoint ?? null) !== null) {
+    throw new Error('frontend command artifact manifest did not match command batch and lowered bitcode manifest')
+  }
+  if ((commandArtifactManifest.reason ?? 'missing-wasi-entrypoint') !== 'missing-wasi-entrypoint') {
+    throw new Error('frontend command artifact manifest did not match command batch and lowered bitcode manifest')
+  }
+  if ((commandArtifactManifest.runnable ?? false) !== false) {
+    throw new Error('frontend command artifact manifest did not match command batch and lowered bitcode manifest')
+  }
   return {
     artifactOutputPath,
+    artifactKind: 'probe' as const,
     bitcodeFiles: loweredBitcodeManifest.bitcodeFiles ?? [],
+    entrypoint: null,
+    reason: 'missing-wasi-entrypoint' as const,
+    runnable: false,
   }
 }
 
@@ -3945,8 +3985,24 @@ export const verifyCommandArtifactManifestAgainstBackendInputAndLoweredBitcodeMa
   if (JSON.stringify(loweredBitcodeManifest.bitcodeFiles ?? []) !== JSON.stringify(commandArtifactManifest.bitcodeFiles ?? [])) {
     throw new Error('frontend command artifact manifest did not match backend input and lowered bitcode manifest')
   }
+  if ((commandArtifactManifest.artifactKind ?? 'probe') !== 'probe') {
+    throw new Error('frontend command artifact manifest did not match backend input and lowered bitcode manifest')
+  }
+  if ((commandArtifactManifest.entrypoint ?? null) !== null) {
+    throw new Error('frontend command artifact manifest did not match backend input and lowered bitcode manifest')
+  }
+  if ((commandArtifactManifest.reason ?? 'missing-wasi-entrypoint') !== 'missing-wasi-entrypoint') {
+    throw new Error('frontend command artifact manifest did not match backend input and lowered bitcode manifest')
+  }
+  if ((commandArtifactManifest.runnable ?? false) !== false) {
+    throw new Error('frontend command artifact manifest did not match backend input and lowered bitcode manifest')
+  }
   return {
     artifactOutputPath,
+    artifactKind: 'probe' as const,
     bitcodeFiles: loweredBitcodeManifest.bitcodeFiles ?? [],
+    entrypoint: null,
+    reason: 'missing-wasi-entrypoint' as const,
+    runnable: false,
   }
 }

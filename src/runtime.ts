@@ -1108,12 +1108,15 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       const exportNames = WebAssembly.Module.exports(
         new WebAssembly.Module(new Uint8Array(artifactBytes)),
       ).map((entry) => entry.name)
+      const manifestArtifactKind = frontendCommandArtifactVerification?.artifactKind
       const hasBootstrapManifestExports =
+        manifestArtifactKind === undefined &&
         exportNames.includes('tinygo_embedded_manifest_len') &&
         exportNames.includes('tinygo_embedded_manifest_ptr')
       lastBuildArtifactPath = artifactPath
       lastBuildArtifactBytes = new Uint8Array(artifactBytes)
-      lastBuildArtifactEntrypoint = hasBootstrapManifestExports
+      lastBuildArtifactEntrypoint = frontendCommandArtifactVerification?.entrypoint ?? (
+        hasBootstrapManifestExports
         ? null
         : exportNames.includes('_start')
           ? '_start'
@@ -1122,12 +1125,15 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             : exportNames.includes('main')
               ? 'main'
               : null
-      lastBuildArtifactRunnable = lastBuildArtifactEntrypoint !== null
+      )
+      lastBuildArtifactRunnable = frontendCommandArtifactVerification?.runnable ?? (lastBuildArtifactEntrypoint !== null)
       lastBuildArtifactReason = lastBuildArtifactRunnable
         ? undefined
-        : hasBootstrapManifestExports
-          ? 'bootstrap-artifact'
-          : 'missing-wasi-entrypoint'
+        : frontendCommandArtifactVerification?.reason ?? (
+          hasBootstrapManifestExports
+            ? 'bootstrap-artifact'
+            : 'missing-wasi-entrypoint'
+        )
       setPhase('smoke', `${size.toLocaleString()} bytes`, 'success')
       appendLog(`build artifact ready: ${artifactPath} (${size.toLocaleString()} bytes)`, 'success')
       if (!lastBuildArtifactRunnable) {
