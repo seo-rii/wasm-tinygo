@@ -173,6 +173,61 @@ export const verifyTinyGoLoweredArtifactExports = (
 
   const exportsObject = instance.exports as Record<string, unknown>
   const textEncoder = new TextEncoder()
+  const textDecoder = new TextDecoder()
+  const sanitizedSourceTextByFile: Record<string, string> = {}
+  const typeContextSourceTextByFile: Record<string, string> = {}
+  for (const unit of loweredSourcesManifest.units) {
+    for (const sourceFile of unit.sourceFiles ?? []) {
+      if (sanitizedSourceTextByFile[sourceFile] !== undefined) {
+        continue
+      }
+      const sourceText =
+        typeof sourceFileContents[sourceFile] === 'string'
+          ? sourceFileContents[sourceFile] as string
+          : sourceFileContents[sourceFile] instanceof Uint8Array
+            ? textDecoder.decode(sourceFileContents[sourceFile] as Uint8Array)
+            : ''
+      const sanitizedSourceText = sourceText
+        .replace(/`[\s\S]*?`/g, (match) => ' '.repeat(match.length))
+        .replace(/"(?:\\.|[^"\\])*"/g, (match) => ' '.repeat(match.length))
+        .replace(/'(?:\\.|[^'\\])*'/g, (match) => ' '.repeat(match.length))
+        .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
+        .replace(/\/\/[^\n]*/g, (match) => ' '.repeat(match.length))
+      sanitizedSourceTextByFile[sourceFile] = sanitizedSourceText
+      const typeContextSourceText = [...sanitizedSourceText]
+      const funcKeywordPattern = /\bfunc\b/g
+      while (true) {
+        const funcKeywordMatch = funcKeywordPattern.exec(sanitizedSourceText)
+        if (funcKeywordMatch === null) {
+          break
+        }
+        const bodyStartIndex = sanitizedSourceText.indexOf('{', funcKeywordMatch.index)
+        if (bodyStartIndex < 0) {
+          break
+        }
+        let bodyDepth = 1
+        let bodyEndIndex = bodyStartIndex + 1
+        while (bodyEndIndex < sanitizedSourceText.length && bodyDepth > 0) {
+          if (sanitizedSourceText[bodyEndIndex] === '{') {
+            bodyDepth += 1
+          } else if (sanitizedSourceText[bodyEndIndex] === '}') {
+            bodyDepth -= 1
+          }
+          bodyEndIndex += 1
+        }
+        if (bodyDepth > 0) {
+          break
+        }
+        for (let blankIndex = bodyStartIndex + 1; blankIndex < bodyEndIndex - 1; blankIndex += 1) {
+          if (typeContextSourceText[blankIndex] !== '\n') {
+            typeContextSourceText[blankIndex] = ' '
+          }
+        }
+        funcKeywordPattern.lastIndex = bodyEndIndex
+      }
+      typeContextSourceTextByFile[sourceFile] = typeContextSourceText.join('')
+    }
+  }
   const units: TinyGoLoweredArtifactProbeVerification['units'] = []
   for (const unit of loweredSourcesManifest.units) {
     if (typeof unit.id !== 'string' || unit.id === '' || !Array.isArray(unit.sourceFiles) || typeof unit.kind !== 'string') {
@@ -1517,12 +1572,7 @@ export const verifyTinyGoLoweredArtifactExports = (
     const assignStatementCountExportValue = exportsObject[assignStatementCountExportName]
     let expectedAssignStatementCount = expectedDefineStatementCount
     for (const sourceFile of unit.sourceFiles) {
-      const sourceText =
-        typeof sourceFileContents[sourceFile] === 'string'
-          ? sourceFileContents[sourceFile] as string
-          : sourceFileContents[sourceFile] instanceof Uint8Array
-            ? new TextDecoder().decode(sourceFileContents[sourceFile] as Uint8Array)
-            : ''
+      const sourceText = sanitizedSourceTextByFile[sourceFile] ?? ''
       if (sourceText === '') {
         continue
       }
@@ -1583,18 +1633,11 @@ export const verifyTinyGoLoweredArtifactExports = (
     const returnStatementCountExportValue = exportsObject[returnStatementCountExportName]
     let expectedReturnStatementCount = 0
     for (const sourceFile of unit.sourceFiles) {
-      const sourceText =
-        typeof sourceFileContents[sourceFile] === 'string'
-          ? sourceFileContents[sourceFile] as string
-          : sourceFileContents[sourceFile] instanceof Uint8Array
-            ? new TextDecoder().decode(sourceFileContents[sourceFile] as Uint8Array)
-            : ''
+      const sourceText = sanitizedSourceTextByFile[sourceFile] ?? ''
       if (sourceText === '') {
         continue
       }
-      for (const match of sourceText.matchAll(/^\s*func(?:\s*\([^)]*\))?\s+[A-Za-z_]\w*\s*\([^)]*\)\s*(?:[^{\n]+)?\{([^}]*)\}/gm)) {
-        expectedReturnStatementCount += (match[1].match(/\breturn\b/g) ?? []).length
-      }
+      expectedReturnStatementCount += (sourceText.match(/\breturn\b/g) ?? []).length
     }
     const returnStatementCount = typeof returnStatementCountExportValue === 'function' ? Number(returnStatementCountExportValue()) : expectedReturnStatementCount
     if (!Number.isInteger(returnStatementCount) || returnStatementCount < 0) {
@@ -2705,12 +2748,7 @@ export const verifyTinyGoLoweredArtifactExports = (
     const pointerTypeCountExportValue = exportsObject[pointerTypeCountExportName]
     let expectedPointerTypeCount = 0
     for (const sourceFile of unit.sourceFiles) {
-      const sourceText =
-        typeof sourceFileContents[sourceFile] === 'string'
-          ? sourceFileContents[sourceFile] as string
-          : sourceFileContents[sourceFile] instanceof Uint8Array
-            ? new TextDecoder().decode(sourceFileContents[sourceFile] as Uint8Array)
-            : ''
+      const sourceText = typeContextSourceTextByFile[sourceFile] ?? ''
       if (sourceText === '') {
         continue
       }

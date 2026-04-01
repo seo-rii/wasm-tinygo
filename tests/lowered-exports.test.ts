@@ -2739,6 +2739,49 @@ test('verifyTinyGoLoweredArtifactExports rejects mismatched lowered assign state
   }), /frontend lowered artifact probe assign statement count did not match lowered sources manifest/)
 })
 
+test('verifyTinyGoLoweredArtifactExports ignores string literal equals signs when checking assign statement counts', () => {
+  assert.throws(() => verifyTinyGoLoweredArtifactExports({
+    exports: {
+      tinygo_lowered_program_000_source_file_count: () => 1,
+      tinygo_lowered_program_000_kind_tag: () => 1,
+      tinygo_lowered_program_000_source_hash: () => expectedSourceHash(['/workspace/main.go'], {
+        '/workspace/main.go': 'package main\nfunc main() { print("factorial_plus_bonus=") }\n',
+      }),
+      tinygo_lowered_program_000_import_count: () => 0,
+      tinygo_lowered_program_000_import_path_hash: () => 0,
+      tinygo_lowered_program_000_function_count: () => 1,
+      tinygo_lowered_program_000_function_name_hash: () => expectedFunctionNameHash(['/workspace/main.go'], {
+        '/workspace/main.go': 'package main\nfunc main() { print("factorial_plus_bonus=") }\n',
+      }),
+      tinygo_lowered_program_000_call_expression_count: () => 1,
+      tinygo_lowered_program_000_builtin_call_count: () => 1,
+      tinygo_lowered_program_000_assign_statement_count: () => 0,
+      tinygo_lowered_program_000_define_statement_count: () => 0,
+      tinygo_lowered_program_000_return_statement_count: () => 0,
+      tinygo_lowered_program_000_method_count: () => 0,
+      tinygo_lowered_program_000_exported_function_count: () => 0,
+      tinygo_lowered_program_000_type_count: () => 0,
+      tinygo_lowered_program_000_exported_type_count: () => 0,
+      tinygo_lowered_program_000_const_count: () => 0,
+      tinygo_lowered_program_000_var_count: () => 0,
+      tinygo_lowered_program_000_exported_const_count: () => 0,
+      tinygo_lowered_program_000_exported_var_count: () => 0,
+      tinygo_lowered_program_000_main_count: () => 1,
+      tinygo_lowered_program_000_init_count: () => 0,
+    },
+  } as unknown as WebAssembly.Instance, {
+    units: [
+      {
+        id: 'program-000',
+        kind: 'program',
+        sourceFiles: ['/workspace/main.go'],
+      },
+    ],
+  }, {
+    '/workspace/main.go': 'package main\nfunc main() { print("factorial_plus_bonus=") }\n',
+  }), /frontend lowered artifact probe missing export tinygo_lowered_program_000_struct_type_count/)
+})
+
 test('verifyTinyGoLoweredArtifactExports rejects mismatched lowered define statement counts', () => {
   assert.throws(() => verifyTinyGoLoweredArtifactExports({
     exports: {
@@ -4512,6 +4555,37 @@ test('verifyTinyGoLoweredArtifactExports rejects mismatched lowered return state
   }, {
     '/workspace/main.go': 'package main\nfunc main() { return }\n',
   }), /frontend lowered artifact probe return statement count did not match lowered sources manifest/)
+})
+
+test('verifyTinyGoLoweredArtifactExports counts returns after nested blocks', () => {
+  assert.throws(() => verifyTinyGoLoweredArtifactExports({
+    exports: {
+      tinygo_lowered_program_000_source_file_count: () => 1,
+      tinygo_lowered_program_000_kind_tag: () => 1,
+      tinygo_lowered_program_000_source_hash: () => expectedSourceHash(['/workspace/main.go'], {
+        '/workspace/main.go': 'package main\nfunc factorial(n int) int { if n <= 1 { return 1 }; return n }\n',
+      }),
+      tinygo_lowered_program_000_import_count: () => 0,
+      tinygo_lowered_program_000_import_path_hash: () => 0,
+      tinygo_lowered_program_000_function_count: () => 1,
+      tinygo_lowered_program_000_function_name_hash: () => expectedFunctionNameHash(['/workspace/main.go'], {
+        '/workspace/main.go': 'package main\nfunc factorial(n int) int { if n <= 1 { return 1 }; return n }\n',
+      }),
+      tinygo_lowered_program_000_binary_expression_count: () => 1,
+      tinygo_lowered_program_000_return_statement_count: () => 2,
+      tinygo_lowered_program_000_if_statement_count: () => 1,
+    },
+  } as unknown as WebAssembly.Instance, {
+    units: [
+      {
+        id: 'program-000',
+        kind: 'program',
+        sourceFiles: ['/workspace/main.go'],
+      },
+    ],
+  }, {
+    '/workspace/main.go': 'package main\nfunc factorial(n int) int { if n <= 1 { return 1 }; return n }\n',
+  }), /frontend lowered artifact probe missing export tinygo_lowered_program_000_method_count/)
 })
 
 test('verifyTinyGoLoweredArtifactExports rejects mismatched lowered go statement counts', () => {

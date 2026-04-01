@@ -47,6 +47,28 @@ func main() {
 }
 `,
   }
+  const staticBrowserWorkspaceFiles = {
+    'go.mod': `module example.com/staticprobe
+
+go 1.22
+`,
+    'main.go': `package main
+
+const bonus = 3
+
+func factorial(n int) int {
+\tif n <= 1 {
+\t\treturn 1
+\t}
+\treturn n * factorial(n-1)
+}
+
+func main() {
+\tprint("factorial_plus_bonus=")
+\tprintln(factorial(5) + bonus)
+}
+`,
+  }
   const listenError = await new Promise((resolve) => {
     const server = createServer()
     server.once('error', (error) => resolve(error))
@@ -876,5 +898,54 @@ func main() {
   assert.doesNotMatch(staticFallbackActivity ?? '', /\.exec\.wasm/)
   assert.doesNotMatch(staticFallbackActivity ?? '', /build execution failed: execution artifact did not expose a supported WASI entrypoint/)
   assert.doesNotMatch(staticFallbackActivity ?? '', /build artifact execution blocked: bootstrap artifact has no WASI entrypoint/)
+
+  await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
+  await page.waitForFunction(
+    () =>
+      typeof window.__wasmTinygoTestHooks?.boot === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.readBuildArtifact === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setBuildRequestOverrides === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setDriverBridgeManifest === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setWorkspaceFiles === 'function',
+    null,
+    { timeout: 120000 },
+  )
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), staticBrowserWorkspaceFiles)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setDriverBridgeManifest(null))
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+
+  const staticExecutionArtifact = await page.evaluate(() => {
+    const artifact = window.__wasmTinygoTestHooks.readBuildArtifact()
+    if (!artifact) {
+      return null
+    }
+    return {
+      path: artifact.path,
+      artifactKind: artifact.artifactKind,
+      runnable: artifact.runnable,
+      entrypoint: artifact.entrypoint,
+      reason: artifact.reason,
+    }
+  })
+  const staticExecutionPhases = await page.locator('[data-phase]').allTextContents()
+  const staticExecutionActivity = await page.locator('#terminal-output').textContent()
+  assert.match(staticExecutionPhases.join('\n'), /build execution\s+[\d,]+ bytes/)
+  assert.match(staticExecutionPhases.join('\n'), /front-end verification\s+verified/)
+  assert.match(staticExecutionArtifact?.path ?? '', /\/working\/out\.wasm$/)
+  assert.equal(staticExecutionArtifact?.artifactKind, 'execution')
+  assert.equal(staticExecutionArtifact?.runnable, true)
+  assert.equal(staticExecutionArtifact?.entrypoint, 'main')
+  assert.equal(staticExecutionArtifact?.reason, undefined)
+  assert.match(staticExecutionActivity ?? '', /build artifact ready: \/working\/out\.wasm \([\d,]+ bytes\)/)
+  assert.match(staticExecutionActivity ?? '', /execution artifact ready: \/working\/out\.wasm \([\d,]+ bytes\)/)
+  assert.match(staticExecutionActivity ?? '', /execution artifact entrypoint=main/)
+  assert.match(staticExecutionActivity ?? '', /factorial_plus_bonus=123/)
+  assert.match(staticExecutionActivity ?? '', /execution artifact completed exitCode=0/)
+  assert.doesNotMatch(staticExecutionActivity ?? '', /tinygo host compile ready:/)
+  assert.doesNotMatch(staticExecutionActivity ?? '', /build artifact execution blocked:/)
+  assert.doesNotMatch(staticExecutionActivity ?? '', /\.exec\.wasm/)
   await page.unroute('**/api/tinygo/compile')
 })
