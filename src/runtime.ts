@@ -128,6 +128,7 @@ export type TinyGoRuntimePhase = 'toolchain' | 'smoke' | 'probe' | 'verify'
 export type TinyGoBuildArtifact = {
   path: string
   bytes: Uint8Array
+  artifactKind: 'probe' | 'bootstrap' | 'execution'
   runnable: boolean
   entrypoint: '_start' | '_initialize' | 'main' | null
   reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
@@ -158,6 +159,7 @@ type TinyGoRuntimeLogEntry = {
 
 type TinyGoHostCompileResponse = {
   artifact?: {
+    artifactKind?: 'probe' | 'bootstrap' | 'execution'
     bytesBase64?: string
     entrypoint?: '_start' | '_initialize' | 'main' | null
     path?: string
@@ -239,6 +241,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
   let lastBuildResult: TinyGoBuildResult | null = null
   let lastBuildArtifactPath: string | null = null
   let lastBuildArtifactBytes: Uint8Array | null = null
+  let lastBuildArtifactKind: 'probe' | 'bootstrap' | 'execution' = 'execution'
   let lastBuildArtifactEntrypoint: '_start' | '_initialize' | 'main' | null = null
   let lastBuildArtifactRunnable = false
   let lastBuildArtifactReason: 'bootstrap-artifact' | 'missing-wasi-entrypoint' | undefined
@@ -1115,6 +1118,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         exportNames.includes('tinygo_embedded_manifest_ptr')
       lastBuildArtifactPath = artifactPath
       lastBuildArtifactBytes = new Uint8Array(artifactBytes)
+      lastBuildArtifactKind = frontendCommandArtifactVerification?.artifactKind ?? (
+        hasBootstrapManifestExports ? 'bootstrap' : 'execution'
+      )
       lastBuildArtifactEntrypoint = frontendCommandArtifactVerification?.entrypoint ?? (
         hasBootstrapManifestExports
         ? null
@@ -1360,6 +1366,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           }
           lastBuildArtifactPath = hostArtifactPath
           lastBuildArtifactBytes = new Uint8Array(hostArtifactBytes)
+          lastBuildArtifactKind = payload.artifact?.artifactKind ?? 'execution'
           lastBuildArtifactEntrypoint = hostArtifactEntrypoint
           lastBuildArtifactRunnable = payload.artifact?.runnable ?? true
           lastBuildArtifactReason = payload.artifact?.reason
@@ -1432,6 +1439,15 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             }
           }
           throw new Error(hostCompileFailure)
+        }
+        if (frontendCommandArtifactVerification?.runnable === false) {
+          appendLog(
+            `build artifact execution blocked: backend emitted a probe-only final artifact at ${frontendCommandArtifactVerification.artifactOutputPath}`,
+            'error',
+          )
+          throw new Error(
+            'browser runtime stopped before preparing a runnable execution artifact because the backend emitted a probe-only command artifact and the host compile seam was unavailable',
+          )
         }
       }
       if (
@@ -1592,6 +1608,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       return {
         path: lastBuildArtifactPath,
         bytes: new Uint8Array(lastBuildArtifactBytes),
+        artifactKind: lastBuildArtifactKind,
         runnable: lastBuildArtifactRunnable,
         entrypoint: lastBuildArtifactEntrypoint,
         reason: lastBuildArtifactReason,

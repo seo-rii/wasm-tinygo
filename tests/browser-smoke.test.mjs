@@ -278,6 +278,7 @@ func main() {
     return {
       path: artifact.path,
       byteLength: artifact.bytes.length,
+      artifactKind: artifact.artifactKind,
       runnable: artifact.runnable,
       entrypoint: artifact.entrypoint,
       reason: artifact.reason,
@@ -293,6 +294,7 @@ func main() {
   assert.match(phases.join('\n'), /front-end verification\s+verified/)
   assert.match(buildArtifact?.path ?? '', /main\.wasm$/)
   assert.equal(buildArtifact?.byteLength > 0, true)
+  assert.equal(buildArtifact?.artifactKind, 'execution')
   assert.equal(buildArtifact?.runnable, true)
   assert.match(buildArtifact?.entrypoint ?? '', /^(?:_(?:start|initialize)|main)$/)
   assert.equal(buildArtifact?.reason, undefined)
@@ -847,6 +849,7 @@ func main() {
     }
     return {
       path: artifact.path,
+      artifactKind: artifact.artifactKind,
       runnable: artifact.runnable,
       entrypoint: artifact.entrypoint,
       reason: artifact.reason,
@@ -857,12 +860,21 @@ func main() {
   assert.match(staticFallbackPhases.join('\n'), /build execution\s+failed/)
   assert.match(staticFallbackPhases.join('\n'), /front-end verification\s+failed/)
   assert.match(staticFallbackArtifact?.path ?? '', /\/working\/out\.wasm$/)
+  assert.equal(staticFallbackArtifact?.artifactKind, 'probe')
   assert.equal(staticFallbackArtifact?.runnable, false)
   assert.equal(staticFallbackArtifact?.entrypoint, null)
   assert.equal(staticFallbackArtifact?.reason, 'missing-wasi-entrypoint')
-  assert.match(staticFallbackActivity ?? '', /build artifact execution blocked: final artifact has no supported WASI entrypoint/)
-  assert.match(staticFallbackActivity ?? '', /build execution failed: execution artifact did not expose a supported WASI entrypoint/)
+  assert.match(
+    staticFallbackActivity ?? '',
+    /build artifact execution blocked: backend emitted a probe-only final artifact at \/working\/out\.wasm/,
+  )
+  assert.match(
+    staticFallbackActivity ?? '',
+    /build execution failed: browser runtime stopped before preparing a runnable execution artifact because the backend emitted a probe-only command artifact and the host compile seam was unavailable/,
+  )
   assert.match(staticFallbackActivity ?? '', /\$ \/usr\/bin\/wasm-ld .*\/working\/tinygo-work\/.*\.bc .* -o \/working\/out\.wasm/)
+  assert.doesNotMatch(staticFallbackActivity ?? '', /\.exec\.wasm/)
+  assert.doesNotMatch(staticFallbackActivity ?? '', /build execution failed: execution artifact did not expose a supported WASI entrypoint/)
   assert.doesNotMatch(staticFallbackActivity ?? '', /build artifact execution blocked: bootstrap artifact has no WASI entrypoint/)
   await page.unroute('**/api/tinygo/compile')
 })
