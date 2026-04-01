@@ -373,6 +373,109 @@ func TestBuildProducesBackendOwnedCommandArtifacts(t *testing.T) {
 	}
 }
 
+func TestBuildMarksMinimalStandaloneProgramArtifactsRunnable(t *testing.T) {
+	tempDir := t.TempDir()
+	entryPath := filepath.Join(tempDir, "main.go")
+	if err := os.WriteFile(entryPath, []byte(`package main
+
+const bonus = 3
+
+func factorial(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	return n * factorial(n-1)
+}
+
+func main() {
+	print("factorial_plus_bonus=")
+	println(factorial(5) + bonus)
+}
+`), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(main.go): %v", err)
+	}
+
+	result, err := Build(Input{
+		EntryFile: entryPath,
+		CompileJobs: []CompileJob{
+			{
+				ID:                "program-000",
+				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{},
+				DepOnly:           false,
+				ModulePath:        "example.com/app",
+				PackageName:       "main",
+				PackageDir:        tempDir,
+				Files:             []string{entryPath},
+				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory", "-mnontrapping-fptoint"},
+				OptimizeFlag:      "-Oz",
+				Standard:          false,
+			},
+		},
+		LinkJob: LinkJob{
+			Linker:             "wasm-ld",
+			LDFlags:            []string{"--stack-first", "--no-demangle", "--no-entry", "--export-all"},
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	generatedFilesByPath := map[string]string{}
+	for _, generatedFile := range result.GeneratedFiles {
+		generatedFilesByPath[generatedFile.Path] = generatedFile.Contents
+	}
+
+	var loweredArtifactManifest LoweredArtifactManifest
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-lowered-artifact.json"]), &loweredArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(lowered-artifact): %v", err)
+	}
+	if loweredArtifactManifest.ArtifactKind != "execution" {
+		t.Fatalf("expected lowered artifact kind execution, got %#v", loweredArtifactManifest)
+	}
+	if loweredArtifactManifest.Entrypoint == nil || *loweredArtifactManifest.Entrypoint != "main" {
+		t.Fatalf("expected lowered artifact entrypoint main, got %#v", loweredArtifactManifest)
+	}
+	if loweredArtifactManifest.Reason != "" || !loweredArtifactManifest.Runnable {
+		t.Fatalf("expected lowered artifact manifest to be runnable, got %#v", loweredArtifactManifest)
+	}
+
+	var commandArtifactManifest CommandArtifactManifest
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-command-artifact.json"]), &commandArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(command-artifact): %v", err)
+	}
+	if commandArtifactManifest.ArtifactKind != "execution" {
+		t.Fatalf("expected command artifact kind execution, got %#v", commandArtifactManifest)
+	}
+	if commandArtifactManifest.Entrypoint == nil || *commandArtifactManifest.Entrypoint != "main" {
+		t.Fatalf("expected command artifact entrypoint main, got %#v", commandArtifactManifest)
+	}
+	if commandArtifactManifest.Reason != "" || !commandArtifactManifest.Runnable {
+		t.Fatalf("expected command artifact manifest to be runnable, got %#v", commandArtifactManifest)
+	}
+
+	loweredSourceContents := generatedFilesByPath["/working/tinygo-lowered/program-000.c"]
+	if !strings.Contains(loweredSourceContents, "extern tinygo_wasi_errno_t tinygo_runtime_fd_write_import") {
+		t.Fatalf("expected lowered source to embed wasi stdout helpers, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static int factorial(int n)") {
+		t.Fatalf("expected lowered source to lower factorial function, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "int main(void)") {
+		t.Fatalf("expected lowered source to embed runnable main entrypoint, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"factorial_plus_bonus=\", 21u, 0);") {
+		t.Fatalf("expected lowered source to lower print builtin, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32((factorial(5) + bonus), 1);") {
+		t.Fatalf("expected lowered source to lower println integer payload, got: %q", loweredSourceContents)
+	}
+}
+
 func TestBuildUsesSourceContentsForLoweredSourceHashWhenFilesExist(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "main.go")
@@ -443,6 +546,83 @@ func TestBuildUsesSourceContentsForLoweredSourceHashWhenFilesExist(t *testing.T)
 	}
 	if !strings.Contains(result.GeneratedFiles[2].Contents, "unsigned int tinygo_lowered_program_000_init_count(void) {\n\treturn 0u;\n}") {
 		t.Fatalf("expected lowered source to embed parsed init count, got: %q", result.GeneratedFiles[2].Contents)
+	}
+}
+
+func TestBuildProducesRunnableExecutionArtifactsForSimpleProgramSubset(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.go")
+	sourceContents := "package main\n\nconst bonus = 3\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tprint(\"factorial_plus_bonus=\")\n\tprintln(factorial(5) + bonus)\n}\n"
+	if err := os.WriteFile(sourcePath, []byte(sourceContents), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(source): %v", err)
+	}
+
+	result, err := Build(Input{
+		EntryFile: sourcePath,
+		CompileJobs: []CompileJob{
+			{
+				ID:                "program-000",
+				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{},
+				DepOnly:           false,
+				ModulePath:        "example.com/staticprobe",
+				PackageName:       "main",
+				PackageDir:        dir,
+				Files:             []string{sourcePath},
+				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          false,
+			},
+		},
+		LinkJob: LinkJob{
+			Linker:             "wasm-ld",
+			LDFlags:            []string{"--stack-first", "--no-demangle", "--no-entry", "--export-all"},
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	if !strings.Contains(result.GeneratedFiles[2].Contents, "extern tinygo_wasi_errno_t tinygo_runtime_fd_write_import") {
+		t.Fatalf("expected lowered source to import wasi fd_write, got: %q", result.GeneratedFiles[2].Contents)
+	}
+	if !strings.Contains(result.GeneratedFiles[2].Contents, "static void tinygo_runtime_print_i32(int value, int newline)") {
+		t.Fatalf("expected lowered source to embed integer printing helper, got: %q", result.GeneratedFiles[2].Contents)
+	}
+	if !strings.Contains(result.GeneratedFiles[2].Contents, "int main(void) {") {
+		t.Fatalf("expected lowered source to embed a runnable main entrypoint, got: %q", result.GeneratedFiles[2].Contents)
+	}
+	if !strings.Contains(result.GeneratedFiles[2].Contents, "tinygo_runtime_print_literal(\"factorial_plus_bonus=\", 21u, 0);") {
+		t.Fatalf("expected lowered source to embed translated print calls, got: %q", result.GeneratedFiles[2].Contents)
+	}
+
+	var loweredArtifactManifest struct {
+		ArtifactKind string  `json:"artifactKind"`
+		Entrypoint   *string `json:"entrypoint"`
+		Reason       string  `json:"reason"`
+		Runnable     bool    `json:"runnable"`
+	}
+	if err := json.Unmarshal([]byte(result.GeneratedFiles[5].Contents), &loweredArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(lowered-artifact): %v", err)
+	}
+	if loweredArtifactManifest.ArtifactKind != "execution" || loweredArtifactManifest.Entrypoint == nil || *loweredArtifactManifest.Entrypoint != "main" || loweredArtifactManifest.Reason != "" || loweredArtifactManifest.Runnable != true {
+		t.Fatalf("unexpected lowered artifact manifest: %#v", loweredArtifactManifest)
+	}
+	var commandArtifactManifest struct {
+		ArtifactKind string  `json:"artifactKind"`
+		Entrypoint   *string `json:"entrypoint"`
+		Reason       string  `json:"reason"`
+		Runnable     bool    `json:"runnable"`
+	}
+	if err := json.Unmarshal([]byte(result.GeneratedFiles[6].Contents), &commandArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(command-artifact): %v", err)
+	}
+	if commandArtifactManifest.ArtifactKind != "execution" || commandArtifactManifest.Entrypoint == nil || *commandArtifactManifest.Entrypoint != "main" || commandArtifactManifest.Reason != "" || commandArtifactManifest.Runnable != true {
+		t.Fatalf("unexpected command artifact manifest: %#v", commandArtifactManifest)
 	}
 }
 

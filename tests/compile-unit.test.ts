@@ -5381,6 +5381,44 @@ test('verifyCommandArtifactManifestAgainstBackendInputAndLoweredBitcodeManifest 
   assert.equal(verification.runnable, false)
 })
 
+test('verifyCommandArtifactManifestAgainstBackendInputAndLoweredBitcodeManifest accepts a runnable backend-owned final command artifact', () => {
+  const verification = verifyCommandArtifactManifestAgainstBackendInputAndLoweredBitcodeManifest({
+    entryFile: '/workspace/main.go',
+    compileJobs: [
+      {
+        id: 'program-000',
+        kind: 'program',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+        bitcodeOutputPath: '/working/tinygo-work/program-000.bc',
+        llvmTarget: 'wasm32-unknown-wasi',
+        cflags: ['-mbulk-memory'],
+        optimizeFlag: '-Oz',
+      },
+    ],
+    linkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      artifactOutputPath: '/working/out.wasm',
+    },
+  }, {
+    bitcodeFiles: ['/working/tinygo-work/program-000.bc'],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    artifactKind: 'execution',
+    bitcodeFiles: ['/working/tinygo-work/program-000.bc'],
+    entrypoint: 'main',
+    runnable: true,
+  })
+
+  assert.equal(verification.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.artifactKind, 'execution')
+  assert.deepEqual(verification.bitcodeFiles, ['/working/tinygo-work/program-000.bc'])
+  assert.equal(verification.entrypoint, 'main')
+  assert.equal(verification.reason, undefined)
+  assert.equal(verification.runnable, true)
+})
+
 test('verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest accepts a normalized final command artifact', () => {
   const verification = verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest({
     compileCommands: [
@@ -5423,6 +5461,40 @@ test('verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest 
   assert.equal(verification.entrypoint, null)
   assert.equal(verification.reason, 'missing-wasi-entrypoint')
   assert.equal(verification.runnable, false)
+})
+
+test('verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest accepts a runnable final command artifact', () => {
+  const verification = verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest({
+    compileCommands: [
+      {
+        argv: ['/usr/bin/clang', '--target=wasm32-unknown-wasi', '-Oz', '-emit-llvm', '-c', '/working/tinygo-lowered/program-000.c', '-o', '/working/tinygo-work/program-000.bc'],
+        cwd: '/working',
+      },
+    ],
+    linkCommand: {
+      argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '--no-entry', '--export-all', '/working/tinygo-work/program-000.bc', '-o', '/working/out.wasm'],
+      cwd: '/working',
+    },
+  }, {
+    bitcodeFiles: [
+      '/working/tinygo-work/program-000.bc',
+    ],
+  }, {
+    artifactOutputPath: '/working/out.wasm',
+    artifactKind: 'execution',
+    bitcodeFiles: [
+      '/working/tinygo-work/program-000.bc',
+    ],
+    entrypoint: 'main',
+    runnable: true,
+  })
+
+  assert.equal(verification.artifactOutputPath, '/working/out.wasm')
+  assert.equal(verification.artifactKind, 'execution')
+  assert.deepEqual(verification.bitcodeFiles, ['/working/tinygo-work/program-000.bc'])
+  assert.equal(verification.entrypoint, 'main')
+  assert.equal(verification.reason, undefined)
+  assert.equal(verification.runnable, true)
 })
 
 test('verifyCommandArtifactManifestAgainstCommandBatchAndLoweredBitcodeManifest rejects mismatched final command artifact', () => {
@@ -5857,6 +5929,34 @@ test('verifyLoweredArtifactManifestAgainstLoweredCommandBatchManifest accepts no
   assert.equal(verification.objectFiles.length, 2)
   assert.equal(verification.reason, 'missing-wasi-entrypoint')
   assert.equal(verification.runnable, false)
+})
+
+test('verifyLoweredArtifactManifestAgainstLoweredCommandBatchManifest accepts runnable lowered artifact metadata', () => {
+  const verification = verifyLoweredArtifactManifestAgainstLoweredCommandBatchManifest({
+    compileCommands: [
+      {
+        argv: ['/usr/bin/clang', '--target=wasm32-unknown-wasi', '-Oz', '-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext', '-c', '/working/tinygo-lowered/program-000.c', '-o', '/working/tinygo-lowered/program-000.o'],
+        cwd: '/working',
+      },
+    ],
+    linkCommand: {
+      argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '--no-entry', '--export-all', '/working/tinygo-lowered/program-000.o', '-o', '/working/tinygo-lowered-out.wasm'],
+      cwd: '/working',
+    },
+  }, {
+    artifactOutputPath: '/working/tinygo-lowered-out.wasm',
+    artifactKind: 'execution',
+    entrypoint: 'main',
+    objectFiles: ['/working/tinygo-lowered/program-000.o'],
+    runnable: true,
+  })
+
+  assert.equal(verification.artifactOutputPath, '/working/tinygo-lowered-out.wasm')
+  assert.equal(verification.artifactKind, 'execution')
+  assert.equal(verification.entrypoint, 'main')
+  assert.equal(verification.objectFiles.length, 1)
+  assert.equal(verification.reason, undefined)
+  assert.equal(verification.runnable, true)
 })
 
 test('verifyLoweredArtifactManifestAgainstLoweredCommandBatchManifest rejects mismatched lowered artifact metadata', () => {
