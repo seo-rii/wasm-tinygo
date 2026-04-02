@@ -61,3 +61,48 @@ test('build-runtime-pack bundles emception assets and go-probe into a pack index
     ['tools/go-probe.wasm', 'vendor/emception/emception.worker.js', 'vendor/emception/tool.wasm'],
   )
 })
+
+test('build-runtime-pack accepts a manifest-driven file list', async () => {
+  const repoRoot = path.resolve(new URL('..', import.meta.url).pathname)
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-pack-manifest-'))
+  const publicDir = path.join(tempDir, 'public')
+  const assetsDir = path.join(tempDir, 'assets')
+  await mkdir(publicDir, { recursive: true })
+  await mkdir(assetsDir, { recursive: true })
+  const firstPath = path.join(assetsDir, 'one.wasm')
+  const secondPath = path.join(assetsDir, 'nested', 'two.wasm')
+  await mkdir(path.dirname(secondPath), { recursive: true })
+  await writeFile(firstPath, new Uint8Array([1, 2, 3, 4]))
+  await writeFile(secondPath, new Uint8Array([9, 8]))
+
+  const manifestPath = path.join(tempDir, 'runtime-pack.json')
+  await writeFile(
+    manifestPath,
+    JSON.stringify(
+      [
+        { runtimePath: 'assets/one.wasm', filePath: firstPath },
+        { runtimePath: 'assets/nested/two.wasm', filePath: secondPath },
+      ],
+      null,
+      2,
+    ),
+  )
+
+  await runBuildRuntimePack(repoRoot, {
+    WASM_TINYGO_RUNTIME_PACK_ROOT: publicDir,
+    WASM_TINYGO_RUNTIME_PACK_OUTPUT: path.join(publicDir, 'runtime-pack'),
+    WASM_TINYGO_RUNTIME_PACK_MANIFEST: manifestPath,
+  })
+
+  const indexPath = path.join(publicDir, 'runtime-pack', 'runtime-pack.index.json')
+  const packPath = path.join(publicDir, 'runtime-pack', 'runtime-pack.bin')
+  const index = JSON.parse(await readFile(indexPath, 'utf8'))
+  const packBytes = await readFile(packPath)
+
+  assert.equal(index.fileCount, 2)
+  assert.equal(index.totalBytes, packBytes.length)
+  assert.deepEqual(index.entries.map((entry) => entry.runtimePath), [
+    'assets/nested/two.wasm',
+    'assets/one.wasm',
+  ])
+})

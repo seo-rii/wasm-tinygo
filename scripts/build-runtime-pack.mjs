@@ -9,6 +9,7 @@ const PUBLIC_DIR =
 const OUTPUT_DIR =
   process.env.WASM_TINYGO_RUNTIME_PACK_OUTPUT ??
   path.join(PUBLIC_DIR, 'runtime-pack')
+const MANIFEST_PATH = process.env.WASM_TINYGO_RUNTIME_PACK_MANIFEST ?? ''
 
 const normalizePath = (value) => value.split(path.sep).join('/')
 
@@ -28,6 +29,34 @@ const collectFiles = async (dir) => {
   return files
 }
 
+const loadManifestEntries = async (manifestPath) => {
+  const raw = JSON.parse(await fs.readFile(manifestPath, 'utf8'))
+  if (!Array.isArray(raw)) {
+    throw new Error('runtime pack manifest must be an array')
+  }
+  const manifestDir = path.dirname(manifestPath)
+  return raw.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`runtime pack manifest entry ${index} is not an object`)
+    }
+    const runtimePath = entry.runtimePath
+    const filePath = entry.filePath ?? entry.sourcePath
+    if (typeof runtimePath !== 'string' || runtimePath.length === 0) {
+      throw new Error(`runtime pack manifest entry ${index} is missing runtimePath`)
+    }
+    if (typeof filePath !== 'string' || filePath.length === 0) {
+      throw new Error(`runtime pack manifest entry ${index} is missing filePath`)
+    }
+    const resolvedPath = path.isAbsolute(filePath)
+      ? filePath
+      : path.resolve(manifestDir, filePath)
+    return {
+      runtimePath,
+      filePath: resolvedPath,
+    }
+  })
+}
+
 const buildPack = async () => {
   const packEntries = []
   const publicAssets = []
@@ -43,16 +72,17 @@ const buildPack = async () => {
     publicAssets.push(...(await collectFiles(emceptionDir)))
   } catch {}
 
-  if (!publicAssets.length) {
+  const sortedAssets = (MANIFEST_PATH
+    ? await loadManifestEntries(MANIFEST_PATH)
+    : publicAssets.map((filePath) => ({
+        filePath,
+        runtimePath: normalizePath(path.relative(PUBLIC_DIR, filePath)),
+      })))
+    .sort((a, b) => a.runtimePath.localeCompare(b.runtimePath))
+
+  if (!sortedAssets.length) {
     throw new Error(`no runtime assets found under ${PUBLIC_DIR}`)
   }
-
-  const sortedAssets = publicAssets
-    .map((filePath) => ({
-      filePath,
-      runtimePath: normalizePath(path.relative(PUBLIC_DIR, filePath)),
-    }))
-    .sort((a, b) => a.runtimePath.localeCompare(b.runtimePath))
 
   let offset = 0
   const chunks = []
