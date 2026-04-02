@@ -626,6 +626,197 @@ func TestBuildProducesRunnableExecutionArtifactsForSimpleProgramSubset(t *testin
 	}
 }
 
+func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testing.T) {
+	dir := t.TempDir()
+	entryPath := filepath.Join(dir, "main.go")
+	starterSource := "package main\n\nimport (\n\t\"bufio\"\n\t\"fmt\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nconst bonus = 3\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tline, _ := bufio.NewReader(os.Stdin).ReadString('\\n')\n\tn, err := strconv.Atoi(strings.TrimSpace(line))\n\tif err != nil {\n\t\tn = 4\n\t}\n\tfmt.Printf(\"factorial_plus_bonus=%d\\n\", factorial(n)+bonus)\n}\n"
+	if err := os.WriteFile(entryPath, []byte(starterSource), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(main.go): %v", err)
+	}
+
+	stdlibFiles := map[string]string{
+		"bufio/bufio.go":     "package bufio\n\ntype Reader struct{}\n\nfunc NewReader(v any) Reader { return Reader{} }\n\nfunc (Reader) ReadString(delim byte) (string, error) { return \"\", nil }\n",
+		"fmt/fmt.go":         "package fmt\n\nfunc Printf(format string, args ...any) (int, error) { return 0, nil }\n",
+		"os/os.go":           "package os\n\ntype File struct{}\n\nvar Stdin File\n",
+		"strconv/strconv.go": "package strconv\n\nfunc Atoi(s string) (int, error) { return 0, nil }\n",
+		"strings/strings.go": "package strings\n\nfunc TrimSpace(s string) string { return s }\n",
+	}
+	for relativePath, contents := range stdlibFiles {
+		absolutePath := filepath.Join(dir, relativePath)
+		if err := os.MkdirAll(filepath.Dir(absolutePath), 0o755); err != nil {
+			t.Fatalf("os.MkdirAll(%s): %v", relativePath, err)
+		}
+		if err := os.WriteFile(absolutePath, []byte(contents), 0o644); err != nil {
+			t.Fatalf("os.WriteFile(%s): %v", relativePath, err)
+		}
+	}
+
+	result, err := Build(Input{
+		EntryFile: entryPath,
+		CompileJobs: []CompileJob{
+			{
+				ID:                "program-000",
+				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{"bufio", "fmt", "os", "strconv", "strings"},
+				DepOnly:           false,
+				ModulePath:        "example.com/wasmidle",
+				PackageName:       "main",
+				PackageDir:        dir,
+				Files:             []string{entryPath},
+				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          false,
+			},
+			{
+				ID:                "stdlib-000",
+				Kind:              "stdlib",
+				ImportPath:        "bufio",
+				DepOnly:           true,
+				ModulePath:        "std",
+				PackageName:       "bufio",
+				PackageDir:        filepath.Join(dir, "bufio"),
+				Files:             []string{filepath.Join(dir, "bufio", "bufio.go")},
+				BitcodeOutputPath: "/working/tinygo-work/stdlib-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          true,
+			},
+			{
+				ID:                "stdlib-001",
+				Kind:              "stdlib",
+				ImportPath:        "fmt",
+				DepOnly:           true,
+				ModulePath:        "std",
+				PackageName:       "fmt",
+				PackageDir:        filepath.Join(dir, "fmt"),
+				Files:             []string{filepath.Join(dir, "fmt", "fmt.go")},
+				BitcodeOutputPath: "/working/tinygo-work/stdlib-001.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          true,
+			},
+			{
+				ID:                "stdlib-002",
+				Kind:              "stdlib",
+				ImportPath:        "os",
+				DepOnly:           true,
+				ModulePath:        "std",
+				PackageName:       "os",
+				PackageDir:        filepath.Join(dir, "os"),
+				Files:             []string{filepath.Join(dir, "os", "os.go")},
+				BitcodeOutputPath: "/working/tinygo-work/stdlib-002.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          true,
+			},
+			{
+				ID:                "stdlib-003",
+				Kind:              "stdlib",
+				ImportPath:        "strconv",
+				DepOnly:           true,
+				ModulePath:        "std",
+				PackageName:       "strconv",
+				PackageDir:        filepath.Join(dir, "strconv"),
+				Files:             []string{filepath.Join(dir, "strconv", "strconv.go")},
+				BitcodeOutputPath: "/working/tinygo-work/stdlib-003.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          true,
+			},
+			{
+				ID:                "stdlib-004",
+				Kind:              "stdlib",
+				ImportPath:        "strings",
+				DepOnly:           true,
+				ModulePath:        "std",
+				PackageName:       "strings",
+				PackageDir:        filepath.Join(dir, "strings"),
+				Files:             []string{filepath.Join(dir, "strings", "strings.go")},
+				BitcodeOutputPath: "/working/tinygo-work/stdlib-004.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          true,
+			},
+		},
+		LinkJob: LinkJob{
+			Linker:             "wasm-ld",
+			LDFlags:            []string{"--stack-first", "--no-demangle", "--no-entry", "--export-all"},
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	generatedFilesByPath := map[string]string{}
+	for _, generatedFile := range result.GeneratedFiles {
+		generatedFilesByPath[generatedFile.Path] = generatedFile.Contents
+	}
+
+	loweredSourceContents := generatedFilesByPath["/working/tinygo-lowered/program-000.c"]
+	if !strings.Contains(loweredSourceContents, "extern tinygo_wasi_errno_t tinygo_runtime_fd_read_import") {
+		t.Fatalf("expected lowered source to import wasi fd_read, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static unsigned int tinygo_runtime_read_line(char *buffer, tinygo_wasi_size_t capacity)") {
+		t.Fatalf("expected lowered source to embed line reader helper, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static char *tinygo_runtime_trim_space(char *value)") {
+		t.Fatalf("expected lowered source to embed trim-space helper, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static int tinygo_runtime_parse_i32(char *value, int *out)") {
+		t.Fatalf("expected lowered source to embed integer parser helper, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_read_line(line, 256u);") {
+		t.Fatalf("expected lowered source to lower bufio.ReadString newline reads, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "err = tinygo_runtime_parse_i32(tinygo_runtime_trim_space(line), &n);") {
+		t.Fatalf("expected lowered source to lower strconv.Atoi(strings.TrimSpace(...)), got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"factorial_plus_bonus=\", 21u, 0);") {
+		t.Fatalf("expected lowered source to lower fmt.Printf prefix, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32((factorial(n) + bonus), 0);") {
+		t.Fatalf("expected lowered source to lower fmt.Printf integer payload, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"\\n\", 1u, 0);") {
+		t.Fatalf("expected lowered source to lower fmt.Printf newline suffix, got: %q", loweredSourceContents)
+	}
+
+	var loweredArtifactManifest struct {
+		ArtifactKind string  `json:"artifactKind"`
+		Entrypoint   *string `json:"entrypoint"`
+		Reason       string  `json:"reason"`
+		Runnable     bool    `json:"runnable"`
+	}
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-lowered-artifact.json"]), &loweredArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(lowered-artifact): %v", err)
+	}
+	if loweredArtifactManifest.ArtifactKind != "execution" || loweredArtifactManifest.Entrypoint == nil || *loweredArtifactManifest.Entrypoint != "main" || loweredArtifactManifest.Reason != "" || loweredArtifactManifest.Runnable != true {
+		t.Fatalf("unexpected lowered artifact manifest: %#v", loweredArtifactManifest)
+	}
+
+	var commandArtifactManifest struct {
+		ArtifactKind string  `json:"artifactKind"`
+		Entrypoint   *string `json:"entrypoint"`
+		Reason       string  `json:"reason"`
+		Runnable     bool    `json:"runnable"`
+	}
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-command-artifact.json"]), &commandArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(command-artifact): %v", err)
+	}
+	if commandArtifactManifest.ArtifactKind != "execution" || commandArtifactManifest.Entrypoint == nil || *commandArtifactManifest.Entrypoint != "main" || commandArtifactManifest.Reason != "" || commandArtifactManifest.Runnable != true {
+		t.Fatalf("unexpected command artifact manifest: %#v", commandArtifactManifest)
+	}
+}
+
 func TestBuildParsesBlankAndDotImportCountsWhenFilesExist(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "main.go")
