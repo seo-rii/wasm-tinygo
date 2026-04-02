@@ -106,6 +106,47 @@ It:
 
 This keeps a later run from reusing stale runtime state or stale bridge inputs.
 
+## Runtime asset loading
+
+The browser runtime can load its assets in three ways:
+
+- direct fetch from `assetBaseUrl`
+- a caller-provided `assetLoader`
+- a compressed runtime pack index + binary
+
+### Asset loader
+
+`createTinyGoRuntime(...)` accepts:
+
+- `assetLoader`
+  A callback that can return a URL, bytes, or a Blob for a given runtime asset.
+  The loader receives `{ assetPath, assetUrl, label }`.
+- `assetPacks`
+  A list of `{ index, asset, fileCount, totalBytes }` pack references.
+
+The runtime applies the loader to:
+
+- `tools/go-probe.wasm`
+- any pack index fetches (so a loader can serve the pack index itself)
+
+The emception worker must still be reachable as a URL. If the loader returns
+raw bytes for the worker asset, the runtime rejects it, because the worker
+bootstrap expects a stable URL for its nested assets.
+
+### Runtime packs
+
+Runtime packs are optional compressed bundles of the browser assets. A pack is
+two files:
+
+- `runtime-pack.index.json`
+  JSON index with `format: "wasm-tinygo-runtime-pack-index-v1"` plus
+  `fileCount`, `totalBytes`, and entry ranges.
+- `runtime-pack.bin`
+  Concatenated bytes for the listed assets.
+
+The runtime uses `assetPacks` to resolve runtime assets before falling back to
+direct fetch or loader URLs. This mirrors the wasm-rust runtime pack flow.
+
 ## Shared action model
 
 UI buttons and `window.__wasmTinygoTestHooks` share the same action guard.

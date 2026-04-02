@@ -24,6 +24,10 @@ The dev and build flows prepare browser-side assets automatically before startin
   Starts the local app after preparing assets.
 - `npm run build`
   Produces a production build after preparing assets.
+- `npm run build:runtime-pack`
+  Builds a compact runtime pack (`runtime-pack.index.json` + `runtime-pack.bin`)
+  under `public/runtime-pack/`. Use this when you want to serve TinyGo runtime
+  assets as a single compressed bundle.
 - `npm run check`
   Runs TypeScript checking.
 - `npm run probe:tinygo-host`
@@ -47,6 +51,7 @@ These are generated locally and ignored by git:
 
 - `public/vendor/emception/`
 - `public/tools/go-probe.wasm`
+- `public/runtime-pack/`
 - `.cache/`
 - `dist/`
 
