@@ -1,6 +1,12 @@
 import { ConsoleStdout, Directory, File, OpenFile, PreopenDirectory, WASI, WASIProcExit } from '@bjorn3/browser_wasi_shim'
 import * as Comlink from 'comlink'
 import {
+  type TinyGoRuntimeAssetLoader,
+  type TinyGoRuntimeAssetPackReference,
+  loadRuntimeAssetBytes,
+  resolveRuntimeAssetUrl,
+} from './runtime-assets'
+import {
   readTinyGoBootstrapManifest,
   verifyTinyGoBootstrapArtifactExpectation,
 } from './bootstrap-exports'
@@ -172,6 +178,8 @@ type TinyGoHostCompileResponse = {
 
 export type TinyGoRuntimeOptions = {
   assetBaseUrl: string
+  assetLoader?: TinyGoRuntimeAssetLoader
+  assetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
   initialLogMessages?: Array<{ message: string; tone?: Exclude<PhaseTone, 'idle'> | 'idle' }>
@@ -186,6 +194,8 @@ export type TinyGoBrowserRuntime = TinyGoRuntime
 
 export type TinyGoBrowserRuntimeOptions = {
   baseUrl: string
+  assetLoader?: TinyGoRuntimeAssetLoader
+  assetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
   initialLogs?: string[]
@@ -275,6 +285,43 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
 
   const resolveAssetUrl = (assetPath: string) => new URL(assetPath, assetBaseUrl).toString()
 
+  const resolveWorkerUrl = async (assetPath: string) =>
+    await resolveRuntimeAssetUrl({
+      assetPath,
+      assetUrl: resolveAssetUrl(assetPath),
+      label: assetPath,
+      loader: options.assetLoader,
+    })
+
+  const loadAssetBytes = async (assetPath: string, label: string) =>
+    await loadRuntimeAssetBytes({
+      assetPath,
+      assetUrl: resolveAssetUrl(assetPath),
+      label,
+      loader: options.assetLoader,
+      packs: options.assetPacks ?? null,
+      assetBaseUrl,
+    })
+
+  const toArrayBuffer = (bytes: Uint8Array) =>
+    bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+      ? bytes.buffer
+      : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+
+  const instantiateWasiModule = async (
+    bytes: Uint8Array,
+    imports: WebAssembly.Imports,
+  ): Promise<WebAssembly.Instance> => {
+    const instantiated = (await WebAssembly.instantiate(
+      toArrayBuffer(bytes),
+      imports,
+    )) as unknown
+    if (instantiated instanceof WebAssembly.Instance) {
+      return instantiated
+    }
+    return (instantiated as WebAssembly.WebAssemblyInstantiatedSource).instance
+  }
+
   const disposeEmceptionRuntime = () => {
     emceptionWorker?.terminate()
     emceptionWorker = null
@@ -331,7 +378,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       setPhase('toolchain', 'booting', 'running')
       appendLog('Fetching patched emception worker', 'running')
 
-      const workerUrl = resolveAssetUrl('vendor/emception/emception.worker.js')
+      const workerUrl = await resolveWorkerUrl('vendor/emception/emception.worker.js')
       emceptionWorker = new Worker(workerUrl, { type: 'classic', name: 'emception-worker' })
       emception = Comlink.wrap<unknown>(emceptionWorker) as unknown as EmceptionBridge
 
@@ -396,14 +443,8 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         ['WASM_TINYGO_MODE=driver'],
         [new OpenFile(new File([])), stdout, stderr, workspace],
       )
-      const response = await fetch(resolveAssetUrl('tools/go-probe.wasm'))
-
-      if (!response.ok) {
-        throw new Error(`go-probe fetch failed: ${response.status}`)
-      }
-
-      const moduleBytes = await response.arrayBuffer()
-      const { instance } = await WebAssembly.instantiate(moduleBytes, {
+      const moduleBytes = await loadAssetBytes('tools/go-probe.wasm', 'go-probe.wasm')
+      const instance = await instantiateWasiModule(moduleBytes, {
         wasi_snapshot_preview1: wasi.wasiImport,
       })
 
@@ -567,11 +608,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           'tinygo-frontend-analysis-input.json',
           new File(textEncoder.encode(JSON.stringify(frontendAnalysisInputManifest, null, 2))),
         )
-        const frontendResponse = await fetch(resolveAssetUrl('tools/go-probe.wasm'))
-        if (!frontendResponse.ok) {
-          throw new Error(`go-probe fetch failed: ${frontendResponse.status}`)
-        }
-        const frontendModuleBytes = await frontendResponse.arrayBuffer()
+        const frontendModuleBytes = await loadAssetBytes('tools/go-probe.wasm', 'go-probe.wasm')
         const frontendAnalysisStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'running'))
         const frontendAnalysisStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'error'))
         const frontendAnalysisWasi = new WASI(
@@ -582,7 +619,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           ],
           [new OpenFile(new File([])), frontendAnalysisStdout, frontendAnalysisStderr, working],
         )
-        const { instance: frontendAnalysisInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+        const frontendAnalysisInstance = await instantiateWasiModule(frontendModuleBytes, {
           wasi_snapshot_preview1: frontendAnalysisWasi.wasiImport,
         })
         let frontendAnalysisExitCode = 0
@@ -639,7 +676,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           ['WASM_TINYGO_MODE=frontend-real-adapter-analysis'],
           [new OpenFile(new File([])), frontendRealAdapterStdout, frontendRealAdapterStderr, working],
         )
-        const { instance: frontendRealAdapterInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+        const frontendRealAdapterInstance = await instantiateWasiModule(frontendModuleBytes, {
           wasi_snapshot_preview1: frontendRealAdapterWasi.wasiImport,
         })
         let frontendRealAdapterExitCode = 0
@@ -707,7 +744,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           ['WASM_TINYGO_MODE=frontend'],
           [new OpenFile(new File([])), frontendStdout, frontendStderr, working],
         )
-        const { instance: frontendInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+        const frontendInstance = await instantiateWasiModule(frontendModuleBytes, {
           wasi_snapshot_preview1: frontendWasi.wasiImport,
         })
         let frontendExitCode = 0
@@ -928,7 +965,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           ['WASM_TINYGO_MODE=backend'],
           [new OpenFile(new File([])), backendStdout, backendStderr, backendWorking, backendWorkspace],
         )
-        const { instance: backendInstance } = await WebAssembly.instantiate(frontendModuleBytes, {
+        const backendInstance = await instantiateWasiModule(frontendModuleBytes, {
           wasi_snapshot_preview1: backendWasi.wasiImport,
         })
         let backendExitCode = 0
@@ -1645,6 +1682,8 @@ export const createTinyGoBrowserRuntime = (options: TinyGoBrowserRuntimeOptions)
 
   const runtime = createTinyGoRuntime({
     assetBaseUrl: options.baseUrl,
+    assetLoader: options.assetLoader,
+    assetPacks: options.assetPacks,
     bootstrapGoEntrySource: options.bootstrapGoEntrySource,
     hostCompileUrl: options.hostCompileUrl,
     initialLogMessages: (options.initialLogs ?? []).map((message) => ({ message })),
