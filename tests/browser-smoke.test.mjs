@@ -944,6 +944,7 @@ func main() {
   assert.match(staticExecutionActivity ?? '', /execution artifact entrypoint=main/)
   assert.match(staticExecutionActivity ?? '', /factorial_plus_bonus=123/)
   assert.match(staticExecutionActivity ?? '', /execution artifact completed exitCode=0/)
+  assert.doesNotMatch(staticExecutionActivity ?? '', /artifact probe failed:/)
   assert.doesNotMatch(staticExecutionActivity ?? '', /tinygo host compile ready:/)
   assert.doesNotMatch(staticExecutionActivity ?? '', /build artifact execution blocked:/)
   assert.doesNotMatch(staticExecutionActivity ?? '', /\.exec\.wasm/)

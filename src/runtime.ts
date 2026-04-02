@@ -1206,122 +1206,128 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         appendLog(`frontend lowered artifact ready: /working/tinygo-lowered-out.wasm (${loweredArtifactSize.toLocaleString()} bytes)`, 'success')
       }
       try {
-        const bootstrapArtifactBytes = frontendBootstrapArtifactBytes ?? new Uint8Array(artifactBytes)
-        const bootstrapModule =
-          (await WebAssembly.instantiate(
-            bootstrapArtifactBytes as BufferSource,
-            {},
-          )) as WebAssembly.WebAssemblyInstantiatedSource
         appendLog('frontend final artifact compiled module=ok', 'success')
-        const bootstrapInstance = bootstrapModule.instance
-        const bootstrapVerification = frontendBootstrapArtifactExpectationSource
-          ? verifyTinyGoBootstrapArtifactExpectation(
-              frontendBootstrapArtifactExpectationSource,
-              bootstrapInstance.exports as Record<string, unknown>,
-            )
-          : {
-              ok: false,
-              reason: 'missing frontend bootstrap expectation',
+        if (lastBuildArtifactRunnable) {
+          artifactProbeVerified = true
+        } else {
+          const bootstrapArtifactBytes = frontendBootstrapArtifactBytes ?? new Uint8Array(artifactBytes)
+          const bootstrapModule =
+            (await WebAssembly.instantiate(
+              bootstrapArtifactBytes as BufferSource,
+              {},
+            )) as WebAssembly.WebAssemblyInstantiatedSource
+          const bootstrapInstance = bootstrapModule.instance
+          const bootstrapVerification = frontendBootstrapArtifactExpectationSource
+            ? verifyTinyGoBootstrapArtifactExpectation(
+                frontendBootstrapArtifactExpectationSource,
+                bootstrapInstance.exports as Record<string, unknown>,
+              )
+            : {
+                ok: false,
+                reason: 'missing frontend bootstrap expectation',
+              }
+          const bootstrapManifest = readTinyGoBootstrapManifest(bootstrapInstance.exports as Record<string, unknown>)
+          if (bootstrapManifest) {
+            const parsedBootstrapManifest = JSON.parse(bootstrapManifest) as {
+              entryFile?: string
+              allFileCount?: number
+              materializedFiles?: string[]
+              sourceSelection?: {
+                allCompile?: string[]
+              }
             }
-        const bootstrapManifest = readTinyGoBootstrapManifest(bootstrapInstance.exports as Record<string, unknown>)
-        if (bootstrapManifest) {
-          const parsedBootstrapManifest = JSON.parse(bootstrapManifest) as {
-            entryFile?: string
-            allFileCount?: number
-            materializedFiles?: string[]
-            sourceSelection?: {
-              allCompile?: string[]
-            }
-          }
-          const bootstrapAllFileCount = Array.isArray(parsedBootstrapManifest.sourceSelection?.allCompile)
-            ? parsedBootstrapManifest.sourceSelection.allCompile.length
-            : parsedBootstrapManifest.allFileCount
-          appendLog(
-            `bootstrap manifest entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
-            'idle',
-          )
-          if (Array.isArray(parsedBootstrapManifest.materializedFiles)) {
+            const bootstrapAllFileCount = Array.isArray(parsedBootstrapManifest.sourceSelection?.allCompile)
+              ? parsedBootstrapManifest.sourceSelection.allCompile.length
+              : parsedBootstrapManifest.allFileCount
             appendLog(
-              `bootstrap dispatch materialized=${parsedBootstrapManifest.materializedFiles.length}`,
+              `bootstrap manifest entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
               'idle',
             )
-          }
-          if (bootstrapVerification?.ok) {
-            appendLog(
-              `bootstrap roundtrip verified entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
-              'success',
-            )
-            if (frontendResult) {
-              if (!frontendLoweredSourcesManifest) {
-                throw new Error('missing lowered sources manifest for lowered artifact probe')
-              }
-              const loweredSourceFileContents: Record<string, string | Uint8Array> = {}
-              for (const unit of frontendLoweredSourcesManifest.units ?? []) {
-                for (const sourceFile of unit.sourceFiles ?? []) {
-                  if (loweredSourceFileContents[sourceFile] !== undefined) {
-                    continue
-                  }
-                  try {
-                    loweredSourceFileContents[sourceFile] = await fileSystem.readFile(sourceFile)
-                  } catch (error) {
-                    const workspaceRelativePath = sourceFile.startsWith('/workspace/')
-                      ? sourceFile.slice('/workspace/'.length)
-                      : ''
-                    if (
-                      workspaceRelativePath !== '' &&
-                      workspaceFiles !== null &&
-                      workspaceFiles[workspaceRelativePath] !== undefined
-                    ) {
-                      loweredSourceFileContents[sourceFile] = workspaceFiles[workspaceRelativePath]
-                      continue
-                    }
-                    if (sourceFile === '/workspace/main.go') {
-                      loweredSourceFileContents[sourceFile] = bootstrapGoEntrySource
-                      continue
-                    }
-                    throw error
-                  }
-                }
-              }
-              const loweredArtifact = await fileSystem.readFile('/working/tinygo-lowered-out.wasm')
-              const loweredModuleBytes = typeof loweredArtifact === 'string' ? textEncoder.encode(loweredArtifact) : loweredArtifact
-              const loweredModule =
-                (await WebAssembly.instantiate(
-                  loweredModuleBytes as BufferSource,
-                  {
-                    wasi_snapshot_preview1: {
-                      fd_write: () => 0,
-                    },
-                    wasi_unstable: {
-                      fd_write: () => 0,
-                    },
-                  },
-                )) as WebAssembly.WebAssemblyInstantiatedSource
-              const loweredVerification = verifyTinyGoLoweredArtifactExports(
-                loweredModule.instance,
-                frontendLoweredSourcesManifest,
-                loweredSourceFileContents,
-                frontendLoweredIRVerification ?? undefined,
-              )
+            if (Array.isArray(parsedBootstrapManifest.materializedFiles)) {
               appendLog(
-                `frontend lowered probe verified units=${loweredVerification.units.length} kinds=${new Set(loweredVerification.units.map((unit) => unit.kindTag)).size} hashes=${new Set(loweredVerification.units.map((unit) => unit.sourceHash)).size} imports=${new Set(loweredVerification.units.map((unit) => unit.importCount)).size} importPaths=${new Set(loweredVerification.units.map((unit) => unit.importPathHash)).size} blankImports=${new Set(loweredVerification.units.map((unit) => unit.blankImportCount)).size} dotImports=${new Set(loweredVerification.units.map((unit) => unit.dotImportCount)).size} aliasedImports=${new Set(loweredVerification.units.map((unit) => unit.aliasedImportCount)).size} funcs=${new Set(loweredVerification.units.map((unit) => unit.functionCount)).size} funcNameHashes=${new Set(loweredVerification.units.map((unit) => unit.functionNameHash)).size} funcLiterals=${new Set(loweredVerification.units.map((unit) => unit.funcLiteralCount)).size} funcParameters=${new Set(loweredVerification.units.map((unit) => unit.funcParameterCount)).size} funcResults=${new Set(loweredVerification.units.map((unit) => unit.funcResultCount)).size} variadicParameters=${new Set(loweredVerification.units.map((unit) => unit.variadicParameterCount)).size} namedResults=${new Set(loweredVerification.units.map((unit) => unit.namedResultCount)).size} typeParameters=${new Set(loweredVerification.units.map((unit) => unit.typeParameterCount)).size} genericFunctions=${new Set(loweredVerification.units.map((unit) => unit.genericFunctionCount)).size} genericTypes=${new Set(loweredVerification.units.map((unit) => unit.genericTypeCount)).size} calls=${new Set(loweredVerification.units.map((unit) => unit.callExpressionCount)).size} builtinCalls=${new Set(loweredVerification.units.map((unit) => unit.builtinCallCount)).size} appendCalls=${new Set(loweredVerification.units.map((unit) => unit.appendCallCount)).size} lenCalls=${new Set(loweredVerification.units.map((unit) => unit.lenCallCount)).size} makeCalls=${new Set(loweredVerification.units.map((unit) => unit.makeCallCount)).size} capCalls=${new Set(loweredVerification.units.map((unit) => unit.capCallCount)).size} copyCalls=${new Set(loweredVerification.units.map((unit) => unit.copyCallCount)).size} panicCalls=${new Set(loweredVerification.units.map((unit) => unit.panicCallCount)).size} recoverCalls=${new Set(loweredVerification.units.map((unit) => unit.recoverCallCount)).size} newCalls=${new Set(loweredVerification.units.map((unit) => unit.newCallCount)).size} deleteCalls=${new Set(loweredVerification.units.map((unit) => unit.deleteCallCount)).size} compositeLiterals=${new Set(loweredVerification.units.map((unit) => unit.compositeLiteralCount)).size} selectorExpressions=${new Set(loweredVerification.units.map((unit) => unit.selectorExpressionCount)).size} selectorNameHashes=${new Set(loweredVerification.units.map((unit) => unit.selectorNameHash)).size} indexExpressions=${new Set(loweredVerification.units.map((unit) => unit.indexExpressionCount)).size} sliceExpressions=${new Set(loweredVerification.units.map((unit) => unit.sliceExpressionCount)).size} keyValueExpressions=${new Set(loweredVerification.units.map((unit) => unit.keyValueExpressionCount)).size} typeAssertions=${new Set(loweredVerification.units.map((unit) => unit.typeAssertionCount)).size} blankIdentifiers=${new Set(loweredVerification.units.map((unit) => unit.blankIdentifierCount)).size} blankAssignmentTargets=${new Set(loweredVerification.units.map((unit) => unit.blankAssignmentTargetCount)).size} unaryExpressions=${new Set(loweredVerification.units.map((unit) => unit.unaryExpressionCount)).size} binaryExpressions=${new Set(loweredVerification.units.map((unit) => unit.binaryExpressionCount)).size} sends=${new Set(loweredVerification.units.map((unit) => unit.sendStatementCount)).size} receives=${new Set(loweredVerification.units.map((unit) => unit.receiveExpressionCount)).size} assignments=${new Set(loweredVerification.units.map((unit) => unit.assignStatementCount)).size} defines=${new Set(loweredVerification.units.map((unit) => unit.defineStatementCount)).size} increments=${new Set(loweredVerification.units.map((unit) => unit.incStatementCount)).size} decrements=${new Set(loweredVerification.units.map((unit) => unit.decStatementCount)).size} returns=${new Set(loweredVerification.units.map((unit) => unit.returnStatementCount)).size} goStatements=${new Set(loweredVerification.units.map((unit) => unit.goStatementCount)).size} deferStatements=${new Set(loweredVerification.units.map((unit) => unit.deferStatementCount)).size} ifStatements=${new Set(loweredVerification.units.map((unit) => unit.ifStatementCount)).size} rangeStatements=${new Set(loweredVerification.units.map((unit) => unit.rangeStatementCount)).size} switchStatements=${new Set(loweredVerification.units.map((unit) => unit.switchStatementCount)).size} typeSwitchStatements=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchStatementCount)).size} typeSwitchCases=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchCaseClauseCount)).size} typeSwitchGuardNameHashes=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchGuardNameHash)).size} typeSwitchCaseTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchCaseTypeHash)).size} selectStatements=${new Set(loweredVerification.units.map((unit) => unit.selectStatementCount)).size} switchCases=${new Set(loweredVerification.units.map((unit) => unit.switchCaseClauseCount)).size} selectClauses=${new Set(loweredVerification.units.map((unit) => unit.selectCommClauseCount)).size} forStatements=${new Set(loweredVerification.units.map((unit) => unit.forStatementCount)).size} breakStatements=${new Set(loweredVerification.units.map((unit) => unit.breakStatementCount)).size} breakLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.breakLabelNameHash)).size} continueStatements=${new Set(loweredVerification.units.map((unit) => unit.continueStatementCount)).size} continueLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.continueLabelNameHash)).size} labels=${new Set(loweredVerification.units.map((unit) => unit.labeledStatementCount)).size} labelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.labelNameHash)).size} gotos=${new Set(loweredVerification.units.map((unit) => unit.gotoStatementCount)).size} gotoLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.gotoLabelNameHash)).size} fallthroughs=${new Set(loweredVerification.units.map((unit) => unit.fallthroughStatementCount)).size} methods=${new Set(loweredVerification.units.map((unit) => unit.methodCount)).size} methodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.methodNameHash)).size} methodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.methodSignatureHash)).size} exportedMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedMethodNameHash)).size} exportedMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedMethodSignatureHash)).size} exports=${new Set(loweredVerification.units.map((unit) => unit.exportedFunctionCount)).size} exportedFunctionNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedFunctionNameHash)).size} types=${new Set(loweredVerification.units.map((unit) => unit.typeCount)).size} typeNameHashes=${new Set(loweredVerification.units.map((unit) => unit.typeNameHash)).size} exportedTypes=${new Set(loweredVerification.units.map((unit) => unit.exportedTypeCount)).size} exportedTypeNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedTypeNameHash)).size} structs=${new Set(loweredVerification.units.map((unit) => unit.structTypeCount)).size} interfaces=${new Set(loweredVerification.units.map((unit) => unit.interfaceTypeCount)).size} mapTypes=${new Set(loweredVerification.units.map((unit) => unit.mapTypeCount)).size} chanTypes=${new Set(loweredVerification.units.map((unit) => unit.chanTypeCount)).size} sendOnlyChanTypes=${new Set(loweredVerification.units.map((unit) => unit.sendOnlyChanTypeCount)).size} receiveOnlyChanTypes=${new Set(loweredVerification.units.map((unit) => unit.receiveOnlyChanTypeCount)).size} arrayTypes=${new Set(loweredVerification.units.map((unit) => unit.arrayTypeCount)).size} sliceTypes=${new Set(loweredVerification.units.map((unit) => unit.sliceTypeCount)).size} pointerTypes=${new Set(loweredVerification.units.map((unit) => unit.pointerTypeCount)).size} structFields=${new Set(loweredVerification.units.map((unit) => unit.structFieldCount)).size} embeddedStructFields=${new Set(loweredVerification.units.map((unit) => unit.embeddedStructFieldCount)).size} taggedStructFields=${new Set(loweredVerification.units.map((unit) => unit.taggedStructFieldCount)).size} structFieldNameHashes=${new Set(loweredVerification.units.map((unit) => unit.structFieldNameHash)).size} structFieldTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.structFieldTypeHash)).size} embeddedStructFieldTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.embeddedStructFieldTypeHash)).size} taggedStructFieldTagHashes=${new Set(loweredVerification.units.map((unit) => unit.taggedStructFieldTagHash)).size} interfaceMethods=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodCount)).size} interfaceMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodNameHash)).size} interfaceMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodSignatureHash)).size} embeddedInterfaceMethods=${new Set(loweredVerification.units.map((unit) => unit.embeddedInterfaceMethodCount)).size} embeddedInterfaceMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.embeddedInterfaceMethodNameHash)).size} consts=${new Set(loweredVerification.units.map((unit) => unit.constCount)).size} constNameHashes=${new Set(loweredVerification.units.map((unit) => unit.constNameHash)).size} vars=${new Set(loweredVerification.units.map((unit) => unit.varCount)).size} varNameHashes=${new Set(loweredVerification.units.map((unit) => unit.varNameHash)).size} exportedConsts=${new Set(loweredVerification.units.map((unit) => unit.exportedConstCount)).size} exportedConstNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedConstNameHash)).size} exportedVars=${new Set(loweredVerification.units.map((unit) => unit.exportedVarCount)).size} exportedVarNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedVarNameHash)).size} declarationCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationCount)).size} declarationNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationNameHash)).size} declarationSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationSignatureHash)).size} declarationKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationKindHash)).size} declarationExportedCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedCount)).size} declarationExportedNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedNameHash)).size} declarationExportedSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedSignatureHash)).size} declarationExportedKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedKindHash)).size} declarationMethodCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodCount)).size} declarationMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodNameHash)).size} declarationMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodSignatureHash)).size} declarationMethodKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodKindHash)).size} placeholderBlocks=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockCount)).size} placeholderBlockHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockHash)).size} placeholderBlockSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockSignatureHash)).size} placeholderBlockRuntimeHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockRuntimeHash)).size} loweringBlocks=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockCount)).size} loweringBlockHashes=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockHash)).size} loweringBlockRuntimeHashes=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockRuntimeHash)).size} mains=${new Set(loweredVerification.units.map((unit) => unit.mainCount)).size} inits=${new Set(loweredVerification.units.map((unit) => unit.initCount)).size}`,
-                'success',
+                `bootstrap dispatch materialized=${parsedBootstrapManifest.materializedFiles.length}`,
+                'idle',
               )
             }
-            artifactProbeVerified = true
+            if (bootstrapVerification?.ok) {
+              appendLog(
+                `bootstrap roundtrip verified entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
+                'success',
+              )
+              if (frontendResult) {
+                if (!frontendLoweredSourcesManifest) {
+                  throw new Error('missing lowered sources manifest for lowered artifact probe')
+                }
+                const loweredSourceFileContents: Record<string, string | Uint8Array> = {}
+                for (const unit of frontendLoweredSourcesManifest.units ?? []) {
+                  for (const sourceFile of unit.sourceFiles ?? []) {
+                    if (loweredSourceFileContents[sourceFile] !== undefined) {
+                      continue
+                    }
+                    try {
+                      loweredSourceFileContents[sourceFile] = await fileSystem.readFile(sourceFile)
+                    } catch (error) {
+                      const workspaceRelativePath = sourceFile.startsWith('/workspace/')
+                        ? sourceFile.slice('/workspace/'.length)
+                        : ''
+                      if (
+                        workspaceRelativePath !== '' &&
+                        workspaceFiles !== null &&
+                        workspaceFiles[workspaceRelativePath] !== undefined
+                      ) {
+                        loweredSourceFileContents[sourceFile] = workspaceFiles[workspaceRelativePath]
+                        continue
+                      }
+                      if (sourceFile === '/workspace/main.go') {
+                        loweredSourceFileContents[sourceFile] = bootstrapGoEntrySource
+                        continue
+                      }
+                      throw error
+                    }
+                  }
+                }
+                const loweredArtifact = await fileSystem.readFile('/working/tinygo-lowered-out.wasm')
+                const loweredModuleBytes = typeof loweredArtifact === 'string' ? textEncoder.encode(loweredArtifact) : loweredArtifact
+                const loweredModule =
+                  (await WebAssembly.instantiate(
+                    loweredModuleBytes as BufferSource,
+                    {
+                      wasi_snapshot_preview1: {
+                        fd_read: () => 0,
+                        fd_write: () => 0,
+                      },
+                      wasi_unstable: {
+                        fd_read: () => 0,
+                        fd_write: () => 0,
+                      },
+                    },
+                  )) as WebAssembly.WebAssemblyInstantiatedSource
+                const loweredVerification = verifyTinyGoLoweredArtifactExports(
+                  loweredModule.instance,
+                  frontendLoweredSourcesManifest,
+                  loweredSourceFileContents,
+                  frontendLoweredIRVerification ?? undefined,
+                )
+                appendLog(
+                `frontend lowered probe verified units=${loweredVerification.units.length} kinds=${new Set(loweredVerification.units.map((unit) => unit.kindTag)).size} hashes=${new Set(loweredVerification.units.map((unit) => unit.sourceHash)).size} imports=${new Set(loweredVerification.units.map((unit) => unit.importCount)).size} importPaths=${new Set(loweredVerification.units.map((unit) => unit.importPathHash)).size} blankImports=${new Set(loweredVerification.units.map((unit) => unit.blankImportCount)).size} dotImports=${new Set(loweredVerification.units.map((unit) => unit.dotImportCount)).size} aliasedImports=${new Set(loweredVerification.units.map((unit) => unit.aliasedImportCount)).size} funcs=${new Set(loweredVerification.units.map((unit) => unit.functionCount)).size} funcNameHashes=${new Set(loweredVerification.units.map((unit) => unit.functionNameHash)).size} funcLiterals=${new Set(loweredVerification.units.map((unit) => unit.funcLiteralCount)).size} funcParameters=${new Set(loweredVerification.units.map((unit) => unit.funcParameterCount)).size} funcResults=${new Set(loweredVerification.units.map((unit) => unit.funcResultCount)).size} variadicParameters=${new Set(loweredVerification.units.map((unit) => unit.variadicParameterCount)).size} namedResults=${new Set(loweredVerification.units.map((unit) => unit.namedResultCount)).size} typeParameters=${new Set(loweredVerification.units.map((unit) => unit.typeParameterCount)).size} genericFunctions=${new Set(loweredVerification.units.map((unit) => unit.genericFunctionCount)).size} genericTypes=${new Set(loweredVerification.units.map((unit) => unit.genericTypeCount)).size} calls=${new Set(loweredVerification.units.map((unit) => unit.callExpressionCount)).size} builtinCalls=${new Set(loweredVerification.units.map((unit) => unit.builtinCallCount)).size} appendCalls=${new Set(loweredVerification.units.map((unit) => unit.appendCallCount)).size} lenCalls=${new Set(loweredVerification.units.map((unit) => unit.lenCallCount)).size} makeCalls=${new Set(loweredVerification.units.map((unit) => unit.makeCallCount)).size} capCalls=${new Set(loweredVerification.units.map((unit) => unit.capCallCount)).size} copyCalls=${new Set(loweredVerification.units.map((unit) => unit.copyCallCount)).size} panicCalls=${new Set(loweredVerification.units.map((unit) => unit.panicCallCount)).size} recoverCalls=${new Set(loweredVerification.units.map((unit) => unit.recoverCallCount)).size} newCalls=${new Set(loweredVerification.units.map((unit) => unit.newCallCount)).size} deleteCalls=${new Set(loweredVerification.units.map((unit) => unit.deleteCallCount)).size} compositeLiterals=${new Set(loweredVerification.units.map((unit) => unit.compositeLiteralCount)).size} selectorExpressions=${new Set(loweredVerification.units.map((unit) => unit.selectorExpressionCount)).size} selectorNameHashes=${new Set(loweredVerification.units.map((unit) => unit.selectorNameHash)).size} indexExpressions=${new Set(loweredVerification.units.map((unit) => unit.indexExpressionCount)).size} sliceExpressions=${new Set(loweredVerification.units.map((unit) => unit.sliceExpressionCount)).size} keyValueExpressions=${new Set(loweredVerification.units.map((unit) => unit.keyValueExpressionCount)).size} typeAssertions=${new Set(loweredVerification.units.map((unit) => unit.typeAssertionCount)).size} blankIdentifiers=${new Set(loweredVerification.units.map((unit) => unit.blankIdentifierCount)).size} blankAssignmentTargets=${new Set(loweredVerification.units.map((unit) => unit.blankAssignmentTargetCount)).size} unaryExpressions=${new Set(loweredVerification.units.map((unit) => unit.unaryExpressionCount)).size} binaryExpressions=${new Set(loweredVerification.units.map((unit) => unit.binaryExpressionCount)).size} sends=${new Set(loweredVerification.units.map((unit) => unit.sendStatementCount)).size} receives=${new Set(loweredVerification.units.map((unit) => unit.receiveExpressionCount)).size} assignments=${new Set(loweredVerification.units.map((unit) => unit.assignStatementCount)).size} defines=${new Set(loweredVerification.units.map((unit) => unit.defineStatementCount)).size} increments=${new Set(loweredVerification.units.map((unit) => unit.incStatementCount)).size} decrements=${new Set(loweredVerification.units.map((unit) => unit.decStatementCount)).size} returns=${new Set(loweredVerification.units.map((unit) => unit.returnStatementCount)).size} goStatements=${new Set(loweredVerification.units.map((unit) => unit.goStatementCount)).size} deferStatements=${new Set(loweredVerification.units.map((unit) => unit.deferStatementCount)).size} ifStatements=${new Set(loweredVerification.units.map((unit) => unit.ifStatementCount)).size} rangeStatements=${new Set(loweredVerification.units.map((unit) => unit.rangeStatementCount)).size} switchStatements=${new Set(loweredVerification.units.map((unit) => unit.switchStatementCount)).size} typeSwitchStatements=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchStatementCount)).size} typeSwitchCases=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchCaseClauseCount)).size} typeSwitchGuardNameHashes=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchGuardNameHash)).size} typeSwitchCaseTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.typeSwitchCaseTypeHash)).size} selectStatements=${new Set(loweredVerification.units.map((unit) => unit.selectStatementCount)).size} switchCases=${new Set(loweredVerification.units.map((unit) => unit.switchCaseClauseCount)).size} selectClauses=${new Set(loweredVerification.units.map((unit) => unit.selectCommClauseCount)).size} forStatements=${new Set(loweredVerification.units.map((unit) => unit.forStatementCount)).size} breakStatements=${new Set(loweredVerification.units.map((unit) => unit.breakStatementCount)).size} breakLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.breakLabelNameHash)).size} continueStatements=${new Set(loweredVerification.units.map((unit) => unit.continueStatementCount)).size} continueLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.continueLabelNameHash)).size} labels=${new Set(loweredVerification.units.map((unit) => unit.labeledStatementCount)).size} labelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.labelNameHash)).size} gotos=${new Set(loweredVerification.units.map((unit) => unit.gotoStatementCount)).size} gotoLabelNameHashes=${new Set(loweredVerification.units.map((unit) => unit.gotoLabelNameHash)).size} fallthroughs=${new Set(loweredVerification.units.map((unit) => unit.fallthroughStatementCount)).size} methods=${new Set(loweredVerification.units.map((unit) => unit.methodCount)).size} methodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.methodNameHash)).size} methodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.methodSignatureHash)).size} exportedMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedMethodNameHash)).size} exportedMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedMethodSignatureHash)).size} exports=${new Set(loweredVerification.units.map((unit) => unit.exportedFunctionCount)).size} exportedFunctionNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedFunctionNameHash)).size} types=${new Set(loweredVerification.units.map((unit) => unit.typeCount)).size} typeNameHashes=${new Set(loweredVerification.units.map((unit) => unit.typeNameHash)).size} exportedTypes=${new Set(loweredVerification.units.map((unit) => unit.exportedTypeCount)).size} exportedTypeNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedTypeNameHash)).size} structs=${new Set(loweredVerification.units.map((unit) => unit.structTypeCount)).size} interfaces=${new Set(loweredVerification.units.map((unit) => unit.interfaceTypeCount)).size} mapTypes=${new Set(loweredVerification.units.map((unit) => unit.mapTypeCount)).size} chanTypes=${new Set(loweredVerification.units.map((unit) => unit.chanTypeCount)).size} sendOnlyChanTypes=${new Set(loweredVerification.units.map((unit) => unit.sendOnlyChanTypeCount)).size} receiveOnlyChanTypes=${new Set(loweredVerification.units.map((unit) => unit.receiveOnlyChanTypeCount)).size} arrayTypes=${new Set(loweredVerification.units.map((unit) => unit.arrayTypeCount)).size} sliceTypes=${new Set(loweredVerification.units.map((unit) => unit.sliceTypeCount)).size} pointerTypes=${new Set(loweredVerification.units.map((unit) => unit.pointerTypeCount)).size} structFields=${new Set(loweredVerification.units.map((unit) => unit.structFieldCount)).size} embeddedStructFields=${new Set(loweredVerification.units.map((unit) => unit.embeddedStructFieldCount)).size} taggedStructFields=${new Set(loweredVerification.units.map((unit) => unit.taggedStructFieldCount)).size} structFieldNameHashes=${new Set(loweredVerification.units.map((unit) => unit.structFieldNameHash)).size} structFieldTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.structFieldTypeHash)).size} embeddedStructFieldTypeHashes=${new Set(loweredVerification.units.map((unit) => unit.embeddedStructFieldTypeHash)).size} taggedStructFieldTagHashes=${new Set(loweredVerification.units.map((unit) => unit.taggedStructFieldTagHash)).size} interfaceMethods=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodCount)).size} interfaceMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodNameHash)).size} interfaceMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.interfaceMethodSignatureHash)).size} embeddedInterfaceMethods=${new Set(loweredVerification.units.map((unit) => unit.embeddedInterfaceMethodCount)).size} embeddedInterfaceMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.embeddedInterfaceMethodNameHash)).size} consts=${new Set(loweredVerification.units.map((unit) => unit.constCount)).size} constNameHashes=${new Set(loweredVerification.units.map((unit) => unit.constNameHash)).size} vars=${new Set(loweredVerification.units.map((unit) => unit.varCount)).size} varNameHashes=${new Set(loweredVerification.units.map((unit) => unit.varNameHash)).size} exportedConsts=${new Set(loweredVerification.units.map((unit) => unit.exportedConstCount)).size} exportedConstNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedConstNameHash)).size} exportedVars=${new Set(loweredVerification.units.map((unit) => unit.exportedVarCount)).size} exportedVarNameHashes=${new Set(loweredVerification.units.map((unit) => unit.exportedVarNameHash)).size} declarationCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationCount)).size} declarationNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationNameHash)).size} declarationSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationSignatureHash)).size} declarationKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationKindHash)).size} declarationExportedCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedCount)).size} declarationExportedNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedNameHash)).size} declarationExportedSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedSignatureHash)).size} declarationExportedKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationExportedKindHash)).size} declarationMethodCounts=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodCount)).size} declarationMethodNameHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodNameHash)).size} declarationMethodSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodSignatureHash)).size} declarationMethodKindHashes=${new Set(loweredVerification.units.map((unit) => unit.declarationMethodKindHash)).size} placeholderBlocks=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockCount)).size} placeholderBlockHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockHash)).size} placeholderBlockSignatureHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockSignatureHash)).size} placeholderBlockRuntimeHashes=${new Set(loweredVerification.units.map((unit) => unit.placeholderBlockRuntimeHash)).size} loweringBlocks=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockCount)).size} loweringBlockHashes=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockHash)).size} loweringBlockRuntimeHashes=${new Set(loweredVerification.units.map((unit) => unit.loweringBlockRuntimeHash)).size} mains=${new Set(loweredVerification.units.map((unit) => unit.mainCount)).size} inits=${new Set(loweredVerification.units.map((unit) => unit.initCount)).size}`,
+                  'success',
+                )
+              }
+              artifactProbeVerified = true
+            } else if (bootstrapVerification) {
+              setPhase('verify', 'failed', 'error')
+              appendLog(
+                `bootstrap verification failed: ${bootstrapVerification.reason} entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
+                'error',
+              )
+            }
           } else if (bootstrapVerification) {
             setPhase('verify', 'failed', 'error')
             appendLog(
-              `bootstrap verification failed: ${bootstrapVerification.reason} entry=${parsedBootstrapManifest.entryFile ?? 'unknown'} all=${bootstrapAllFileCount ?? 'unknown'}`,
+              `bootstrap verification failed: ${bootstrapVerification.reason}`,
               'error',
             )
           }
-        } else if (bootstrapVerification) {
-          setPhase('verify', 'failed', 'error')
-          appendLog(
-            `bootstrap verification failed: ${bootstrapVerification.reason}`,
-            'error',
-          )
         }
       } catch (error) {
         setPhase('verify', 'failed', 'error')
