@@ -29,7 +29,13 @@ The dev and build flows prepare browser-side assets automatically before startin
   under `public/runtime-pack/`. Use this when you want to serve TinyGo runtime
   assets as a single compressed bundle. Set `WASM_TINYGO_RUNTIME_PACK_MANIFEST`
   to a JSON array of `{ runtimePath, filePath }` entries if you want to pack a
-  custom file list instead of the default emception + go-probe assets.
+  custom file list instead of the default emception + go-probe assets. You can
+  also supply a JSON object:
+
+  - `root`: directory to scan
+  - `include`: list of regex strings to keep
+  - `exclude`: list of regex strings to drop
+  - `entries`: explicit entries (overrides `root/include/exclude`)
 - `npm run check`
   Runs TypeScript checking.
 - `npm run probe:tinygo-host`

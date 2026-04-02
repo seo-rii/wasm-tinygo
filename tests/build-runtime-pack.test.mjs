@@ -106,3 +106,40 @@ test('build-runtime-pack accepts a manifest-driven file list', async () => {
     'assets/one.wasm',
   ])
 })
+
+test('build-runtime-pack supports include/exclude patterns in the manifest', async () => {
+  const repoRoot = path.resolve(new URL('..', import.meta.url).pathname)
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-pack-patterns-'))
+  const rootDir = path.join(tempDir, 'assets')
+  await mkdir(path.join(rootDir, 'nested'), { recursive: true })
+  await writeFile(path.join(rootDir, 'keep.wasm'), new Uint8Array([1]))
+  await writeFile(path.join(rootDir, 'drop.txt'), new Uint8Array([2]))
+  await writeFile(path.join(rootDir, 'nested', 'skip.wasm'), new Uint8Array([3]))
+
+  const manifestPath = path.join(tempDir, 'runtime-pack.json')
+  await writeFile(
+    manifestPath,
+    JSON.stringify(
+      {
+        root: rootDir,
+        include: ['\\.wasm$'],
+        exclude: ['nested/'],
+      },
+      null,
+      2,
+    ),
+  )
+
+  const outputDir = path.join(tempDir, 'runtime-pack')
+  await runBuildRuntimePack(repoRoot, {
+    WASM_TINYGO_RUNTIME_PACK_ROOT: path.join(tempDir, 'public'),
+    WASM_TINYGO_RUNTIME_PACK_OUTPUT: outputDir,
+    WASM_TINYGO_RUNTIME_PACK_MANIFEST: manifestPath,
+  })
+
+  const indexPath = path.join(outputDir, 'runtime-pack.index.json')
+  const index = JSON.parse(await readFile(indexPath, 'utf8'))
+
+  assert.equal(index.fileCount, 1)
+  assert.deepEqual(index.entries.map((entry) => entry.runtimePath), ['keep.wasm'])
+})

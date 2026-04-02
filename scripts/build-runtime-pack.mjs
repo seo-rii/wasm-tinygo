@@ -31,30 +31,73 @@ const collectFiles = async (dir) => {
 
 const loadManifestEntries = async (manifestPath) => {
   const raw = JSON.parse(await fs.readFile(manifestPath, 'utf8'))
-  if (!Array.isArray(raw)) {
-    throw new Error('runtime pack manifest must be an array')
-  }
   const manifestDir = path.dirname(manifestPath)
-  return raw.map((entry, index) => {
-    if (!entry || typeof entry !== 'object') {
-      throw new Error(`runtime pack manifest entry ${index} is not an object`)
+  if (Array.isArray(raw)) {
+    return raw.map((entry, index) => normalizeManifestEntry(entry, index, manifestDir))
+  }
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('runtime pack manifest must be an array or object')
+  }
+  const root =
+    typeof raw.root === 'string' && raw.root.length > 0
+      ? (path.isAbsolute(raw.root) ? raw.root : path.resolve(manifestDir, raw.root))
+      : null
+  const include = normalizePatterns(raw.include, 'include')
+  const exclude = normalizePatterns(raw.exclude, 'exclude')
+  if (Array.isArray(raw.entries) && raw.entries.length > 0) {
+    return raw.entries.map((entry, index) => normalizeManifestEntry(entry, index, manifestDir))
+  }
+  if (!root) {
+    throw new Error('runtime pack manifest root is required when entries are omitted')
+  }
+  const candidates = (await collectFiles(root)).map((filePath) => ({
+    filePath,
+    runtimePath: normalizePath(path.relative(root, filePath)),
+  }))
+  return candidates.filter((entry) => {
+    if (!entry.runtimePath) return false
+    if (include.length && !include.some((pattern) => pattern.test(entry.runtimePath))) {
+      return false
     }
-    const runtimePath = entry.runtimePath
-    const filePath = entry.filePath ?? entry.sourcePath
-    if (typeof runtimePath !== 'string' || runtimePath.length === 0) {
-      throw new Error(`runtime pack manifest entry ${index} is missing runtimePath`)
+    if (exclude.some((pattern) => pattern.test(entry.runtimePath))) {
+      return false
     }
-    if (typeof filePath !== 'string' || filePath.length === 0) {
-      throw new Error(`runtime pack manifest entry ${index} is missing filePath`)
-    }
-    const resolvedPath = path.isAbsolute(filePath)
-      ? filePath
-      : path.resolve(manifestDir, filePath)
-    return {
-      runtimePath,
-      filePath: resolvedPath,
-    }
+    return true
   })
+}
+
+const normalizePatterns = (patterns, label) => {
+  if (patterns === undefined || patterns === null) return []
+  if (!Array.isArray(patterns)) {
+    throw new Error(`runtime pack manifest ${label} must be an array`)
+  }
+  return patterns.map((pattern, index) => {
+    if (typeof pattern !== 'string' || pattern.length === 0) {
+      throw new Error(`runtime pack manifest ${label}[${index}] must be a string`)
+    }
+    return new RegExp(pattern)
+  })
+}
+
+const normalizeManifestEntry = (entry, index, manifestDir) => {
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`runtime pack manifest entry ${index} is not an object`)
+  }
+  const runtimePath = entry.runtimePath
+  const filePath = entry.filePath ?? entry.sourcePath
+  if (typeof runtimePath !== 'string' || runtimePath.length === 0) {
+    throw new Error(`runtime pack manifest entry ${index} is missing runtimePath`)
+  }
+  if (typeof filePath !== 'string' || filePath.length === 0) {
+    throw new Error(`runtime pack manifest entry ${index} is missing filePath`)
+  }
+  const resolvedPath = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(manifestDir, filePath)
+  return {
+    runtimePath,
+    filePath: resolvedPath,
+  }
 }
 
 const buildPack = async () => {
