@@ -259,6 +259,14 @@ func main() {
   })
 
   const context = await browser.newContext()
+  await context.addCookies([
+    {
+      name: 'dev_bypass_waf',
+      value: 'seorii_bypass_token_is_this',
+      domain: '127.0.0.1',
+      path: '/',
+    },
+  ])
   await context.addInitScript(() => {
     window.__codexUnhandledRejections = []
     window.addEventListener('unhandledrejection', (event) => {
