@@ -32,7 +32,7 @@ export interface TinyGoRuntimePackIndexEntry {
 }
 
 export interface TinyGoRuntimePackIndex {
-  format: 'wasm-tinygo-runtime-pack-index-v1'
+  format: 'wasm-tinygo-runtime-pack-index-v1' | 'wasm-rust-runtime-pack-index-v1'
   fileCount: number
   totalBytes: number
   entries: TinyGoRuntimePackIndexEntry[]
@@ -74,7 +74,7 @@ export function clearTinyGoRuntimePackCache() {
 
 export function parseTinyGoRuntimePackIndex(value: unknown): TinyGoRuntimePackIndex {
   const root = expectObject(value, 'root')
-  if (root.format !== 'wasm-tinygo-runtime-pack-index-v1') {
+  if (root.format !== 'wasm-tinygo-runtime-pack-index-v1' && root.format !== 'wasm-rust-runtime-pack-index-v1') {
     throw new Error('invalid root.format in wasm-tinygo runtime pack index')
   }
   if (!Array.isArray(root.entries)) {
@@ -108,7 +108,7 @@ export function parseTinyGoRuntimePackIndex(value: unknown): TinyGoRuntimePackIn
     }
   }
   return {
-    format: 'wasm-tinygo-runtime-pack-index-v1',
+    format: root.format,
     fileCount,
     totalBytes,
     entries,

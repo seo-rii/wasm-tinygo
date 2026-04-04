@@ -180,6 +180,8 @@ export type TinyGoRuntimeOptions = {
   assetBaseUrl: string
   assetLoader?: TinyGoRuntimeAssetLoader
   assetPacks?: TinyGoRuntimeAssetPackReference[]
+  rustRuntimeBaseUrl?: string
+  rustRuntimeAssetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
   initialLogMessages?: Array<{ message: string; tone?: Exclude<PhaseTone, 'idle'> | 'idle' }>
@@ -196,6 +198,8 @@ export type TinyGoBrowserRuntimeOptions = {
   baseUrl: string
   assetLoader?: TinyGoRuntimeAssetLoader
   assetPacks?: TinyGoRuntimeAssetPackReference[]
+  rustRuntimeBaseUrl?: string
+  rustRuntimeAssetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
   initialLogs?: string[]
@@ -240,6 +244,7 @@ const normalizeAssetBaseUrl = (assetBaseUrl: string) =>
 
 export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntime => {
   const assetBaseUrl = normalizeAssetBaseUrl(options.assetBaseUrl)
+  const rustRuntimeBaseUrl = normalizeAssetBaseUrl(options.rustRuntimeBaseUrl ?? assetBaseUrl)
   const textEncoder = new TextEncoder()
   const textDecoder = new TextDecoder()
   const bootstrapGoEntrySource = options.bootstrapGoEntrySource ?? DEFAULT_TINYGO_BOOTSTRAP_GO_ENTRY_SOURCE
@@ -303,10 +308,22 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       assetBaseUrl,
     })
 
+  const loadRustRuntimeAssetBytes = async (assetPath: string, label: string) =>
+    await loadRuntimeAssetBytes({
+      assetPath,
+      assetUrl: new URL(assetPath, rustRuntimeBaseUrl).toString(),
+      label,
+      loader: options.assetLoader,
+      packs: options.rustRuntimeAssetPacks ?? null,
+      assetBaseUrl: rustRuntimeBaseUrl,
+    })
+
   const toArrayBuffer = (bytes: Uint8Array) =>
     bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
       ? bytes.buffer
       : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+
+  void loadRustRuntimeAssetBytes('runtime-manifest.v3.json', 'wasm-rust runtime manifest')
 
   const instantiateWasiModule = async (
     bytes: Uint8Array,
