@@ -309,6 +309,17 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       assetBaseUrl,
     })
 
+  const loadCompilerModuleBytes = async () => {
+    try {
+      const compilerBytes = await loadAssetBytes('tools/tinygo-compiler.wasm', 'tinygo-compiler.wasm')
+      appendLog('tinygo compiler module loaded from tools/tinygo-compiler.wasm', 'success')
+      return compilerBytes
+    } catch (error) {
+      appendLog('tinygo compiler module fallback to tools/go-probe.wasm', 'idle')
+      return await loadAssetBytes('tools/go-probe.wasm', 'go-probe.wasm')
+    }
+  }
+
   const loadRustRuntimeAssetBytes = async (assetPath: string, label: string) =>
     await loadRuntimeAssetBytes({
       assetPath,
@@ -480,7 +491,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         ['WASM_TINYGO_MODE=driver'],
         [new OpenFile(new File([])), stdout, stderr, workspace],
       )
-      const moduleBytes = await loadAssetBytes('tools/go-probe.wasm', 'go-probe.wasm')
+      const moduleBytes = await loadCompilerModuleBytes()
       const instance = await instantiateWasiModule(moduleBytes, {
         wasi_snapshot_preview1: wasi.wasiImport,
       })
@@ -645,7 +656,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           'tinygo-frontend-analysis-input.json',
           new File(textEncoder.encode(JSON.stringify(frontendAnalysisInputManifest, null, 2))),
         )
-        const frontendModuleBytes = await loadAssetBytes('tools/go-probe.wasm', 'go-probe.wasm')
+        const frontendModuleBytes = await loadCompilerModuleBytes()
         const frontendAnalysisStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'running'))
         const frontendAnalysisStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'error'))
         const frontendAnalysisWasi = new WASI(

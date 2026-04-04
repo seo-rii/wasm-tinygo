@@ -1,10 +1,12 @@
 import { spawnSync } from 'node:child_process'
-import { mkdir } from 'node:fs/promises'
+import { copyFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outputPath = process.env.WASM_TINYGO_GO_PROBE_OUTPUT_PATH ?? path.join(rootDir, 'public', 'tools', 'go-probe.wasm')
+const compilerOutputPath =
+  process.env.WASM_TINYGO_COMPILER_OUTPUT_PATH ?? path.join(rootDir, 'public', 'tools', 'tinygo-compiler.wasm')
 const goCachePath = process.env.GOCACHE || path.join(rootDir, '.cache', 'go-build')
 
 await mkdir(path.dirname(outputPath), { recursive: true })
@@ -27,3 +29,7 @@ if (result.status !== 0) {
 }
 
 console.log(`Built ${path.relative(rootDir, outputPath)}`)
+if (outputPath !== compilerOutputPath) {
+  await copyFile(outputPath, compilerOutputPath)
+  console.log(`Copied ${path.relative(rootDir, compilerOutputPath)}`)
+}
