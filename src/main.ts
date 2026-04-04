@@ -236,17 +236,8 @@ const setPhase = (phase: 'toolchain' | 'smoke' | 'probe' | 'verify', label: stri
 }
 
 const browserBaseUrl = new URL(import.meta.env.BASE_URL, window.location.href).href
-const browserHostCompileUrl = (() => {
-  const currentUrl = new URL(window.location.href)
-  if (currentUrl.hostname !== 'localhost' && currentUrl.hostname !== '127.0.0.1') {
-    return undefined
-  }
-  return new URL('/api/tinygo/compile', currentUrl).toString()
-})()
-
 const runtime = createTinyGoBrowserRuntime({
   baseUrl: browserBaseUrl,
-  hostCompileUrl: browserHostCompileUrl,
   initialLogs: [
     'wasm-tinygo bootstrap ready',
     'Plan the TinyGo build first, then execute the generated plan with emception',
