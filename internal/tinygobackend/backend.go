@@ -3197,6 +3197,23 @@ func Build(input Input) (Result, error) {
 									return "", false
 								}
 								translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftName.Name, translatedValue))
+							case *ast.IncDecStmt:
+								ident, ok := typedStatement.X.(*ast.Ident)
+								if !ok || ident.Name == "" {
+									return "", false
+								}
+								localKind, ok := locals[ident.Name]
+								if !ok || localKind != "int" {
+									return "", false
+								}
+								switch typedStatement.Tok {
+								case token.INC:
+									translatedStatements.WriteString(fmt.Sprintf("\t%s += 1;\n", ident.Name))
+								case token.DEC:
+									translatedStatements.WriteString(fmt.Sprintf("\t%s -= 1;\n", ident.Name))
+								default:
+									return "", false
+								}
 							case *ast.IfStmt:
 								if typedStatement.Init != nil {
 									return "", false
@@ -3230,6 +3247,96 @@ func Build(input Input) (Result, error) {
 									return "", false
 								}
 							}
+							case *ast.ForStmt:
+								loopLocals := map[string]string{}
+								for name, kind := range locals {
+									loopLocals[name] = kind
+								}
+								initFragment := ""
+								if typedStatement.Init != nil {
+									initAssign, ok := typedStatement.Init.(*ast.AssignStmt)
+									if !ok || len(initAssign.Lhs) != 1 || len(initAssign.Rhs) != 1 {
+										return "", false
+									}
+									leftName, ok := initAssign.Lhs[0].(*ast.Ident)
+									if !ok || leftName.Name == "" || leftName.Name == "_" {
+										return "", false
+									}
+									translatedValue, translatedKind, _, translatedOK := translateExpression(initAssign.Rhs[0], loopLocals)
+									if !translatedOK || translatedKind != "int" {
+										return "", false
+									}
+									switch initAssign.Tok {
+									case token.DEFINE:
+										if _, exists := loopLocals[leftName.Name]; exists {
+											return "", false
+										}
+										loopLocals[leftName.Name] = "int"
+										initFragment = fmt.Sprintf("int %s = %s", leftName.Name, translatedValue)
+									case token.ASSIGN:
+										localKind, ok := loopLocals[leftName.Name]
+										if !ok || localKind != "int" {
+											return "", false
+										}
+										initFragment = fmt.Sprintf("%s = %s", leftName.Name, translatedValue)
+									default:
+										return "", false
+									}
+								}
+								conditionFragment := "1"
+								if typedStatement.Cond != nil {
+									translatedCondition, conditionKind, _, conditionOK := translateExpression(typedStatement.Cond, loopLocals)
+									if !conditionOK || conditionKind != "int" {
+										return "", false
+									}
+									conditionFragment = translatedCondition
+								}
+								postFragment := ""
+								if typedStatement.Post != nil {
+									switch postStatement := typedStatement.Post.(type) {
+									case *ast.IncDecStmt:
+										postIdent, ok := postStatement.X.(*ast.Ident)
+										if !ok || postIdent.Name == "" {
+											return "", false
+										}
+										postKind, ok := loopLocals[postIdent.Name]
+										if !ok || postKind != "int" {
+											return "", false
+										}
+										switch postStatement.Tok {
+										case token.INC:
+											postFragment = fmt.Sprintf("%s += 1", postIdent.Name)
+										case token.DEC:
+											postFragment = fmt.Sprintf("%s -= 1", postIdent.Name)
+										default:
+											return "", false
+										}
+									case *ast.AssignStmt:
+										if len(postStatement.Lhs) != 1 || len(postStatement.Rhs) != 1 || postStatement.Tok != token.ASSIGN {
+											return "", false
+										}
+										postName, ok := postStatement.Lhs[0].(*ast.Ident)
+										if !ok || postName.Name == "" || postName.Name == "_" {
+											return "", false
+										}
+										postKind, ok := loopLocals[postName.Name]
+										if !ok || postKind != "int" {
+											return "", false
+										}
+										translatedValue, translatedKind, _, translatedOK := translateExpression(postStatement.Rhs[0], loopLocals)
+										if !translatedOK || translatedKind != "int" {
+											return "", false
+										}
+										postFragment = fmt.Sprintf("%s = %s", postName.Name, translatedValue)
+									default:
+										return "", false
+									}
+								}
+								translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, loopLocals, functionReturnsInt)
+								if !bodyOK {
+									return "", false
+								}
+								translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
 							case *ast.ReturnStmt:
 								if functionReturnsInt {
 									if len(typedStatement.Results) != 1 {
