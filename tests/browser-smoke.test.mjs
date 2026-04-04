@@ -69,6 +69,28 @@ func main() {
 }
 `,
   }
+  const staticImportedWorkspaceFiles = {
+    'go.mod': `module example.com/staticimport
+
+go 1.22
+`,
+    'helper/helper.go': `package helper
+
+import "fmt"
+
+func Run() {
+\tfmt.Println("import-ok")
+}
+`,
+    'main.go': `package main
+
+import "example.com/staticimport/helper"
+
+func main() {
+\thelper.Run()
+}
+`,
+  }
   const listenError = await new Promise((resolve) => {
     const server = createServer()
     server.once('error', (error) => resolve(error))
@@ -314,14 +336,13 @@ func main() {
   assert.match(phases.join('\n'), /build driver plan\s+\d+ steps/)
   assert.match(phases.join('\n'), /build execution\s+[\d,]+ bytes/)
   assert.match(phases.join('\n'), /front-end verification\s+verified/)
-  assert.match(buildArtifact?.path ?? '', /main\.wasm$/)
+  assert.match(buildArtifact?.path ?? '', /\/(?:main|out)\.wasm$/)
   assert.equal(buildArtifact?.byteLength > 0, true)
   assert.equal(buildArtifact?.artifactKind, 'execution')
   assert.equal(buildArtifact?.runnable, true)
   assert.match(buildArtifact?.entrypoint ?? '', /^(?:_(?:start|initialize)|main)$/)
   assert.equal(buildArtifact?.reason, undefined)
   assert.deepEqual(frontendAnalysisInputManifest, driverBridgeManifest.frontendAnalysisInput)
-  assert.match(activity ?? '', /bootstrap roundtrip verified/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-sources\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-bitcode\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-ir\.json/)
@@ -338,10 +359,7 @@ func main() {
   assert.match(activity ?? '', /\$ \/usr\/bin\/wasm-ld .*\/working\/tinygo-work\/.*\.bc .* -o \/working\/out\.wasm/)
   assert.match(activity ?? '', /frontend final artifact verified format=wasm output=\/working\/out\.wasm/)
   assert.match(activity ?? '', /frontend final artifact compiled module=ok/)
-  assert.match(activity ?? '', /build artifact execution blocked: final artifact has no supported WASI entrypoint/)
-  assert.match(activity ?? '', /tinygo host compile ready: target=wasip1 scheduler=asyncify version=/)
-  assert.match(activity ?? '', /tinygo host artifact built: .*main\.wasm \([\d,]+ bytes\)/)
-  assert.match(activity ?? '', /execution artifact ready: .*main\.wasm \([\d,]+ bytes\)/)
+  assert.match(activity ?? '', /execution artifact ready: .*\/(?:main|out)\.wasm \([\d,]+ bytes\)/)
   assert.match(activity ?? '', /execution artifact entrypoint=(?:_(?:start|initialize)|main)/)
   assert.match(activity ?? '', /browser-ok/)
   assert.match(activity ?? '', /execution artifact completed exitCode=0/)
@@ -359,7 +377,6 @@ func main() {
   assert.match(activity ?? '', /frontend bridge verified target=wasm llvm=wasm32-unknown-wasi program=main imports=1 packages=[1-9]\d*/)
   assert.match(activity ?? '', /frontend bridge coverage compileUnits=[1-9]\d* graphPackages=[1-9]\d* coveredPackages=[1-9]\d*\/[1-9]\d* compileUnitFiles=[1-9]\d* coveredFiles=[1-9]\d*\/[1-9]\d* depOnly=[1-9]\d* standard=[1-9]\d* local=2 alias=direct/)
   assert.match(activity ?? '', /frontend bridge toolchain version=.*0\.40\.1/)
-  assert.match(activity ?? '', /frontend lowered probe verified units=\d+ kinds=\d+ hashes=\d+ imports=\d+ importPaths=\d+ blankImports=\d+ dotImports=\d+ aliasedImports=\d+ funcs=\d+ funcNameHashes=\d+ funcLiterals=\d+ funcParameters=\d+ funcResults=\d+ variadicParameters=\d+ namedResults=\d+ typeParameters=\d+ genericFunctions=\d+ genericTypes=\d+ calls=\d+ builtinCalls=\d+ appendCalls=\d+ lenCalls=\d+ makeCalls=\d+ capCalls=\d+ copyCalls=\d+ panicCalls=\d+ recoverCalls=\d+ newCalls=\d+ deleteCalls=\d+ compositeLiterals=\d+ selectorExpressions=\d+ selectorNameHashes=\d+ indexExpressions=\d+ sliceExpressions=\d+ keyValueExpressions=\d+ typeAssertions=\d+ blankIdentifiers=\d+ blankAssignmentTargets=\d+ unaryExpressions=\d+ binaryExpressions=\d+ sends=\d+ receives=\d+ assignments=\d+ defines=\d+ increments=\d+ decrements=\d+ returns=\d+ goStatements=\d+ deferStatements=\d+ ifStatements=\d+ rangeStatements=\d+ switchStatements=\d+ typeSwitchStatements=\d+ typeSwitchCases=\d+ typeSwitchGuardNameHashes=\d+ typeSwitchCaseTypeHashes=\d+ selectStatements=\d+ switchCases=\d+ selectClauses=\d+ forStatements=\d+ breakStatements=\d+ breakLabelNameHashes=\d+ continueStatements=\d+ continueLabelNameHashes=\d+ labels=\d+ labelNameHashes=\d+ gotos=\d+ gotoLabelNameHashes=\d+ fallthroughs=\d+ methods=\d+ methodNameHashes=\d+ methodSignatureHashes=\d+ exportedMethodNameHashes=\d+ exportedMethodSignatureHashes=\d+ exports=\d+ exportedFunctionNameHashes=\d+ types=\d+ typeNameHashes=\d+ exportedTypes=\d+ exportedTypeNameHashes=\d+ structs=\d+ interfaces=\d+ mapTypes=\d+ chanTypes=\d+ sendOnlyChanTypes=\d+ receiveOnlyChanTypes=\d+ arrayTypes=\d+ sliceTypes=\d+ pointerTypes=\d+ structFields=\d+ embeddedStructFields=\d+ taggedStructFields=\d+ structFieldNameHashes=\d+ structFieldTypeHashes=\d+ embeddedStructFieldTypeHashes=\d+ taggedStructFieldTagHashes=\d+ interfaceMethods=\d+ interfaceMethodNameHashes=\d+ interfaceMethodSignatureHashes=\d+ embeddedInterfaceMethods=\d+ embeddedInterfaceMethodNameHashes=\d+ consts=\d+ constNameHashes=\d+ vars=\d+ varNameHashes=\d+ exportedConsts=\d+ exportedConstNameHashes=\d+ exportedVars=\d+ exportedVarNameHashes=\d+ declarationCounts=\d+ declarationNameHashes=\d+ declarationSignatureHashes=\d+ declarationKindHashes=\d+ declarationExportedCounts=\d+ declarationExportedNameHashes=\d+ declarationExportedSignatureHashes=\d+ declarationExportedKindHashes=\d+ declarationMethodCounts=\d+ declarationMethodNameHashes=\d+ declarationMethodSignatureHashes=\d+ declarationMethodKindHashes=\d+ placeholderBlocks=\d+ placeholderBlockHashes=\d+ placeholderBlockSignatureHashes=\d+ placeholderBlockRuntimeHashes=\d+ loweringBlocks=\d+ loweringBlockHashes=\d+ loweringBlockRuntimeHashes=\d+ mains=\d+ inits=\d+/)
   assert.doesNotMatch(activity ?? '', /build artifact execution blocked: bootstrap artifact has no WASI entrypoint/)
   assert.doesNotMatch(activity ?? '', /bootstrap exports checksum=/)
   assert.doesNotMatch(activity ?? '', /bootstrap exports manifestBytes=/)
@@ -879,25 +896,18 @@ func main() {
   })
   const staticFallbackPhases = await page.locator('[data-phase]').allTextContents()
   const staticFallbackActivity = await page.locator('#terminal-output').textContent()
-  assert.match(staticFallbackPhases.join('\n'), /build execution\s+failed/)
-  assert.match(staticFallbackPhases.join('\n'), /front-end verification\s+failed/)
+  assert.match(staticFallbackPhases.join('\n'), /build execution\s+[\d,]+ bytes/)
+  assert.match(staticFallbackPhases.join('\n'), /front-end verification\s+verified/)
   assert.match(staticFallbackArtifact?.path ?? '', /\/working\/out\.wasm$/)
-  assert.equal(staticFallbackArtifact?.artifactKind, 'probe')
-  assert.equal(staticFallbackArtifact?.runnable, false)
-  assert.equal(staticFallbackArtifact?.entrypoint, null)
-  assert.equal(staticFallbackArtifact?.reason, 'missing-wasi-entrypoint')
-  assert.match(
-    staticFallbackActivity ?? '',
-    /build artifact execution blocked: backend emitted a probe-only final artifact at \/working\/out\.wasm/,
-  )
-  assert.match(
-    staticFallbackActivity ?? '',
-    /build execution failed: browser runtime stopped before preparing a runnable execution artifact because the backend emitted a probe-only command artifact and the host compile seam was unavailable/,
-  )
-  assert.match(staticFallbackActivity ?? '', /\$ \/usr\/bin\/wasm-ld .*\/working\/tinygo-work\/.*\.bc .* -o \/working\/out\.wasm/)
-  assert.doesNotMatch(staticFallbackActivity ?? '', /\.exec\.wasm/)
-  assert.doesNotMatch(staticFallbackActivity ?? '', /build execution failed: execution artifact did not expose a supported WASI entrypoint/)
-  assert.doesNotMatch(staticFallbackActivity ?? '', /build artifact execution blocked: bootstrap artifact has no WASI entrypoint/)
+  assert.equal(staticFallbackArtifact?.artifactKind, 'execution')
+  assert.equal(staticFallbackArtifact?.runnable, true)
+  assert.equal(staticFallbackArtifact?.entrypoint, 'main')
+  assert.equal(staticFallbackArtifact?.reason, undefined)
+  assert.match(staticFallbackActivity ?? '', /execution artifact ready: \/working\/out\.wasm \([\d,]+ bytes\)/)
+  assert.match(staticFallbackActivity ?? '', /execution artifact entrypoint=main/)
+  assert.match(staticFallbackActivity ?? '', /browser-ok/)
+  assert.match(staticFallbackActivity ?? '', /execution artifact completed exitCode=0/)
+  assert.doesNotMatch(staticFallbackActivity ?? '', /tinygo host compile ready:/)
 
   await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
   await page.waitForFunction(
@@ -948,5 +958,39 @@ func main() {
   assert.doesNotMatch(staticExecutionActivity ?? '', /tinygo host compile ready:/)
   assert.doesNotMatch(staticExecutionActivity ?? '', /build artifact execution blocked:/)
   assert.doesNotMatch(staticExecutionActivity ?? '', /\.exec\.wasm/)
+
+  await page.evaluate(() => window.__wasmTinygoTestHooks.reset())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), staticImportedWorkspaceFiles)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setDriverBridgeManifest(null))
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+
+  const staticImportedArtifact = await page.evaluate(() => {
+    const artifact = window.__wasmTinygoTestHooks.readBuildArtifact()
+    if (!artifact) {
+      return null
+    }
+    return {
+      path: artifact.path,
+      artifactKind: artifact.artifactKind,
+      runnable: artifact.runnable,
+      entrypoint: artifact.entrypoint,
+      reason: artifact.reason,
+    }
+  })
+  const staticImportedPhases = await page.locator('[data-phase]').allTextContents()
+  const staticImportedActivity = await page.locator('#terminal-output').textContent()
+  assert.match(staticImportedPhases.join('\n'), /build execution\s+[\d,]+ bytes/)
+  assert.match(staticImportedPhases.join('\n'), /front-end verification\s+verified/)
+  assert.match(staticImportedArtifact?.path ?? '', /\/working\/out\.wasm$/)
+  assert.equal(staticImportedArtifact?.artifactKind, 'execution')
+  assert.equal(staticImportedArtifact?.runnable, true)
+  assert.equal(staticImportedArtifact?.entrypoint, 'main')
+  assert.equal(staticImportedArtifact?.reason, undefined)
+  assert.match(staticImportedActivity ?? '', /import-ok/)
+  assert.match(staticImportedActivity ?? '', /execution artifact completed exitCode=0/)
+  assert.doesNotMatch(staticImportedActivity ?? '', /tinygo host compile ready:/)
   await page.unroute('**/api/tinygo/compile')
 })
