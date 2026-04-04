@@ -938,6 +938,56 @@ func TestBuildProducesRunnableExecutionArtifactsForImportedWorkspacePackageSubse
 	}
 }
 
+func TestBuildProducesRunnableExecutionArtifactsForSimpleForLoopSubset(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.go")
+	sourceContents := "package main\n\nfunc main() {\n\tsum := 0\n\tfor i := 0; i < 3; i++ {\n\t\tsum = sum + i\n\t}\n\tprintln(sum)\n}\n"
+	if err := os.WriteFile(sourcePath, []byte(sourceContents), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(source): %v", err)
+	}
+
+	result, err := Build(Input{
+		EntryFile: sourcePath,
+		CompileJobs: []CompileJob{
+			{
+				ID:                "program-000",
+				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{},
+				DepOnly:           false,
+				ModulePath:        "example.com/staticprobe",
+				PackageName:       "main",
+				PackageDir:        dir,
+				Files:             []string{sourcePath},
+				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory"},
+				OptimizeFlag:      "-Oz",
+				Standard:          false,
+			},
+		},
+		LinkJob: LinkJob{
+			Linker:             "wasm-ld",
+			LDFlags:            []string{"--stack-first", "--no-demangle", "--no-entry", "--export-all"},
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	loweredSourceContents := result.GeneratedFiles[2].Contents
+	if !strings.Contains(loweredSourceContents, "for (int i = 0; (i < 3); i += 1) {") {
+		t.Fatalf("expected lowered source to lower for loop, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "sum = (sum + i);") {
+		t.Fatalf("expected lowered source to lower loop body assignment, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32(sum, 1);") {
+		t.Fatalf("expected lowered source to lower println(sum), got: %q", loweredSourceContents)
+	}
+}
+
 func TestBuildParsesBlankAndDotImportCountsWhenFilesExist(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "main.go")
