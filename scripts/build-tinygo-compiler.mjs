@@ -4,8 +4,24 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { ensureTinyGoSourceReady } from './fetch-tinygo-source.mjs'
+import { patchTinyGoSourceForWasi } from './patch-tinygo-wasi.mjs'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+const classifyTinyGoCompilerBlockers = (details) => {
+  const blockers = []
+  const push = (value, pattern) => {
+    if (pattern.test(details) && !blockers.includes(value)) {
+      blockers.push(value)
+    }
+  }
+  push('serial', /go\.bug\.st\/serial|nativeGetDetailedPortsList|nativeGetPortsList|nativeOpen/i)
+  push('tty', /github\.com\/mattn\/go-tty|tty_unix\.go|unix\.Termios|IoctlGetTermios/i)
+  push('flock', /github\.com\/gofrs\/flock|syscall\.Flock|LOCK_EX|LOCK_SH|LOCK_UN/i)
+  push('go-llvm', /tinygo\.org\/x\/go-llvm|string\.go:.*TypeKind|llvm_dep\.go:.*run_build_sh/i)
+  push('tinygo-cgo', /github\.com\/tinygo-org\/tinygo\/cgo|cgo\/cgo\.go:.*clangCursor|cgo\/libclang\.go/i)
+  return blockers
+}
 
 const runGo = ({ argv, cwd, env }) => {
   const result = spawnSync(argv[0], argv.slice(1), {
@@ -28,11 +44,24 @@ const runGo = ({ argv, cwd, env }) => {
   return result
 }
 
+const tryRunGo = ({ argv, cwd, env }) => {
+  const result = spawnSync(argv[0], argv.slice(1), {
+    cwd,
+    env,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (result.error) {
+    throw new Error(`TinyGo wasm compiler build failed: go is not available (${result.error.message})`)
+  }
+  return result
+}
+
 const resolveCompilerPaths = async () => {
   const outputPath =
     process.env.WASM_TINYGO_COMPILER_OUTPUT_PATH ??
     path.join(rootDir, 'public', 'tools', 'tinygo-compiler.wasm')
-  const mainPath = process.env.WASM_TINYGO_COMPILER_MAIN_PATH ?? 'cmd/tinygo'
+  const mainPath = process.env.WASM_TINYGO_COMPILER_MAIN_PATH ?? '.'
   return { outputPath, mainPath }
 }
 
@@ -53,11 +82,25 @@ export const buildTinyGoCompilerWasm = async () => {
     GOWORK: 'off',
   }
 
-  runGo({
+  let buildMode = 'direct'
+  let fallbackReason = null
+  let blockers = []
+  const initialBuild = tryRunGo({
     argv: ['go', 'build', '-o', outputPath, resolvedMainPath],
     cwd: source.rootPath,
     env,
   })
+  if (initialBuild.status !== 0) {
+    const patch = await patchTinyGoSourceForWasi(source.rootPath)
+    buildMode = 'patched-wasi-probe'
+    fallbackReason = [initialBuild.stdout, initialBuild.stderr].join('').trim()
+    blockers = classifyTinyGoCompilerBlockers(fallbackReason)
+    runGo({
+      argv: ['go', 'build', '-o', outputPath, patch.commandPath],
+      cwd: source.rootPath,
+      env,
+    })
+  }
 
   const manifestPath =
     process.env.WASM_TINYGO_COMPILER_MANIFEST_PATH ??
@@ -70,6 +113,10 @@ export const buildTinyGoCompilerWasm = async () => {
         sourceRef: source.sourceRef,
         sourceUrl: source.sourceUrl,
         sourceVersion: source.sourceVersion,
+        buildMode,
+        fallbackReason,
+        blockers,
+        artifactKind: buildMode === 'direct' ? 'compiler' : 'bootstrap',
         outputPath,
         wasmBytes: wasmBytes.length,
       },
@@ -80,6 +127,8 @@ export const buildTinyGoCompilerWasm = async () => {
 
   return { outputPath, manifestPath, source }
 }
+
+export { classifyTinyGoCompilerBlockers }
 
 const run = async () => {
   const result = await buildTinyGoCompilerWasm()

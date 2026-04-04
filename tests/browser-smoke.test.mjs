@@ -304,6 +304,7 @@ func main() {
   await page.waitForFunction(
     () =>
       typeof window.__wasmTinygoTestHooks?.boot === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.runUpstreamProbe === 'function' &&
       typeof window.__wasmTinygoTestHooks?.readFrontendAnalysisInputManifest === 'function' &&
       typeof window.__wasmTinygoTestHooks?.setBuildRequestOverrides === 'function' &&
       typeof window.__wasmTinygoTestHooks?.setDriverBridgeManifest === 'function' &&
@@ -311,6 +312,15 @@ func main() {
     null,
     { timeout: 120000 },
   )
+
+  const upstreamProbe = await page.evaluate(() => window.__wasmTinygoTestHooks.runUpstreamProbe())
+  assert.equal(upstreamProbe.requestedTarget, 'wasip1')
+  assert.equal(upstreamProbe.resolvedGoos, 'wasip1')
+  assert.equal(upstreamProbe.resolvedGoarch, 'wasm')
+  assert.equal(upstreamProbe.triple, 'wasm32-unknown-wasi')
+  assert.equal(Array.isArray(upstreamProbe.buildTags), true)
+  assert.equal(upstreamProbe.buildTags.includes('tinygo.wasm'), true)
+  assert.equal(upstreamProbe.scheduler, 'asyncify')
 
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
@@ -355,7 +365,8 @@ func main() {
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-bitcode\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-ir\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered\/program-000\.c/)
-  assert.match(activity ?? '', /tinygo compiler module loaded from tools\/tinygo-compiler\.wasm/)
+  assert.match(activity ?? '', /patched upstream TinyGo WASI probe verified target=wasip1 triple=wasm32-unknown-wasi scheduler=asyncify/)
+  assert.match(activity ?? '', /tinygo bootstrap module loaded from tools\/tinygo-compiler\.wasm \(mode=patched-wasi-probe blockers=serial,tty,flock,go-llvm,tinygo-cgo\)/)
   assert.match(activity ?? '', /backend lowered ir units=\d+ imports=\d+ functions=\d+ types=\d+ consts=\d+ vars=\d+ decls=\d+/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-command-batch\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-artifact\.json/)

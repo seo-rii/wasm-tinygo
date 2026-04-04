@@ -76,7 +76,7 @@ export type TinyGoBuildPlanInputs = {
   workspaceFiles: Record<string, string> | null
 }
 
-type TinyGoRuntimeAction = 'booting' | 'planning' | 'executing'
+type TinyGoRuntimeAction = 'booting' | 'planning' | 'executing' | 'upstream-probe'
 
 export type ToolInvocation = {
   argv: string[]
@@ -140,10 +140,28 @@ export type TinyGoBuildArtifact = {
   reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
 }
 
+type TinyGoCompilerManifest = {
+  buildMode?: string
+  artifactKind?: 'compiler' | 'bootstrap'
+  blockers?: string[]
+}
+
+export type TinyGoUpstreamProbeResult = {
+  requestedTarget: string
+  resolvedGoos: string
+  resolvedGoarch: string
+  triple: string
+  buildTags: string[]
+  gc: string
+  scheduler: string
+  linker: string
+}
+
 export type TinyGoTestHooks = {
   boot(): Promise<void>
   plan(): Promise<TinyGoBuildResult>
   execute(): Promise<void>
+  runUpstreamProbe(): Promise<TinyGoUpstreamProbeResult>
   reset(): void
   readActivityLog(): string
   readBuildArtifact(): TinyGoBuildArtifact | null
@@ -267,6 +285,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
   let activeAction: TinyGoRuntimeAction | null = null
   let buildStateVersion = 0
   let activityLog = ''
+  let compilerManifestPromise: Promise<TinyGoCompilerManifest | null> | null = null
   let rustRuntimeManifestLoaded = false
 
   const setControlsLocked = (locked: boolean) => {
@@ -309,10 +328,36 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       assetBaseUrl,
     })
 
+  const loadCompilerManifest = async (): Promise<TinyGoCompilerManifest | null> => {
+    if (compilerManifestPromise === null) {
+      compilerManifestPromise = (async () => {
+        try {
+          const manifestBytes = await loadAssetBytes('tools/tinygo-compiler.json', 'tinygo-compiler.json')
+          return JSON.parse(textDecoder.decode(manifestBytes)) as TinyGoCompilerManifest
+        } catch {
+          return null
+        }
+      })()
+    }
+    return await compilerManifestPromise
+  }
+
   const loadCompilerModuleBytes = async () => {
     try {
+      const compilerManifest = await loadCompilerManifest()
       const compilerBytes = await loadAssetBytes('tools/tinygo-compiler.wasm', 'tinygo-compiler.wasm')
-      appendLog('tinygo compiler module loaded from tools/tinygo-compiler.wasm', 'success')
+      if (compilerManifest?.artifactKind === 'bootstrap' || compilerManifest?.buildMode === 'patched-wasi-probe') {
+        const blockers =
+          Array.isArray(compilerManifest.blockers) && compilerManifest.blockers.length > 0
+            ? ` blockers=${compilerManifest.blockers.join(',')}`
+            : ''
+        appendLog(
+          `tinygo bootstrap module loaded from tools/tinygo-compiler.wasm (mode=${compilerManifest.buildMode ?? 'unknown'}${blockers})`,
+          'success',
+        )
+      } else {
+        appendLog('tinygo compiler module loaded from tools/tinygo-compiler.wasm (mode=direct)', 'success')
+      }
       return compilerBytes
     } catch (error) {
       appendLog('tinygo compiler module fallback to tools/go-probe.wasm', 'idle')
@@ -334,6 +379,62 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
       ? bytes.buffer
       : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+
+  const runUpstreamProbe = async (): Promise<TinyGoUpstreamProbeResult> => {
+    const [probeBytes, targetSource, zversionSource, armSource] = await Promise.all([
+      loadAssetBytes('tools/tinygo-upstream-probe.wasm', 'tinygo-upstream-probe.wasm'),
+      loadAssetBytes('tools/tinygo-upstream-probe/targets/wasip1.json', 'tinygo-upstream-probe target wasip1.json'),
+      loadAssetBytes('tools/tinygo-upstream-probe/src/runtime/internal/sys/zversion.go', 'tinygo-upstream-probe zversion.go'),
+      loadAssetBytes('tools/tinygo-upstream-probe/src/device/arm/arm.go', 'tinygo-upstream-probe arm.go'),
+    ])
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
+    const tinygoRoot = new PreopenDirectory(
+      '/tinygo-root',
+      buildDirectoryContentsFromTextEntries(
+        {
+          'targets/wasip1.json': textDecoder.decode(targetSource),
+          'src/runtime/internal/sys/zversion.go': textDecoder.decode(zversionSource),
+          'src/device/arm/arm.go': textDecoder.decode(armSource),
+        },
+        textEncoder,
+      ),
+    )
+    const stdout = ConsoleStdout.lineBuffered((line) => stdoutLines.push(line))
+    const stderr = ConsoleStdout.lineBuffered((line) => stderrLines.push(line))
+    const wasi = new WASI(
+      ['tinygo-upstream-probe'],
+      ['TINYGOROOT=/tinygo-root', 'TINYGO_WASI_TARGET=wasip1'],
+      [new OpenFile(new File([])), stdout, stderr, tinygoRoot],
+    )
+    const instance = await instantiateWasiModule(probeBytes, {
+      wasi_snapshot_preview1: wasi.wasiImport,
+    })
+
+    let exitCode = 0
+    try {
+      exitCode = wasi.start(instance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+    } catch (error) {
+      if (error instanceof WASIProcExit) {
+        exitCode = error.code
+      } else {
+        throw error
+      }
+    }
+
+    if (exitCode !== 0) {
+      throw new Error(
+        stderrLines.join('\n').trim() ||
+          stdoutLines.join('\n').trim() ||
+          `tinygo upstream probe exited with code ${exitCode}`,
+      )
+    }
+    if (stderrLines.length) {
+      throw new Error(stderrLines.join('\n'))
+    }
+
+    return JSON.parse(stdoutLines.join('\n')) as TinyGoUpstreamProbeResult
+  }
 
   void loadRustRuntimeAssetBytes('runtime-manifest.v3.json', 'wasm-rust runtime manifest')
 
@@ -1652,6 +1753,16 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         await executeBuildPlan()
       })
     },
+    runUpstreamProbe: async () =>
+      await runWithAction('upstream-probe', async () => {
+        appendLog('running patched upstream TinyGo WASI probe', 'running')
+        const result = await runUpstreamProbe()
+        appendLog(
+          `patched upstream TinyGo WASI probe verified target=${result.requestedTarget} triple=${result.triple} scheduler=${result.scheduler}`,
+          'success',
+        )
+        return result
+      }),
     reset: () => {
       ensureActionIdle()
       disposeEmceptionRuntime()
