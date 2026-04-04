@@ -355,6 +355,7 @@ func main() {
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-bitcode\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-ir\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered\/program-000\.c/)
+  assert.match(activity ?? '', /tinygo compiler module loaded from tools\/tinygo-compiler\.wasm/)
   assert.match(activity ?? '', /backend lowered ir units=\d+ imports=\d+ functions=\d+ types=\d+ consts=\d+ vars=\d+ decls=\d+/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-command-batch\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-artifact\.json/)
