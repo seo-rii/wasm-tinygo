@@ -233,6 +233,377 @@ func Build(input Input) (Result, error) {
 	for _, loweredUnit := range loweredUnits {
 		loweredUnitsByID[loweredUnit.ID] = loweredUnit
 	}
+	loweredUnitsByImportPath := map[string]LoweredUnit{}
+	for _, loweredUnit := range loweredUnits {
+		if loweredUnit.ImportPath != "" {
+			loweredUnitsByImportPath[loweredUnit.ImportPath] = loweredUnit
+		}
+	}
+	type runnablePackage struct {
+		UnitID              string
+		Kind                string
+		PackageName         string
+		ImportOrder         []string
+		AliasToImportPath   map[string]string
+		ImportedPackages    map[string]*runnablePackage
+		ConstantOrder       []string
+		ConstantDefinitions map[string]string
+		ConstantSymbols     map[string]string
+		FunctionOrder       []string
+		FunctionDecls       map[string]*ast.FuncDecl
+		FunctionReturnsInt  map[string]bool
+		FunctionParameters  map[string][]string
+		FunctionSymbols     map[string]string
+	}
+	supportedRunnableImports := map[string]struct{}{
+		"bufio":   {},
+		"fmt":     {},
+		"os":      {},
+		"strconv": {},
+		"strings": {},
+	}
+	runnablePackageCache := map[string]*runnablePackage{}
+	runnablePackageFailures := map[string]bool{}
+	runnablePackageLoading := map[string]bool{}
+	var loadRunnablePackage func(LoweredUnit) (*runnablePackage, bool)
+	loadRunnablePackage = func(loweredUnit LoweredUnit) (*runnablePackage, bool) {
+		if loweredUnit.Kind != "program" && loweredUnit.Kind != "imported" {
+			return nil, false
+		}
+		if cached, ok := runnablePackageCache[loweredUnit.ID]; ok {
+			return cached, true
+		}
+		if runnablePackageFailures[loweredUnit.ID] || runnablePackageLoading[loweredUnit.ID] {
+			return nil, false
+		}
+		runnablePackageLoading[loweredUnit.ID] = true
+		defer delete(runnablePackageLoading, loweredUnit.ID)
+		symbolID := strings.NewReplacer("-", "_", "/", "_", ".", "_").Replace(loweredUnit.ID)
+		pkg := &runnablePackage{
+			UnitID:              loweredUnit.ID,
+			Kind:                loweredUnit.Kind,
+			PackageName:         loweredUnit.PackageName,
+			ImportOrder:         make([]string, 0),
+			AliasToImportPath:   map[string]string{},
+			ImportedPackages:    map[string]*runnablePackage{},
+			ConstantOrder:       make([]string, 0),
+			ConstantDefinitions: map[string]string{},
+			ConstantSymbols:     map[string]string{},
+			FunctionOrder:       make([]string, 0),
+			FunctionDecls:       map[string]*ast.FuncDecl{},
+			FunctionReturnsInt:  map[string]bool{},
+			FunctionParameters:  map[string][]string{},
+			FunctionSymbols:     map[string]string{},
+		}
+		for _, filePath := range loweredUnit.SourceFiles {
+			if !strings.HasSuffix(filePath, ".go") {
+				runnablePackageFailures[loweredUnit.ID] = true
+				return nil, false
+			}
+			sourceBytes, readErr := os.ReadFile(filePath)
+			if readErr != nil {
+				runnablePackageFailures[loweredUnit.ID] = true
+				return nil, false
+			}
+			parsedFile, parseErr := parser.ParseFile(token.NewFileSet(), filePath, sourceBytes, 0)
+			if parseErr != nil {
+				runnablePackageFailures[loweredUnit.ID] = true
+				return nil, false
+			}
+			if parsedFile.Name != nil && parsedFile.Name.Name != "" {
+				if pkg.PackageName != "" && pkg.PackageName != parsedFile.Name.Name {
+					runnablePackageFailures[loweredUnit.ID] = true
+					return nil, false
+				}
+				pkg.PackageName = parsedFile.Name.Name
+			}
+			for _, decl := range parsedFile.Decls {
+				switch typedDecl := decl.(type) {
+				case *ast.GenDecl:
+					switch typedDecl.Tok {
+					case token.IMPORT:
+						for _, spec := range typedDecl.Specs {
+							importSpec, ok := spec.(*ast.ImportSpec)
+							if !ok || importSpec.Path == nil {
+								runnablePackageFailures[loweredUnit.ID] = true
+								return nil, false
+							}
+							importPath, err := strconv.Unquote(importSpec.Path.Value)
+							if err != nil {
+								runnablePackageFailures[loweredUnit.ID] = true
+								return nil, false
+							}
+							alias := path.Base(importPath)
+							if importSpec.Name != nil {
+								if importSpec.Name.Name == "_" || importSpec.Name.Name == "." || importSpec.Name.Name == "" {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								alias = importSpec.Name.Name
+							}
+							if alias == "" {
+								runnablePackageFailures[loweredUnit.ID] = true
+								return nil, false
+							}
+							if existingImportPath, ok := pkg.AliasToImportPath[alias]; ok {
+								if existingImportPath != importPath {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								continue
+							}
+							pkg.AliasToImportPath[alias] = importPath
+							pkg.ImportOrder = append(pkg.ImportOrder, importPath)
+						}
+					case token.CONST:
+						for _, spec := range typedDecl.Specs {
+							valueSpec, ok := spec.(*ast.ValueSpec)
+							if !ok || len(valueSpec.Names) == 0 || len(valueSpec.Values) != len(valueSpec.Names) {
+								runnablePackageFailures[loweredUnit.ID] = true
+								return nil, false
+							}
+							if valueSpec.Type != nil {
+								typeIdent, ok := valueSpec.Type.(*ast.Ident)
+								if !ok || typeIdent.Name != "int" {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+							}
+							for index, name := range valueSpec.Names {
+								if name == nil || name.Name == "" {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								if _, ok := pkg.ConstantDefinitions[name.Name]; ok {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								constantSymbol := name.Name
+								if loweredUnit.Kind != "program" {
+									constantSymbol = fmt.Sprintf("tinygo_%s_%s", symbolID, name.Name)
+								}
+								switch typedValue := valueSpec.Values[index].(type) {
+								case *ast.BasicLit:
+									if typedValue.Kind != token.INT {
+										runnablePackageFailures[loweredUnit.ID] = true
+										return nil, false
+									}
+									pkg.ConstantOrder = append(pkg.ConstantOrder, name.Name)
+									pkg.ConstantSymbols[name.Name] = constantSymbol
+									pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", constantSymbol, typedValue.Value)
+								case *ast.UnaryExpr:
+									if typedValue.Op != token.SUB {
+										runnablePackageFailures[loweredUnit.ID] = true
+										return nil, false
+									}
+									basicValue, ok := typedValue.X.(*ast.BasicLit)
+									if !ok || basicValue.Kind != token.INT {
+										runnablePackageFailures[loweredUnit.ID] = true
+										return nil, false
+									}
+									pkg.ConstantOrder = append(pkg.ConstantOrder, name.Name)
+									pkg.ConstantSymbols[name.Name] = constantSymbol
+									pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = -%s;\n", constantSymbol, basicValue.Value)
+								default:
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+							}
+						}
+					default:
+						runnablePackageFailures[loweredUnit.ID] = true
+						return nil, false
+					}
+				case *ast.FuncDecl:
+					if typedDecl.Recv != nil || typedDecl.Type == nil || typedDecl.Name == nil || typedDecl.Name.Name == "" || typedDecl.Body == nil || typedDecl.Type.TypeParams != nil {
+						runnablePackageFailures[loweredUnit.ID] = true
+						return nil, false
+					}
+					if _, ok := pkg.FunctionDecls[typedDecl.Name.Name]; ok {
+						runnablePackageFailures[loweredUnit.ID] = true
+						return nil, false
+					}
+					functionParameters := make([]string, 0)
+					if typedDecl.Type.Params != nil {
+						for _, field := range typedDecl.Type.Params.List {
+							typeIdent, ok := field.Type.(*ast.Ident)
+							if !ok || typeIdent.Name != "int" || len(field.Names) == 0 {
+								runnablePackageFailures[loweredUnit.ID] = true
+								return nil, false
+							}
+							for _, name := range field.Names {
+								if name == nil || name.Name == "" {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								functionParameters = append(functionParameters, name.Name)
+							}
+						}
+					}
+					functionReturnsInt := false
+					if typedDecl.Type.Results != nil {
+						if len(typedDecl.Type.Results.List) != 1 {
+							runnablePackageFailures[loweredUnit.ID] = true
+							return nil, false
+						}
+						resultField := typedDecl.Type.Results.List[0]
+						typeIdent, ok := resultField.Type.(*ast.Ident)
+						if !ok || typeIdent.Name != "int" || len(resultField.Names) > 1 {
+							runnablePackageFailures[loweredUnit.ID] = true
+							return nil, false
+						}
+						functionReturnsInt = true
+					}
+					functionSymbol := typedDecl.Name.Name
+					if loweredUnit.Kind != "program" {
+						functionSymbol = fmt.Sprintf("tinygo_%s_%s", symbolID, typedDecl.Name.Name)
+					}
+					pkg.FunctionOrder = append(pkg.FunctionOrder, typedDecl.Name.Name)
+					pkg.FunctionDecls[typedDecl.Name.Name] = typedDecl
+					pkg.FunctionReturnsInt[typedDecl.Name.Name] = functionReturnsInt
+					pkg.FunctionParameters[typedDecl.Name.Name] = append([]string{}, functionParameters...)
+					pkg.FunctionSymbols[typedDecl.Name.Name] = functionSymbol
+				default:
+					runnablePackageFailures[loweredUnit.ID] = true
+					return nil, false
+				}
+			}
+		}
+		if loweredUnit.Kind == "program" {
+			if _, ok := pkg.FunctionSymbols["main"]; !ok {
+				runnablePackageFailures[loweredUnit.ID] = true
+				return nil, false
+			}
+			if pkg.FunctionReturnsInt["main"] || len(pkg.FunctionParameters["main"]) != 0 {
+				runnablePackageFailures[loweredUnit.ID] = true
+				return nil, false
+			}
+		}
+		for _, importPath := range pkg.ImportOrder {
+			if _, ok := supportedRunnableImports[importPath]; ok {
+				continue
+			}
+			importedUnit, ok := loweredUnitsByImportPath[importPath]
+			if !ok || importedUnit.Kind != "imported" {
+				runnablePackageFailures[loweredUnit.ID] = true
+				return nil, false
+			}
+			importedPackage, ok := loadRunnablePackage(importedUnit)
+			if !ok {
+				runnablePackageFailures[loweredUnit.ID] = true
+				return nil, false
+			}
+			pkg.ImportedPackages[importPath] = importedPackage
+		}
+		runnablePackageCache[loweredUnit.ID] = pkg
+		return pkg, true
+	}
+
+	importedRunnableSymbolsByPath := map[string]map[string]string{}
+	importedRunnableSymbolsByID := map[string]map[string]string{}
+	importedRunnableBodiesByID := map[string][]string{}
+	for _, loweredUnit := range loweredUnits {
+		if loweredUnit.Kind != "imported" || loweredUnit.ImportPath == "" {
+			continue
+		}
+		symbolID := strings.NewReplacer("-", "_", "/", "_", ".", "_").Replace(loweredUnit.ID)
+		supported := true
+		importedSymbols := map[string]string{}
+		importedBodies := make([]string, 0)
+		for _, filePath := range loweredUnit.SourceFiles {
+			if !strings.HasSuffix(filePath, ".go") {
+				supported = false
+				break
+			}
+			parsedFile, parseErr := parser.ParseFile(token.NewFileSet(), filePath, nil, 0)
+			if parseErr != nil {
+				supported = false
+				break
+			}
+			for _, decl := range parsedFile.Decls {
+				functionDecl, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				if functionDecl.Name == nil || functionDecl.Name.Name == "" || !ast.IsExported(functionDecl.Name.Name) {
+					continue
+				}
+				if functionDecl.Recv != nil || functionDecl.Type == nil || functionDecl.Type.TypeParams != nil {
+					supported = false
+					break
+				}
+				if functionDecl.Type.Params != nil && len(functionDecl.Type.Params.List) > 0 {
+					supported = false
+					break
+				}
+				if functionDecl.Type.Results != nil && len(functionDecl.Type.Results.List) > 0 {
+					supported = false
+					break
+				}
+				if functionDecl.Body == nil {
+					supported = false
+					break
+				}
+				symbolName := fmt.Sprintf("tinygo_%s_%s", symbolID, functionDecl.Name.Name)
+				if existingSymbol, ok := importedSymbols[functionDecl.Name.Name]; ok && existingSymbol != symbolName {
+					supported = false
+					break
+				}
+				bodyLines := make([]string, 0)
+				for _, statement := range functionDecl.Body.List {
+					exprStatement, ok := statement.(*ast.ExprStmt)
+					if !ok {
+						supported = false
+						break
+					}
+					callExpression, ok := exprStatement.X.(*ast.CallExpr)
+					if !ok || callExpression.Fun == nil {
+						supported = false
+						break
+					}
+					selectorExpression, ok := callExpression.Fun.(*ast.SelectorExpr)
+					if !ok || selectorExpression.Sel == nil {
+						supported = false
+						break
+					}
+					packageIdent, ok := selectorExpression.X.(*ast.Ident)
+					if !ok || packageIdent.Name != "fmt" || selectorExpression.Sel.Name != "Println" {
+						supported = false
+						break
+					}
+					if len(callExpression.Args) != 1 {
+						supported = false
+						break
+					}
+					argumentLiteral, ok := callExpression.Args[0].(*ast.BasicLit)
+					if !ok || argumentLiteral.Kind != token.STRING {
+						supported = false
+						break
+					}
+					unquotedValue, err := strconv.Unquote(argumentLiteral.Value)
+					if err != nil {
+						supported = false
+						break
+					}
+					bodyLines = append(bodyLines, fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 1);\n", strconv.Quote(unquotedValue), len([]byte(unquotedValue))))
+				}
+				if !supported {
+					break
+				}
+				importedSymbols[functionDecl.Name.Name] = symbolName
+				importedBodies = append(importedBodies, fmt.Sprintf("void %s(void) {\n%s}\n", symbolName, strings.Join(bodyLines, "")))
+			}
+			if !supported {
+				break
+			}
+		}
+		if !supported || len(importedSymbols) == 0 {
+			continue
+		}
+		importedRunnableSymbolsByPath[loweredUnit.ImportPath] = importedSymbols
+		importedRunnableSymbolsByID[loweredUnit.ID] = importedSymbols
+		importedRunnableBodiesByID[loweredUnit.ID] = importedBodies
+	}
 
 	generatedFiles := make([]GeneratedFile, 0, len(loweredUnits)+6)
 	loweredIRUnits := make([]LoweredIRUnit, 0, len(loweredUnits))
@@ -2350,23 +2721,32 @@ func Build(input Input) (Result, error) {
 		for fileIndex, filePath := range loweredUnit.SourceFiles {
 			loweredSourceContents.WriteString(fmt.Sprintf("static const char tinygo_lowered_%s_source_%03d[] = %q;\n", symbolID, fileIndex, filePath))
 		}
-			if loweredUnit.Kind == "program" && len(parsedGoFiles) == 1 && len(types) == 0 && len(variables) == 0 {
-				parsedProgramFile := parsedGoFiles[0]
-				supportsRunnableProgram := true
-				supportedRunnableImports := map[string]struct{}{
-					"bufio":   {},
-					"fmt":     {},
-					"os":      {},
-					"strconv": {},
-					"strings": {},
+		if loweredUnit.Kind == "imported" {
+			if bodies, ok := importedRunnableBodiesByID[loweredUnit.ID]; ok {
+				loweredSourceContents.WriteString("\nextern void tinygo_runtime_print_literal(const char *value, unsigned int len, int newline);\n")
+				for _, body := range bodies {
+					loweredSourceContents.WriteString(body)
 				}
-				aliasToImportPath := map[string]string{}
-				topLevelConstants := map[string]struct{}{}
-				topLevelFunctionReturnsInt := map[string]bool{}
-				topLevelFunctionDefinitions := map[string]string{}
-				topLevelFunctionParameters := map[string][]string{}
-				functionOrder := make([]string, 0)
-				constantOrder := make([]string, 0)
+			}
+		}
+		if loweredUnit.Kind == "program" && len(parsedGoFiles) >= 1 && len(types) == 0 && len(variables) == 0 {
+			supportsRunnableProgram := true
+			supportedRunnableImports := map[string]struct{}{
+				"bufio":   {},
+				"fmt":     {},
+				"os":      {},
+				"strconv": {},
+				"strings": {},
+			}
+			aliasToImportPath := map[string]string{}
+			topLevelConstants := map[string]struct{}{}
+			topLevelFunctionReturnsInt := map[string]bool{}
+			topLevelFunctionDefinitions := map[string]string{}
+			topLevelFunctionParameters := map[string][]string{}
+			functionDecls := map[string]*ast.FuncDecl{}
+			functionOrder := make([]string, 0)
+			constantOrder := make([]string, 0)
+			for _, parsedProgramFile := range parsedGoFiles {
 				for _, decl := range parsedProgramFile.Decls {
 					switch typedDecl := decl.(type) {
 					case *ast.GenDecl:
@@ -2383,8 +2763,10 @@ func Build(input Input) (Result, error) {
 									continue
 								}
 								if _, ok := supportedRunnableImports[importPath]; !ok {
-									supportsRunnableProgram = false
-									continue
+									if _, ok := importedRunnableSymbolsByPath[importPath]; !ok {
+										supportsRunnableProgram = false
+										continue
+									}
 								}
 								alias := path.Base(importPath)
 								if importSpec.Name != nil {
@@ -2506,17 +2888,19 @@ func Build(input Input) (Result, error) {
 					} else {
 						topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static void %s(%s);\n", functionName, strings.Join(functionParameterDecls, ", "))
 					}
-					topLevelFunctionReturnsInt[functionName] = functionReturnsInt
-					topLevelFunctionParameters[functionName] = append([]string{}, functionParameters...)
-					functionOrder = append(functionOrder, functionName)
-				default:
-					supportsRunnableProgram = false
+						topLevelFunctionReturnsInt[functionName] = functionReturnsInt
+						topLevelFunctionParameters[functionName] = append([]string{}, functionParameters...)
+						functionOrder = append(functionOrder, functionName)
+						functionDecls[functionName] = typedDecl
+					default:
+						supportsRunnableProgram = false
+					}
 				}
 			}
-				if _, ok := topLevelFunctionReturnsInt["main"]; !ok {
-					supportsRunnableProgram = false
-				}
-				if supportsRunnableProgram {
+			if _, ok := topLevelFunctionReturnsInt["main"]; !ok {
+				supportsRunnableProgram = false
+			}
+			if supportsRunnableProgram {
 					resolveImportedSelector := func(expression ast.Expr) (string, string, bool) {
 						selectorExpression, ok := expression.(*ast.SelectorExpr)
 						if !ok {
@@ -2694,6 +3078,17 @@ func Build(input Input) (Result, error) {
 										}
 										continue
 									}
+									if importedSymbolMap, ok := importedRunnableSymbolsByPath[importPath]; ok {
+										if len(callExpression.Args) != 0 {
+											return "", false
+										}
+										symbolName, ok := importedSymbolMap[selectorName]
+										if !ok || symbolName == "" {
+											return "", false
+										}
+										translatedStatements.WriteString(fmt.Sprintf("\t%s();\n", symbolName))
+										continue
+									}
 									return "", false
 								}
 								if !callIdentOK {
@@ -2862,6 +3257,16 @@ func Build(input Input) (Result, error) {
 					generatedConstantDefinitions = append(generatedConstantDefinitions, topLevelFunctionDefinitions[constantName])
 				}
 				generatedFunctionPrototypes := make([]string, 0, len(functionOrder))
+				generatedImportedPrototypes := make([]string, 0)
+				for _, importPath := range aliasToImportPath {
+					importedSymbolMap, ok := importedRunnableSymbolsByPath[importPath]
+					if !ok {
+						continue
+					}
+					for _, symbolName := range importedSymbolMap {
+						generatedImportedPrototypes = append(generatedImportedPrototypes, fmt.Sprintf("extern void %s(void);\n", symbolName))
+					}
+				}
 				generatedFunctionBodies := make([]string, 0, len(functionOrder))
 				for _, functionName := range functionOrder {
 					functionPrototype := topLevelFunctionDefinitions[functionName]
@@ -2872,17 +3277,17 @@ func Build(input Input) (Result, error) {
 					generatedFunctionPrototypes = append(generatedFunctionPrototypes, functionPrototype)
 				}
 				if supportsRunnableProgram {
-						for _, decl := range parsedProgramFile.Decls {
-							functionDecl, ok := decl.(*ast.FuncDecl)
-							if !ok || functionDecl.Name == nil || functionDecl.Name.Name == "" {
-								continue
-							}
-							functionName := functionDecl.Name.Name
-							locals := map[string]string{}
-							for _, parameterName := range topLevelFunctionParameters[functionName] {
-								locals[parameterName] = "int"
-							}
-							translatedBody, bodyOK := translateStatementList(functionDecl.Body.List, locals, topLevelFunctionReturnsInt[functionName])
+					for _, functionName := range functionOrder {
+						functionDecl, ok := functionDecls[functionName]
+						if !ok || functionDecl == nil {
+							supportsRunnableProgram = false
+							break
+						}
+						locals := map[string]string{}
+						for _, parameterName := range topLevelFunctionParameters[functionName] {
+							locals[parameterName] = "int"
+						}
+						translatedBody, bodyOK := translateStatementList(functionDecl.Body.List, locals, topLevelFunctionReturnsInt[functionName])
 						if !bodyOK {
 							supportsRunnableProgram = false
 							break
@@ -2908,20 +3313,24 @@ func Build(input Input) (Result, error) {
 						loweredSourceContents.WriteString("typedef unsigned int tinygo_wasi_fd_t;\n")
 						loweredSourceContents.WriteString("typedef struct {\n\tchar *buf;\n\ttinygo_wasi_size_t buf_len;\n} tinygo_wasi_iovec_t;\n")
 						loweredSourceContents.WriteString("typedef struct {\n\tconst char *buf;\n\ttinygo_wasi_size_t buf_len;\n} tinygo_wasi_ciovec_t;\n")
+						runtimeStorage := "static "
+						if len(generatedImportedPrototypes) > 0 {
+							runtimeStorage = ""
+						}
 						loweredSourceContents.WriteString("__attribute__((__import_module__(\"wasi_snapshot_preview1\"), __import_name__(\"fd_read\")))\n")
 						loweredSourceContents.WriteString("extern tinygo_wasi_errno_t tinygo_runtime_fd_read_import(tinygo_wasi_fd_t fd, tinygo_wasi_iovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nread);\n")
 						loweredSourceContents.WriteString("__attribute__((__import_module__(\"wasi_snapshot_preview1\"), __import_name__(\"fd_write\")))\n")
 						loweredSourceContents.WriteString("extern tinygo_wasi_errno_t tinygo_runtime_fd_write_import(tinygo_wasi_fd_t fd, const tinygo_wasi_ciovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nwritten);\n")
-						loweredSourceContents.WriteString("static unsigned int tinygo_runtime_fd_read(tinygo_wasi_fd_t fd, tinygo_wasi_iovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nread) {\n")
+						loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_fd_read(tinygo_wasi_fd_t fd, tinygo_wasi_iovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nread) {\n", runtimeStorage))
 						loweredSourceContents.WriteString("\treturn tinygo_runtime_fd_read_import(fd, iovs, iovs_len, nread);\n")
 						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString("static unsigned int tinygo_runtime_fd_write(tinygo_wasi_fd_t fd, const tinygo_wasi_ciovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nwritten) {\n")
+						loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_fd_write(tinygo_wasi_fd_t fd, const tinygo_wasi_ciovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nwritten) {\n", runtimeStorage))
 						loweredSourceContents.WriteString("\treturn tinygo_runtime_fd_write_import(fd, iovs, iovs_len, nwritten);\n")
 						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString("static int tinygo_runtime_is_space(char value) {\n")
+						loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_is_space(char value) {\n", runtimeStorage))
 						loweredSourceContents.WriteString("\treturn value == ' ' || value == '\\n' || value == '\\r' || value == '\\t';\n")
 						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString("static unsigned int tinygo_runtime_read_line(char *buffer, tinygo_wasi_size_t capacity) {\n")
+						loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_read_line(char *buffer, tinygo_wasi_size_t capacity) {\n", runtimeStorage))
 						loweredSourceContents.WriteString("\tif (capacity == 0u) {\n")
 						loweredSourceContents.WriteString("\t\treturn 0u;\n")
 						loweredSourceContents.WriteString("\t}\n")
@@ -2941,7 +3350,7 @@ func Build(input Input) (Result, error) {
 						loweredSourceContents.WriteString("\tbuffer[length] = '\\0';\n")
 						loweredSourceContents.WriteString("\treturn length;\n")
 						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString("static char *tinygo_runtime_trim_space(char *value) {\n")
+						loweredSourceContents.WriteString(fmt.Sprintf("%schar *tinygo_runtime_trim_space(char *value) {\n", runtimeStorage))
 						loweredSourceContents.WriteString("\twhile (*value != '\\0' && tinygo_runtime_is_space(*value)) {\n")
 						loweredSourceContents.WriteString("\t\tvalue += 1;\n")
 						loweredSourceContents.WriteString("\t}\n")
@@ -2955,7 +3364,7 @@ func Build(input Input) (Result, error) {
 						loweredSourceContents.WriteString("\t}\n")
 						loweredSourceContents.WriteString("\treturn value;\n")
 						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString("static int tinygo_runtime_parse_i32(char *value, int *out) {\n")
+						loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_parse_i32(char *value, int *out) {\n", runtimeStorage))
 						loweredSourceContents.WriteString("\ttinygo_wasi_size_t index = 0u;\n")
 						loweredSourceContents.WriteString("\tint negative = 0;\n")
 						loweredSourceContents.WriteString("\tint parsed = 0;\n")
@@ -2985,21 +3394,21 @@ func Build(input Input) (Result, error) {
 						loweredSourceContents.WriteString("\t*out = parsed;\n")
 						loweredSourceContents.WriteString("\treturn 0;\n")
 						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString("static void tinygo_runtime_write(const char *value, tinygo_wasi_size_t len) {\n")
+						loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_write(const char *value, tinygo_wasi_size_t len) {\n", runtimeStorage))
 						loweredSourceContents.WriteString("\ttinygo_wasi_ciovec_t iovec = { value, len };\n")
 						loweredSourceContents.WriteString("\ttinygo_wasi_size_t nwritten = 0u;\n")
 					loweredSourceContents.WriteString("\t(void)tinygo_runtime_fd_write(1u, &iovec, 1u, &nwritten);\n")
 					loweredSourceContents.WriteString("}\n")
-					loweredSourceContents.WriteString("static void tinygo_runtime_print_newline(void) {\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_newline(void) {\n", runtimeStorage))
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(\"\\n\", 1u);\n")
 					loweredSourceContents.WriteString("}\n")
-					loweredSourceContents.WriteString("static void tinygo_runtime_print_literal(const char *value, tinygo_wasi_size_t len, int newline) {\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_literal(const char *value, tinygo_wasi_size_t len, int newline) {\n", runtimeStorage))
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(value, len);\n")
 					loweredSourceContents.WriteString("\tif (newline != 0) {\n")
-					loweredSourceContents.WriteString("\t\ttinygo_runtime_print_newline();\n")
+						loweredSourceContents.WriteString("\t\ttinygo_runtime_print_newline();\n")
 					loweredSourceContents.WriteString("\t}\n")
 					loweredSourceContents.WriteString("}\n")
-					loweredSourceContents.WriteString("static void tinygo_runtime_print_i32(int value, int newline) {\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_i32(int value, int newline) {\n", runtimeStorage))
 					loweredSourceContents.WriteString("\tchar buffer[32];\n")
 					loweredSourceContents.WriteString("\tunsigned int index = 0u;\n")
 					loweredSourceContents.WriteString("\tunsigned int magnitude = 0u;\n")
@@ -3034,6 +3443,9 @@ func Build(input Input) (Result, error) {
 						loweredSourceContents.WriteString(constantDefinition)
 					}
 					for _, functionPrototype := range generatedFunctionPrototypes {
+						loweredSourceContents.WriteString(functionPrototype)
+					}
+					for _, functionPrototype := range generatedImportedPrototypes {
 						loweredSourceContents.WriteString(functionPrototype)
 					}
 					for _, functionBody := range generatedFunctionBodies {
