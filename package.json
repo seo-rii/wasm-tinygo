@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "prepare:tinygo": "node ./scripts/fetch-tinygo-toolchain.mjs",
+    "prepare:tinygo-compiler": "node ./scripts/build-tinygo-compiler.mjs",
     "prepare:assets": "node ./scripts/fetch-emception-worker.mjs && node ./scripts/build-go-probe.mjs",
     "build:runtime-pack": "node ./scripts/build-runtime-pack.mjs",
     "probe:tinygo-host": "npm run prepare:tinygo && node ./scripts/probe-tinygo-host.mjs",
