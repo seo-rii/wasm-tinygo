@@ -1455,8 +1455,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             `build artifact execution blocked: backend emitted a probe-only final artifact at ${frontendCommandArtifactVerification.artifactOutputPath}`,
             'error',
           )
-          throw new Error(
-            'browser runtime stopped before preparing a runnable execution artifact because the backend emitted a probe-only command artifact and the host compile seam was unavailable',
+          appendLog(
+            'host compile seam unavailable; attempting browser-side relink to produce a runnable execution artifact',
+            'error',
           )
         }
       }
