@@ -267,6 +267,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
   let activeAction: TinyGoRuntimeAction | null = null
   let buildStateVersion = 0
   let activityLog = ''
+  let rustRuntimeManifestLoaded = false
 
   const setControlsLocked = (locked: boolean) => {
     options.onControlsLockedChange?.(locked)
@@ -393,6 +394,25 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     bootPromise = (async () => {
       setControlsLocked(true)
       setPhase('toolchain', 'booting', 'running')
+      if (!rustRuntimeManifestLoaded && options.rustRuntimeAssetPacks?.length) {
+        appendLog('Fetching wasm-rust runtime manifest', 'running')
+        const manifestBytes = await loadRustRuntimeAssetBytes(
+          'runtime-manifest.v3.json',
+          'wasm-rust runtime manifest',
+        )
+        const manifestText = textDecoder.decode(manifestBytes)
+        try {
+          const manifest = JSON.parse(manifestText) as { version?: string }
+          appendLog(`wasm-rust runtime manifest loaded${manifest.version ? ` version=${manifest.version}` : ''}`, 'success')
+        } catch (error) {
+          appendLog(
+            `wasm-rust runtime manifest parse failed: ${error instanceof Error ? error.message : String(error)}`,
+            'error',
+          )
+          throw error
+        }
+        rustRuntimeManifestLoaded = true
+      }
       appendLog('Fetching patched emception worker', 'running')
 
       const workerUrl = await resolveWorkerUrl('vendor/emception/emception.worker.js')
@@ -1702,6 +1722,8 @@ export const createTinyGoBrowserRuntime = (options: TinyGoBrowserRuntimeOptions)
     assetBaseUrl: options.baseUrl,
     assetLoader: options.assetLoader,
     assetPacks: options.assetPacks,
+    rustRuntimeBaseUrl: options.rustRuntimeBaseUrl,
+    rustRuntimeAssetPacks: options.rustRuntimeAssetPacks,
     bootstrapGoEntrySource: options.bootstrapGoEntrySource,
     hostCompileUrl: options.hostCompileUrl,
     initialLogMessages: (options.initialLogs ?? []).map((message) => ({ message })),
