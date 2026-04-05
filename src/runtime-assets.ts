@@ -18,6 +18,16 @@ export type TinyGoRuntimeAssetLoader = (options: {
   label: string
 }) => TinyGoRuntimeAssetLoaderResult | Promise<TinyGoRuntimeAssetLoaderResult>
 
+export type TinyGoRuntimeAssetProgress = {
+  assetPath: string
+  assetUrl: string
+  label: string
+  loaded: number
+  total: number | null
+}
+
+export type TinyGoRuntimeAssetProgressCallback = (progress: TinyGoRuntimeAssetProgress) => void
+
 export type TinyGoRuntimeAssetPackReference = {
   index: string
   asset: string
@@ -158,9 +168,22 @@ async function fetchRuntimeAssetBytes(
   assetLabel: string,
   fetchImpl: typeof fetch,
   allowCompressedFallback = true,
+  onProgress?: TinyGoRuntimeAssetProgressCallback,
 ): Promise<Uint8Array> {
   const resolvedAssetUrl = assetUrl.toString()
   const resolvedAssetUrlObject = new URL(resolvedAssetUrl)
+  const emitProgress = (loaded: number, total: number | null) => {
+    if (!onProgress) return
+    try {
+      onProgress({
+        assetPath: resolvedAssetUrlObject.pathname.replace(/^\/+/, ''),
+        assetUrl: resolvedAssetUrl,
+        label: assetLabel,
+        loaded,
+        total,
+      })
+    } catch {}
+  }
   let response: Response
   try {
     response = await fetchImpl(resolvedAssetUrl)
@@ -169,7 +192,48 @@ async function fetchRuntimeAssetBytes(
       `failed to fetch ${assetLabel} from ${resolvedAssetUrl}: ${error instanceof Error ? error.message : String(error)}. This usually means the browser loaded a stale wasm-tinygo bundle or blocked a nested runtime asset request; hard refresh and resync the runtime assets.`,
     )
   }
-  const assetBytes = new Uint8Array(await response.arrayBuffer())
+  const contentLength = response.headers.get('content-length')
+  const parsedTotal = contentLength ? Number(contentLength) : Number.NaN
+  const total = Number.isFinite(parsedTotal) ? parsedTotal : null
+  const chunks: Uint8Array[] = []
+  let loaded = 0
+  if (response.body) {
+    const reader = response.body.getReader()
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value) continue
+        chunks.push(value)
+        loaded += value.byteLength
+        emitProgress(loaded, total)
+      }
+    } finally {
+      try {
+        reader.releaseLock()
+      } catch {}
+    }
+  }
+  const assetBytes =
+    chunks.length > 0
+      ? (() => {
+          const bytes = new Uint8Array(loaded)
+          let offset = 0
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset)
+            offset += chunk.byteLength
+          }
+          return bytes
+        })()
+      : response.body
+        ? new Uint8Array(0)
+        : new Uint8Array(await response.arrayBuffer())
+  if (!loaded) {
+    loaded = assetBytes.byteLength
+    emitProgress(loaded, total)
+  } else if (total === loaded) {
+    emitProgress(loaded, total)
+  }
   const assetPreview = new TextDecoder()
     .decode(assetBytes.slice(0, 128))
     .replace(/^\uFEFF/, '')
@@ -188,7 +252,13 @@ async function fetchRuntimeAssetBytes(
     const compressedAssetUrl = new URL(resolvedAssetUrl)
     compressedAssetUrl.pathname = `${compressedAssetUrl.pathname}.gz`
     try {
-      return await fetchRuntimeAssetBytes(compressedAssetUrl.toString(), assetLabel, fetchImpl, false)
+      return await fetchRuntimeAssetBytes(
+        compressedAssetUrl.toString(),
+        assetLabel,
+        fetchImpl,
+        false,
+        onProgress,
+      )
     } catch {}
   }
   if (!response.ok) {
@@ -229,6 +299,7 @@ async function loadRuntimePackBytes(
   pack: TinyGoRuntimeAssetPackReference,
   fetchImpl: typeof fetch,
   loader?: TinyGoRuntimeAssetLoader,
+  onProgress?: TinyGoRuntimeAssetProgressCallback,
 ) {
   const assetUrl = new URL(pack.asset, assetBaseUrl).toString()
   let cachedBytes = runtimePackBytesCache.get(assetUrl)
@@ -240,6 +311,7 @@ async function loadRuntimePackBytes(
       fetchImpl,
       loader,
       packs: null,
+      onProgress,
     })
     runtimePackBytesCache.set(assetUrl, cachedBytes)
     cachedBytes.catch(() => {
@@ -256,6 +328,7 @@ async function loadRuntimePackIndex(
   pack: TinyGoRuntimeAssetPackReference,
   fetchImpl: typeof fetch,
   loader?: TinyGoRuntimeAssetLoader,
+  onProgress?: TinyGoRuntimeAssetProgressCallback,
 ) {
   const indexUrl = new URL(pack.index, assetBaseUrl).toString()
   let cachedIndex = runtimePackIndexCache.get(indexUrl)
@@ -268,6 +341,7 @@ async function loadRuntimePackIndex(
       loader,
       packs: null,
       assetBaseUrl,
+      onProgress,
     }).then((value) =>
       parseTinyGoRuntimePackIndex(JSON.parse(new TextDecoder().decode(value))),
     )
@@ -286,10 +360,11 @@ async function loadRuntimePackEntries(
   pack: TinyGoRuntimeAssetPackReference,
   fetchImpl: typeof fetch,
   loader?: TinyGoRuntimeAssetLoader,
+  onProgress?: TinyGoRuntimeAssetProgressCallback,
 ): Promise<Map<string, Uint8Array>> {
   const [index, packBytes] = await Promise.all([
-    loadRuntimePackIndex(assetBaseUrl, pack, fetchImpl, loader),
-    loadRuntimePackBytes(assetBaseUrl, pack, fetchImpl, loader),
+    loadRuntimePackIndex(assetBaseUrl, pack, fetchImpl, loader, onProgress),
+    loadRuntimePackBytes(assetBaseUrl, pack, fetchImpl, loader, onProgress),
   ])
   if (index.fileCount !== pack.fileCount) {
     throw new Error(
@@ -321,6 +396,7 @@ export async function loadRuntimeAssetBytes(options: {
   loader?: TinyGoRuntimeAssetLoader
   assetBaseUrl?: string
   packs?: TinyGoRuntimeAssetPackReference[] | null
+  onProgress?: TinyGoRuntimeAssetProgressCallback
 }): Promise<Uint8Array> {
   const fetchImpl = options.fetchImpl ?? fetch
   const loader = options.loader
@@ -334,6 +410,7 @@ export async function loadRuntimeAssetBytes(options: {
         pack,
         fetchImpl,
         loader,
+        options.onProgress,
       )
       const packed = entries.get(options.assetPath)
       if (packed) return packed
@@ -350,10 +427,22 @@ export async function loadRuntimeAssetBytes(options: {
     )
     if (normalized?.bytes) return normalized.bytes
     if (normalized?.url) {
-      return await fetchRuntimeAssetBytes(normalized.url, options.label, fetchImpl)
+      return await fetchRuntimeAssetBytes(
+        normalized.url,
+        options.label,
+        fetchImpl,
+        true,
+        options.onProgress,
+      )
     }
   }
-  return await fetchRuntimeAssetBytes(options.assetUrl, options.label, fetchImpl)
+  return await fetchRuntimeAssetBytes(
+    options.assetUrl,
+    options.label,
+    fetchImpl,
+    true,
+    options.onProgress,
+  )
 }
 
 export async function resolveRuntimeAssetUrl(options: {

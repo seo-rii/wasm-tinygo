@@ -3,8 +3,13 @@ import * as Comlink from 'comlink'
 import {
   type TinyGoRuntimeAssetLoader,
   type TinyGoRuntimeAssetPackReference,
+  type TinyGoRuntimeAssetProgress,
   loadRuntimeAssetBytes,
   resolveRuntimeAssetUrl,
+} from './runtime-assets'
+export type {
+  TinyGoRuntimeAssetProgress,
+  TinyGoRuntimeAssetProgressCallback,
 } from './runtime-assets'
 import {
   readTinyGoBootstrapManifest,
@@ -76,7 +81,7 @@ export type TinyGoBuildPlanInputs = {
   workspaceFiles: Record<string, string> | null
 }
 
-type TinyGoRuntimeAction = 'booting' | 'planning' | 'executing' | 'upstream-probe'
+type TinyGoRuntimeAction = 'booting' | 'planning' | 'executing' | 'upstream-probe' | 'upstream-frontend-probe'
 
 export type ToolInvocation = {
   argv: string[]
@@ -157,11 +162,22 @@ export type TinyGoUpstreamProbeResult = {
   linker: string
 }
 
+export type TinyGoUpstreamFrontendProbeResult = {
+  requestedTarget: string
+  mainImportPath: string
+  mainPackageName: string
+  packageCount: number
+  fileCount: number
+  declarationCount: number
+  imports: string[]
+}
+
 export type TinyGoTestHooks = {
   boot(): Promise<void>
   plan(): Promise<TinyGoBuildResult>
   execute(): Promise<void>
   runUpstreamProbe(): Promise<TinyGoUpstreamProbeResult>
+  runUpstreamFrontendProbe(): Promise<TinyGoUpstreamFrontendProbeResult>
   reset(): void
   readActivityLog(): string
   readBuildArtifact(): TinyGoBuildArtifact | null
@@ -202,6 +218,7 @@ export type TinyGoRuntimeOptions = {
   rustRuntimeAssetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
+  onProgress?: (progress: TinyGoRuntimeAssetProgress) => void
   initialLogMessages?: Array<{ message: string; tone?: Exclude<PhaseTone, 'idle'> | 'idle' }>
   onControlsLockedChange?: (locked: boolean) => void
   onLogAppended?: (entry: TinyGoRuntimeLogEntry) => void
@@ -220,6 +237,7 @@ export type TinyGoBrowserRuntimeOptions = {
   rustRuntimeAssetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
+  onProgress?: (progress: TinyGoRuntimeAssetProgress) => void
   initialLogs?: string[]
   onActivityLogChange?: (activityLog: string, tone: Exclude<PhaseTone, 'idle'> | 'idle') => void
   onControlsLockedChange?: (locked: boolean) => void
@@ -326,6 +344,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       loader: options.assetLoader,
       packs: options.assetPacks ?? null,
       assetBaseUrl,
+      onProgress: options.onProgress,
     })
 
   const loadCompilerManifest = async (): Promise<TinyGoCompilerManifest | null> => {
@@ -373,6 +392,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       loader: options.assetLoader,
       packs: options.rustRuntimeAssetPacks ?? null,
       assetBaseUrl: rustRuntimeBaseUrl,
+      onProgress: options.onProgress,
     })
 
   const toArrayBuffer = (bytes: Uint8Array) =>
@@ -434,6 +454,168 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     }
 
     return JSON.parse(stdoutLines.join('\n')) as TinyGoUpstreamProbeResult
+  }
+
+  const runUpstreamFrontendProbe = async (): Promise<TinyGoUpstreamFrontendProbeResult> => {
+    const driverBridgeManifest =
+      injectedDriverBridgeManifest === null ? null : cloneJsonValue(injectedDriverBridgeManifest)
+    const workspaceFiles = injectedWorkspaceFiles ?? { 'main.go': bootstrapGoEntrySource }
+    const goModSource = workspaceFiles['go.mod'] ?? ''
+    let modulePathFromGoMod = ''
+    let goVersionFromGoMod = ''
+    if (goModSource !== '') {
+      for (const line of goModSource.split('\n')) {
+        const trimmed = line.trim()
+        if (modulePathFromGoMod === '' && trimmed.startsWith('module ')) {
+          modulePathFromGoMod = trimmed.slice('module '.length).trim()
+          continue
+        }
+        if (goVersionFromGoMod === '' && trimmed.startsWith('go ')) {
+          goVersionFromGoMod = trimmed.slice('go '.length).trim()
+          continue
+        }
+        if (modulePathFromGoMod !== '' && goVersionFromGoMod !== '') {
+          break
+        }
+      }
+    }
+    const buildContextModulePath = driverBridgeManifest?.frontendAnalysisInput?.buildContext?.modulePath ?? ''
+    const resolvedModulePath = modulePathFromGoMod || buildContextModulePath
+    const resolvedGoVersion = goVersionFromGoMod || '1.22'
+    const packageList = driverBridgeManifest?.packageGraph?.length
+      ? driverBridgeManifest.packageGraph.map((packageInfo) => {
+        const dir = packageInfo.dir ?? ''
+        const importPath = packageInfo.importPath ?? ''
+        const name = packageInfo.name ?? (importPath !== '' ? importPath.split('/').pop() ?? 'main' : 'main')
+        const goFiles = (packageInfo.goFiles ?? []).map((filePath: string) => {
+          const slashIndex = filePath.lastIndexOf('/')
+          return slashIndex >= 0 ? filePath.slice(slashIndex + 1) : filePath
+        })
+        const imports = packageInfo.imports ?? []
+        const modulePath = packageInfo.modulePath ?? resolvedModulePath
+        const isWorkspacePackage = dir.startsWith('/workspace')
+        return {
+          DepOnly: packageInfo.depOnly ?? false,
+          Dir: dir,
+          ImportPath: importPath,
+          Name: name,
+          Root: isWorkspacePackage ? '/workspace' : '',
+          Module: isWorkspacePackage && modulePath !== '' ? {
+            Path: modulePath,
+            Main: true,
+            Dir: '/workspace',
+            GoMod: '/workspace/go.mod',
+            GoVersion: resolvedGoVersion,
+          } : undefined,
+          GoFiles: goFiles,
+          CgoFiles: [],
+          CFiles: [],
+          EmbedFiles: [],
+          Imports: imports,
+          ImportMap: {},
+          Standard: packageInfo.standard ?? false,
+        }
+      })
+      : (() => {
+        const goFiles = Object.keys(workspaceFiles).filter((filePath) => filePath.endsWith('.go') && !filePath.includes('/'))
+        return [
+          {
+            Dir: '/workspace',
+            ImportPath: 'command-line-arguments',
+            Name: 'main',
+            Root: '/workspace',
+            Module: resolvedModulePath !== '' ? {
+              Path: resolvedModulePath,
+              Main: true,
+              Dir: '/workspace',
+              GoMod: '/workspace/go.mod',
+              GoVersion: resolvedGoVersion,
+            } : undefined,
+            GoFiles: goFiles.length ? goFiles : ['main.go'],
+            CgoFiles: [],
+            CFiles: [],
+            EmbedFiles: [],
+            Imports: [],
+            ImportMap: {},
+          },
+        ]
+      })()
+    const packageListSource = `${JSON.stringify(packageList, null, 2)}\n`
+    const [probeBytes, targetSource, zversionSource, armSource] = await Promise.all([
+      loadAssetBytes('tools/tinygo-upstream-frontend-probe.wasm', 'tinygo-upstream-frontend-probe.wasm'),
+      loadAssetBytes(
+        'tools/tinygo-upstream-frontend-probe/targets/wasip1.json',
+        'tinygo-upstream-frontend-probe target wasip1.json',
+      ),
+      loadAssetBytes(
+        'tools/tinygo-upstream-frontend-probe/src/runtime/internal/sys/zversion.go',
+        'tinygo-upstream-frontend-probe zversion.go',
+      ),
+      loadAssetBytes(
+        'tools/tinygo-upstream-frontend-probe/src/device/arm/arm.go',
+        'tinygo-upstream-frontend-probe arm.go',
+      ),
+    ])
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
+    const tinygoRoot = new PreopenDirectory(
+      '/tinygo-root',
+      buildDirectoryContentsFromTextEntries(
+        {
+          'targets/wasip1.json': textDecoder.decode(targetSource),
+          'src/runtime/internal/sys/zversion.go': textDecoder.decode(zversionSource),
+          'src/device/arm/arm.go': textDecoder.decode(armSource),
+        },
+        textEncoder,
+      ),
+    )
+    const workspace = new PreopenDirectory(
+      '/workspace',
+      buildDirectoryContentsFromTextEntries(
+        {
+          ...workspaceFiles,
+          'package-list.json': packageListSource,
+        },
+        textEncoder,
+      ),
+    )
+    const stdout = ConsoleStdout.lineBuffered((line) => stdoutLines.push(line))
+    const stderr = ConsoleStdout.lineBuffered((line) => stderrLines.push(line))
+    const wasi = new WASI(
+      ['tinygo-upstream-frontend-probe'],
+      [
+        'TINYGOROOT=/tinygo-root',
+        'TINYGO_WASI_TARGET=wasip1',
+        'TINYGO_WASI_WORKING_DIR=/workspace',
+        'TINYGO_WASI_PACKAGE_JSON_PATH=/workspace/package-list.json',
+        'GOROOT=/go-root',
+        'GOVERSION=go1.24.0',
+      ],
+      [new OpenFile(new File([])), stdout, stderr, tinygoRoot, workspace],
+    )
+    const instance = await instantiateWasiModule(probeBytes, {
+      wasi_snapshot_preview1: wasi.wasiImport,
+    })
+
+    let exitCode = 0
+    try {
+      exitCode = wasi.start(instance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+    } catch (error) {
+      if (error instanceof WASIProcExit) {
+        exitCode = error.code
+      } else {
+        throw error
+      }
+    }
+
+    if (exitCode !== 0) {
+      throw new Error(`upstream frontend probe exited with code ${exitCode}: ${stderrLines.join('\n')}`)
+    }
+    if (stderrLines.length) {
+      throw new Error(stderrLines.join('\n'))
+    }
+
+    return JSON.parse(stdoutLines.join('\n')) as TinyGoUpstreamFrontendProbeResult
   }
 
   void loadRustRuntimeAssetBytes('runtime-manifest.v3.json', 'wasm-rust runtime manifest')
@@ -1759,6 +1941,16 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         const result = await runUpstreamProbe()
         appendLog(
           `patched upstream TinyGo WASI probe verified target=${result.requestedTarget} triple=${result.triple} scheduler=${result.scheduler}`,
+          'success',
+        )
+        return result
+      }),
+    runUpstreamFrontendProbe: async () =>
+      await runWithAction('upstream-frontend-probe', async () => {
+        appendLog('running patched upstream TinyGo WASI frontend probe', 'running')
+        const result = await runUpstreamFrontendProbe()
+        appendLog(
+          `patched upstream TinyGo WASI frontend probe verified main=${result.mainImportPath} files=${result.fileCount}`,
           'success',
         )
         return result

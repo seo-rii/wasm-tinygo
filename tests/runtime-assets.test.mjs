@@ -6,6 +6,18 @@ import {
   parseTinyGoRuntimePackIndex,
 } from '../src/runtime-assets.ts'
 
+function streamedResponse(chunks, headers = {}) {
+  const stream = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk)
+      }
+      controller.close()
+    },
+  })
+  return new Response(stream, { headers })
+}
+
 test('parseTinyGoRuntimePackIndex validates the index payload', () => {
   const index = parseTinyGoRuntimePackIndex({
     format: 'wasm-tinygo-runtime-pack-index-v1',
@@ -39,13 +51,23 @@ test('loadRuntimeAssetBytes returns packed runtime assets before hitting the net
     ],
   }
   const requests = []
+  const progressEvents = []
   const fetchImpl = async (url) => {
     requests.push(String(url))
     if (String(url).endsWith('pack.index.json')) {
-      return new Response(JSON.stringify(packIndex))
+      const text = JSON.stringify(packIndex)
+      const encoded = new TextEncoder().encode(text)
+      return streamedResponse(
+        [encoded.slice(0, 12), encoded.slice(12)],
+        {
+          'content-length': String(encoded.byteLength),
+        },
+      )
     }
     if (String(url).endsWith('pack.bin')) {
-      return new Response(packBytes)
+      return streamedResponse([packBytes.slice(0, 2), packBytes.slice(2)], {
+        'content-length': String(packBytes.byteLength),
+      })
     }
     throw new Error(`unexpected fetch ${url}`)
   }
@@ -64,6 +86,9 @@ test('loadRuntimeAssetBytes returns packed runtime assets before hitting the net
       },
     ],
     fetchImpl,
+    onProgress: (progress) => {
+      progressEvents.push(progress)
+    },
   })
 
   assert.deepEqual([...bytes], [1, 2, 3, 4])
@@ -71,6 +96,19 @@ test('loadRuntimeAssetBytes returns packed runtime assets before hitting the net
     'http://assets.invalid/pack.index.json',
     'http://assets.invalid/pack.bin',
   ])
+  assert.equal(progressEvents.length >= 2, true)
+  assert.equal(
+    progressEvents.some((progress) => progress.loaded === 4 && progress.total === 4),
+    true,
+  )
+  assert.equal(
+    progressEvents.some((progress) => progress.label.includes('runtime pack index')),
+    true,
+  )
+  assert.equal(
+    progressEvents.some((progress) => progress.label.includes('runtime pack pack.bin')),
+    true,
+  )
 })
 
 test('loadRuntimeAssetBytes respects loader overrides', async () => {
@@ -111,4 +149,29 @@ test('loadRuntimeAssetBytes accepts loader-provided bytes without fetching', asy
 
   assert.deepEqual([...bytes], [7, 8, 9])
   assert.equal(fetched, false)
+})
+
+test('loadRuntimeAssetBytes reports byte progress for streamed direct fetches', async () => {
+  const progressEvents = []
+  const fetchImpl = async () =>
+    streamedResponse([new Uint8Array([1, 2]), new Uint8Array([3, 4, 5])], {
+      'content-length': '5',
+    })
+
+  const bytes = await loadRuntimeAssetBytes({
+    assetPath: 'tools/go-probe.wasm',
+    assetUrl: 'http://assets.invalid/tools/go-probe.wasm',
+    assetBaseUrl: 'http://assets.invalid/',
+    label: 'go-probe.wasm',
+    fetchImpl,
+    onProgress: (progress) => {
+      progressEvents.push(progress)
+    },
+  })
+
+  assert.deepEqual([...bytes], [1, 2, 3, 4, 5])
+  assert.equal(progressEvents.length >= 2, true)
+  assert.equal(progressEvents[0].loaded, 2)
+  assert.equal(progressEvents.at(-1).loaded, 5)
+  assert.equal(progressEvents.at(-1).total, 5)
 })
