@@ -85,6 +85,7 @@ go 1.22
 `,
   )
   await mkdir(path.join(sourceRoot, 'builder'), { recursive: true })
+  await mkdir(path.join(sourceRoot, 'loader'), { recursive: true })
   await writeFile(
     path.join(sourceRoot, 'builder', 'build.go'),
     `package builder
@@ -96,6 +97,15 @@ func lock(path string) error {
 }
 `,
   )
+  await writeFile(
+    path.join(sourceRoot, 'loader', 'loader.go'),
+    `package loader
+
+import "github.com/tinygo-org/tinygo/cgo"
+
+var _ = cgo.Process
+`,
+  )
 
   const patch = await patchTinyGoSourceForWasi(sourceRoot)
   assert.equal(patch.commandPath, './cmd/tinygo-browser')
@@ -103,12 +113,16 @@ func lock(path string) error {
   const browserEntryPath = path.join(sourceRoot, 'cmd', 'tinygo-browser', 'main.go')
   const browserEntrySource = await readFile(browserEntryPath, 'utf8')
   const patchedBuilderSource = await readFile(path.join(sourceRoot, 'builder', 'build.go'), 'utf8')
+  const patchedLoaderSource = await readFile(path.join(sourceRoot, 'loader', 'loader.go'), 'utf8')
   const flockStubSource = await readFile(path.join(sourceRoot, 'wasmbridge', 'flock', 'flock.go'), 'utf8')
+  const cgoStubSource = await readFile(path.join(sourceRoot, 'wasmbridge', 'cgo', 'cgo.go'), 'utf8')
   assert.match(browserEntrySource, /package main/)
   assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/builder/)
   assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/compileopts/)
   assert.match(patchedBuilderSource, /github\.com\/tinygo-org\/tinygo\/wasmbridge\/flock/)
+  assert.match(patchedLoaderSource, /github\.com\/tinygo-org\/tinygo\/wasmbridge\/cgo/)
   assert.match(flockStubSource, /func New\(string\) \*Flock/)
+  assert.match(cgoStubSource, /func Process\(files \[\]\*ast\.File, dir, importPath string, fset \*token\.FileSet/)
   assert.doesNotMatch(browserEntrySource, /go\.bug\.st\/serial/)
   assert.doesNotMatch(browserEntrySource, /github\.com\/mattn\/go-tty/)
   assert.doesNotMatch(browserEntrySource, /serial\/enumerator/)
@@ -124,6 +138,7 @@ test('build-tinygo-compiler promotes a patched browser entry to compiler mode be
   const sourceRoot = path.join(tempDir, 'tinygo')
   await mkdir(path.join(sourceRoot, 'builder'), { recursive: true })
   await mkdir(path.join(sourceRoot, 'compileopts'), { recursive: true })
+  await mkdir(path.join(sourceRoot, 'loader'), { recursive: true })
   await writeFile(
     path.join(sourceRoot, 'go.mod'),
     `module github.com/tinygo-org/tinygo
@@ -201,12 +216,24 @@ func (c *Config) DefaultBinaryExtension() string {
 `,
   )
   await writeFile(
+    path.join(sourceRoot, 'loader', 'loader.go'),
+    `package loader
+
+import "github.com/tinygo-org/tinygo/cgo"
+
+var _ = cgo.Process
+
+func Load() {}
+`,
+  )
+  await writeFile(
     path.join(sourceRoot, 'builder', 'build.go'),
     `package builder
 
 import (
 	"github.com/gofrs/flock"
 	"github.com/tinygo-org/tinygo/compileopts"
+	"github.com/tinygo-org/tinygo/loader"
 )
 
 type BuildResult struct {
@@ -219,6 +246,7 @@ func NewConfig(options *compileopts.Options) (*compileopts.Config, error) {
 }
 
 func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildResult, error) {
+	loader.Load()
 	lock := flock.New(tmpdir + "/tinygo.lock")
 	if err := lock.Lock(); err != nil {
 		return BuildResult{}, err

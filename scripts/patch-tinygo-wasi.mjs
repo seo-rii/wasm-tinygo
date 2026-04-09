@@ -85,6 +85,26 @@ func (f *Flock) Close() error {
 }
 `,
   )
+  const cgoStubDir = path.join(bridgeRoot, 'cgo')
+  await mkdir(cgoStubDir, { recursive: true })
+  await writeFile(
+    path.join(cgoStubDir, 'cgo.go'),
+    `package cgo
+
+import (
+	"errors"
+	"go/ast"
+	"go/token"
+)
+
+func Process(files []*ast.File, dir, importPath string, fset *token.FileSet, cflags []string, goos string) ([]*ast.File, []string, []string, []string, map[string][]byte, []error) {
+	if len(files) != 0 {
+		return nil, nil, nil, nil, nil, []error{errors.New("tinygo wasm compiler patch does not support CGo packages")}
+	}
+	return nil, nil, nil, nil, nil, nil
+}
+`,
+  )
 
   const builderBuildPath = path.join(sourceRoot, 'builder', 'build.go')
   let patchedBuilderFiles = 0
@@ -100,6 +120,21 @@ func (f *Flock) Close() error {
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       patchedBuilderFiles = 0
+    } else {
+      throw error
+    }
+  }
+  const loaderPath = path.join(sourceRoot, 'loader', 'loader.go')
+  let patchedLoaderFiles = 0
+  try {
+    const loaderSource = await readFile(loaderPath, 'utf8')
+    if (loaderSource.includes('"github.com/tinygo-org/tinygo/cgo"')) {
+      await writeFile(loaderPath, loaderSource.replaceAll('"github.com/tinygo-org/tinygo/cgo"', `"${modulePath}/wasmbridge/cgo"`))
+      patchedLoaderFiles += 1
+    }
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      patchedLoaderFiles = 0
     } else {
       throw error
     }
@@ -306,7 +341,7 @@ func main() {
   return {
     commandPath: './cmd/tinygo-browser',
     probeCommandPath: './cmd/tinygo-wasi',
-    copiedFileCount: copiedFiles.length + patchedBuilderFiles + 3,
+    copiedFileCount: copiedFiles.length + patchedBuilderFiles + patchedLoaderFiles + 4,
     modulePath,
     sourceRoot,
   }
