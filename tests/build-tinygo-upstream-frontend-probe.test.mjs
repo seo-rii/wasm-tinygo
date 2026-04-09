@@ -151,6 +151,14 @@ test('build-tinygo-upstream-frontend-probe parses a file-backed package graph wi
   assert.equal(payload.fileCount, 1)
   assert.equal(payload.declarationCount, 2)
   assert.deepEqual(payload.imports, [])
+  assert.deepEqual(payload.packages, [
+    {
+      importPath: 'command-line-arguments',
+      name: 'main',
+      fileCount: 1,
+      imports: [],
+    },
+  ])
 })
 
 test('build-tinygo-upstream-frontend-probe parses a real driver bridge package graph with shipped TinyGo source snapshot', async (t) => {
@@ -298,4 +306,19 @@ func main() {
   assert.ok(payload.packageCount > 1)
   assert.ok(payload.fileCount >= 1)
   assert.deepEqual(payload.imports, browserManifest.entryPackage?.imports ?? [])
+  assert.equal(Array.isArray(payload.packages), true)
+  assert.equal(payload.packages.length, payload.packageCount)
+  assert.deepEqual(
+    payload.packages.find((pkg) => pkg.importPath === (browserManifest.entryPackage?.importPath ?? 'command-line-arguments')),
+    {
+      importPath: browserManifest.entryPackage?.importPath ?? 'command-line-arguments',
+      name: browserManifest.entryPackage?.name ?? 'main',
+      fileCount: 1,
+      imports: browserManifest.entryPackage?.imports ?? [],
+    },
+  )
+  assert.equal(
+    payload.packages.some((pkg) => pkg.importPath === 'fmt'),
+    true,
+  )
 })

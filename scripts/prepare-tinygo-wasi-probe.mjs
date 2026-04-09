@@ -116,6 +116,13 @@ import (
 \t"github.com/tinygo-org/tinygo/loader"
 )
 
+type frontendProbePackage struct {
+\tImportPath string   \`json:"importPath"\`
+\tName       string   \`json:"name"\`
+\tFileCount  int      \`json:"fileCount"\`
+\tImports    []string \`json:"imports"\`
+}
+
 type frontendProbeResult struct {
 \tRequestedTarget  string   \`json:"requestedTarget"\`
 \tMainImportPath   string   \`json:"mainImportPath"\`
@@ -124,6 +131,7 @@ type frontendProbeResult struct {
 \tFileCount        int      \`json:"fileCount"\`
 \tDeclarationCount int      \`json:"declarationCount"\`
 \tImports          []string \`json:"imports"\`
+\tPackages         []frontendProbePackage \`json:"packages"\`
 }
 
 func main() {
@@ -192,6 +200,15 @@ func main() {
 \tfor _, file := range mainPkg.Files {
 \t\tdeclarationCount += len(file.Decls)
 \t}
+\tpackagesSummary := make([]frontendProbePackage, 0, len(program.Sorted()))
+\tfor _, pkg := range program.Sorted() {
+\t\tpackagesSummary = append(packagesSummary, frontendProbePackage{
+\t\t\tImportPath: pkg.ImportPath,
+\t\t\tName:       pkg.Name,
+\t\t\tFileCount:  len(pkg.Files),
+\t\t\tImports:    append([]string{}, pkg.Imports...),
+\t\t})
+\t}
 
 \tpayload := frontendProbeResult{
 \t\tRequestedTarget:  targetName,
@@ -201,6 +218,7 @@ func main() {
 \t\tFileCount:        fileCount,
 \t\tDeclarationCount: declarationCount,
 \t\tImports:          append([]string{}, mainPkg.Imports...),
+\t\tPackages:         packagesSummary,
 \t}
 
 \tencoder := json.NewEncoder(os.Stdout)

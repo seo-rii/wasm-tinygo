@@ -170,6 +170,12 @@ export type TinyGoUpstreamFrontendProbeResult = {
   fileCount: number
   declarationCount: number
   imports: string[]
+  packages: Array<{
+    importPath: string
+    name: string
+    fileCount: number
+    imports: string[]
+  }>
 }
 
 export type TinyGoTestHooks = {
