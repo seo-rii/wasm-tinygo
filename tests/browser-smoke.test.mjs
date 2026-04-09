@@ -330,6 +330,25 @@ func main() {
   assert.equal(frontendProbe.mainPackageName, driverBridgeManifest.entryPackage?.name ?? 'main')
   assert.equal(frontendProbe.packageCount > 1, true)
   assert.deepEqual(frontendProbe.imports, driverBridgeManifest.entryPackage?.imports ?? [])
+  assert.equal(Array.isArray(frontendProbe.packages), true)
+  assert.equal(frontendProbe.packages.length, frontendProbe.packageCount)
+  assert.deepEqual(
+    frontendProbe.packages.find((pkg) => pkg.importPath === (driverBridgeManifest.entryPackage?.importPath ?? 'command-line-arguments')),
+    {
+      importPath: driverBridgeManifest.entryPackage?.importPath ?? 'command-line-arguments',
+      name: driverBridgeManifest.entryPackage?.name ?? 'main',
+      fileCount: 1,
+      imports: driverBridgeManifest.entryPackage?.imports ?? [],
+    },
+  )
+  assert.equal(
+    frontendProbe.packages.some((pkg) => pkg.importPath === 'example.com/browserprobe/helper'),
+    true,
+  )
+  assert.equal(
+    frontendProbe.packages.some((pkg) => pkg.importPath === 'fmt'),
+    true,
+  )
 
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
