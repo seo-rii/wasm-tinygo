@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { resolveTinyGoToolchainPaths } from './tinygo-toolchain-paths.mjs'
@@ -64,36 +65,76 @@ export const ensureTinyGoSourceReady = async () => {
   }
 
   await mkdir(path.dirname(paths.cacheDir), { recursive: true })
-  if (!(await pathExists(paths.cacheDir))) {
-    runGit({
-      args: ['clone', '--depth', '1', '--branch', paths.sourceRef, paths.sourceUrl, paths.cacheDir],
-      cwd: rootDir,
-      label: `git clone ${paths.sourceRef}`,
-    })
+  const sourceLockDir = `${paths.cacheDir}.lock`
+  let lockAcquired = false
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    try {
+      await mkdir(sourceLockDir)
+      lockAcquired = true
+      break
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) {
+        throw error
+      }
+      await delay(100)
+    }
+  }
+  if (!lockAcquired) {
+    throw new Error(`TinyGo source fetch failed: timed out waiting for cache lock at ${sourceLockDir}`)
+  }
+  try {
+    if (!(await pathExists(paths.cacheDir))) {
+      runGit({
+        args: ['clone', '--depth', '1', '--branch', paths.sourceRef, paths.sourceUrl, paths.cacheDir],
+        cwd: rootDir,
+        label: `git clone ${paths.sourceRef}`,
+      })
+      return {
+        rootPath: paths.cacheDir,
+        sourceRef: paths.sourceRef,
+        sourceUrl: paths.sourceUrl,
+        sourceVersion: paths.sourceVersion,
+      }
+    }
+
+    const cacheIndexLockPath = path.join(paths.cacheDir, '.git', 'index.lock')
+    for (const gitStep of [
+      {
+        args: ['fetch', '--tags', paths.sourceUrl],
+        label: 'git fetch --tags',
+      },
+      {
+        args: ['checkout', paths.sourceRef],
+        label: `git checkout ${paths.sourceRef}`,
+      },
+    ]) {
+      try {
+        runGit({
+          args: gitStep.args,
+          cwd: paths.cacheDir,
+          label: gitStep.label,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!message.includes('.git/index.lock')) {
+          throw error
+        }
+        await rm(cacheIndexLockPath, { force: true })
+        runGit({
+          args: gitStep.args,
+          cwd: paths.cacheDir,
+          label: gitStep.label,
+        })
+      }
+    }
     return {
       rootPath: paths.cacheDir,
       sourceRef: paths.sourceRef,
       sourceUrl: paths.sourceUrl,
       sourceVersion: paths.sourceVersion,
     }
-  }
-
-  runGit({
-    args: ['fetch', '--tags', paths.sourceUrl],
-    cwd: paths.cacheDir,
-    label: 'git fetch --tags',
-  })
-  runGit({
-    args: ['checkout', paths.sourceRef],
-    cwd: paths.cacheDir,
-    label: `git checkout ${paths.sourceRef}`,
-  })
-
-  return {
-    rootPath: paths.cacheDir,
-    sourceRef: paths.sourceRef,
-    sourceUrl: paths.sourceUrl,
-    sourceVersion: paths.sourceVersion,
+  } finally {
+    await rm(sourceLockDir, { recursive: true, force: true })
   }
 }
 
