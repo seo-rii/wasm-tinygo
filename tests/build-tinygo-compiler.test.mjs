@@ -84,15 +84,31 @@ test('patch-tinygo-wasi generates a browser-specific tinygo command', async (t) 
 go 1.22
 `,
   )
+  await mkdir(path.join(sourceRoot, 'builder'), { recursive: true })
+  await writeFile(
+    path.join(sourceRoot, 'builder', 'build.go'),
+    `package builder
+
+import "github.com/gofrs/flock"
+
+func lock(path string) error {
+	return flock.New(path).Lock()
+}
+`,
+  )
 
   const patch = await patchTinyGoSourceForWasi(sourceRoot)
   assert.equal(patch.commandPath, './cmd/tinygo-browser')
 
   const browserEntryPath = path.join(sourceRoot, 'cmd', 'tinygo-browser', 'main.go')
   const browserEntrySource = await readFile(browserEntryPath, 'utf8')
+  const patchedBuilderSource = await readFile(path.join(sourceRoot, 'builder', 'build.go'), 'utf8')
+  const flockStubSource = await readFile(path.join(sourceRoot, 'wasmbridge', 'flock', 'flock.go'), 'utf8')
   assert.match(browserEntrySource, /package main/)
   assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/builder/)
   assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/compileopts/)
+  assert.match(patchedBuilderSource, /github\.com\/tinygo-org\/tinygo\/wasmbridge\/flock/)
+  assert.match(flockStubSource, /func New\(string\) \*Flock/)
   assert.doesNotMatch(browserEntrySource, /go\.bug\.st\/serial/)
   assert.doesNotMatch(browserEntrySource, /github\.com\/mattn\/go-tty/)
   assert.doesNotMatch(browserEntrySource, /serial\/enumerator/)
@@ -185,10 +201,13 @@ func (c *Config) DefaultBinaryExtension() string {
 `,
   )
   await writeFile(
-    path.join(sourceRoot, 'builder', 'builder.go'),
+    path.join(sourceRoot, 'builder', 'build.go'),
     `package builder
 
-import "github.com/tinygo-org/tinygo/compileopts"
+import (
+	"github.com/gofrs/flock"
+	"github.com/tinygo-org/tinygo/compileopts"
+)
 
 type BuildResult struct {
 	Binary  string
@@ -200,6 +219,10 @@ func NewConfig(options *compileopts.Options) (*compileopts.Config, error) {
 }
 
 func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildResult, error) {
+	lock := flock.New(tmpdir + "/tinygo.lock")
+	if err := lock.Lock(); err != nil {
+		return BuildResult{}, err
+	}
 	return BuildResult{}, nil
 }
 `,

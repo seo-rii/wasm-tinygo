@@ -64,6 +64,47 @@ export const patchTinyGoSourceForWasi = async (sourceRoot) => {
     }
   }
 
+  const flockStubDir = path.join(bridgeRoot, 'flock')
+  await mkdir(flockStubDir, { recursive: true })
+  await writeFile(
+    path.join(flockStubDir, 'flock.go'),
+    `package flock
+
+type Flock struct{}
+
+func New(string) *Flock {
+	return &Flock{}
+}
+
+func (f *Flock) Lock() error {
+	return nil
+}
+
+func (f *Flock) Close() error {
+	return nil
+}
+`,
+  )
+
+  const builderBuildPath = path.join(sourceRoot, 'builder', 'build.go')
+  let patchedBuilderFiles = 0
+  try {
+    const builderBuildSource = await readFile(builderBuildPath, 'utf8')
+    if (builderBuildSource.includes('"github.com/gofrs/flock"')) {
+      await writeFile(
+        builderBuildPath,
+        builderBuildSource.replaceAll('"github.com/gofrs/flock"', `"${modulePath}/wasmbridge/flock"`),
+      )
+      patchedBuilderFiles += 1
+    }
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      patchedBuilderFiles = 0
+    } else {
+      throw error
+    }
+  }
+
   const browserCommandDir = path.join(sourceRoot, 'cmd', 'tinygo-browser')
   await mkdir(browserCommandDir, { recursive: true })
   await writeFile(
@@ -265,7 +306,7 @@ func main() {
   return {
     commandPath: './cmd/tinygo-browser',
     probeCommandPath: './cmd/tinygo-wasi',
-    copiedFileCount: copiedFiles.length + 2,
+    copiedFileCount: copiedFiles.length + patchedBuilderFiles + 3,
     modulePath,
     sourceRoot,
   }
