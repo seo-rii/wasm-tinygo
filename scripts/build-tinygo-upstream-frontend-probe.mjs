@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -7,6 +7,37 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { prepareTinyGoWasiFrontendProbeSource } from './prepare-tinygo-wasi-probe.mjs'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+const removeRecursive = async (targetPath, { attempts = 3 } = {}) => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await rm(targetPath, { recursive: true, force: true })
+      return
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : null
+      if (code !== 'ENOTEMPTY' && code !== 'EBUSY' && code !== 'EPERM') {
+        throw error
+      }
+      if (attempt + 1 >= attempts) {
+        throw error
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
+    }
+  }
+}
+
+const replaceDirectoryFromCopy = async (sourcePath, targetPath, copyOptions) => {
+  const stagedTargetPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`
+  await removeRecursive(stagedTargetPath)
+  try {
+    await cp(sourcePath, stagedTargetPath, copyOptions)
+    await removeRecursive(targetPath)
+    await rename(stagedTargetPath, targetPath)
+  } catch (error) {
+    await removeRecursive(stagedTargetPath).catch(() => {})
+    throw error
+  }
+}
 
 const runGo = ({ argv, cwd, env }) => {
   const result = spawnSync(argv[0], argv.slice(1), {
@@ -122,9 +153,8 @@ export const buildTinyGoUpstreamFrontendProbeWasm = async () => {
     path.join(targetDir, 'wasip1.json'),
   )
   await cp(path.join(source.patchedRoot, 'src'), path.join(probeAssetRoot, 'src'), { recursive: true })
-  await rm(gorootPath, { recursive: true, force: true })
-  await cp(cachedGoroot, gorootPath, { recursive: true, dereference: true })
-  await rm(bridgeWorkDir, { recursive: true, force: true })
+  await replaceDirectoryFromCopy(cachedGoroot, gorootPath, { recursive: true, dereference: true })
+  await removeRecursive(bridgeWorkDir)
 
   const wasmBytes = await readFile(outputPath)
   await writeFile(

@@ -482,6 +482,8 @@ func main() {
   assert.match(activity ?? '', /frontend bridge verified target=wasm llvm=wasm32-unknown-wasi program=main imports=1 packages=[1-9]\d*/)
   assert.match(activity ?? '', /frontend bridge coverage compileUnits=[1-9]\d* graphPackages=[1-9]\d* coveredPackages=[1-9]\d*\/[1-9]\d* compileUnitFiles=[1-9]\d* coveredFiles=[1-9]\d*\/[1-9]\d* depOnly=[1-9]\d* standard=[1-9]\d* local=2 alias=direct/)
   assert.match(activity ?? '', /frontend bridge toolchain version=.*0\.40\.1/)
+  assert.match(activity ?? '', /frontend bootstrap tool plan skipped: backend lowering is active/)
+  assert.doesNotMatch(activity ?? '', /\$ \/usr\/bin\/clang .*tinygo-bootstrap\.c .* -o .*tinygo-bootstrap\.o/)
   assert.doesNotMatch(activity ?? '', /build artifact execution blocked: bootstrap artifact has no WASI entrypoint/)
   assert.doesNotMatch(activity ?? '', /bootstrap exports checksum=/)
   assert.doesNotMatch(activity ?? '', /bootstrap exports manifestBytes=/)

@@ -1410,27 +1410,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           `backend lowered bitcode outputs=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length} last=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length === 0 ? 'none' : backendResultVerification.loweredBitcodeManifest.bitcodeFiles[backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length - 1] ?? 'none'}`,
           'idle',
         )
-        const toolPlan = frontendToolPlan ?? result.plan
-        for (const step of toolPlan) {
-          appendLog(`$ ${step.argv.join(' ')}`, 'running')
-          const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
-          if (stepResult.returncode !== 0) {
-            setPhase('smoke', 'failed', 'error')
-            if (stepResult.stdout.trim() !== '') {
-              appendLog(stepResult.stdout.trim(), 'error')
-            }
-            if (stepResult.stderr.trim() !== '') {
-              appendLog(stepResult.stderr.trim(), 'error')
-            }
-            appendLog(`build step failed with exit code ${stepResult.returncode}`, 'error')
-            return
-          }
+        if (frontendToolPlan?.length) {
+          appendLog('frontend bootstrap tool plan skipped: backend lowering is active', 'idle')
         }
-        const bootstrapArtifact = await fileSystem.readFile(result.artifact ?? '/working/out.wasm')
-        frontendBootstrapArtifactBytes =
-          typeof bootstrapArtifact === 'string'
-            ? textEncoder.encode(bootstrapArtifact)
-            : new Uint8Array(bootstrapArtifact)
         for (const step of [...loweredCommandBatchVerification.compileCommands, loweredCommandBatchVerification.linkCommand]) {
           appendLog(`$ ${step.argv.join(' ')}`, 'running')
           const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
@@ -1624,7 +1606,17 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         if (lastBuildArtifactRunnable) {
           artifactProbeVerified = true
         } else {
-          const bootstrapArtifactBytes = frontendBootstrapArtifactBytes ?? new Uint8Array(artifactBytes)
+          if (lastBuildArtifactKind !== 'bootstrap') {
+            setPhase('verify', 'failed', 'error')
+            appendLog('frontend bootstrap probe skipped: final artifact is not bootstrap', 'error')
+            return
+          }
+          if (!frontendBootstrapArtifactBytes) {
+            setPhase('verify', 'failed', 'error')
+            appendLog('frontend bootstrap probe skipped: bootstrap artifact missing', 'error')
+            return
+          }
+          const bootstrapArtifactBytes = frontendBootstrapArtifactBytes
           const bootstrapModule =
             (await WebAssembly.instantiate(
               bootstrapArtifactBytes as BufferSource,

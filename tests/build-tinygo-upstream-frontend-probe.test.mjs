@@ -167,6 +167,19 @@ test('build-tinygo-upstream-frontend-probe parses a file-backed package graph wi
   ])
 })
 
+test('build-tinygo-upstream-frontend-probe can rebuild its shipped goroot snapshot in place', async () => {
+  const firstBuild = await buildTinyGoUpstreamFrontendProbeWasm()
+  const secondBuild = await buildTinyGoUpstreamFrontendProbeWasm()
+
+  assert.equal(secondBuild.outputPath, firstBuild.outputPath)
+  assert.equal(secondBuild.gorootPath, firstBuild.gorootPath)
+  const bisectSource = await readFile(
+    path.join(secondBuild.gorootPath, 'src', 'internal', 'bisect', 'bisect.go'),
+    'utf8',
+  )
+  assert.match(bisectSource, /^package bisect/m)
+})
+
 test('build-tinygo-upstream-frontend-probe parses a real driver bridge package graph with shipped TinyGo source snapshot', async (t) => {
   const result = await buildTinyGoUpstreamFrontendProbeWasm()
   const bridgeWorkDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-upstream-frontend-bridge-'))
