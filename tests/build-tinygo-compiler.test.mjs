@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { classifyTinyGoCompilerBlockers } from '../scripts/build-tinygo-compiler.mjs'
+import { patchTinyGoSourceForWasi } from '../scripts/patch-tinygo-wasi.mjs'
 
 test('build-tinygo-compiler builds a tinygo compiler wasm from repo source', async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-build-'))
@@ -68,6 +69,178 @@ func main() {
   assert.equal(wasmBytes[3], 0x6d)
 })
 
+test('patch-tinygo-wasi generates a browser-specific tinygo command', async (t) => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-browser-entry-'))
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  const sourceRoot = path.join(tempDir, 'tinygo')
+  await mkdir(sourceRoot, { recursive: true })
+  await writeFile(
+    path.join(sourceRoot, 'go.mod'),
+    `module github.com/tinygo-org/tinygo
+
+go 1.22
+`,
+  )
+
+  const patch = await patchTinyGoSourceForWasi(sourceRoot)
+  assert.equal(patch.commandPath, './cmd/tinygo-browser')
+
+  const browserEntryPath = path.join(sourceRoot, 'cmd', 'tinygo-browser', 'main.go')
+  const browserEntrySource = await readFile(browserEntryPath, 'utf8')
+  assert.match(browserEntrySource, /package main/)
+  assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/builder/)
+  assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/compileopts/)
+  assert.doesNotMatch(browserEntrySource, /go\.bug\.st\/serial/)
+  assert.doesNotMatch(browserEntrySource, /github\.com\/mattn\/go-tty/)
+  assert.doesNotMatch(browserEntrySource, /serial\/enumerator/)
+  assert.doesNotMatch(browserEntrySource, /wasmbridge\/(driver|tinygobackend|tinygofrontend)/)
+})
+
+test('build-tinygo-compiler promotes a patched browser entry to compiler mode before probe fallback', async (t) => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-browser-fallback-'))
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  const sourceRoot = path.join(tempDir, 'tinygo')
+  await mkdir(path.join(sourceRoot, 'builder'), { recursive: true })
+  await mkdir(path.join(sourceRoot, 'compileopts'), { recursive: true })
+  await writeFile(
+    path.join(sourceRoot, 'go.mod'),
+    `module github.com/tinygo-org/tinygo
+
+go 1.22
+`,
+  )
+  await writeFile(
+    path.join(sourceRoot, 'main.go'),
+    `package main
+
+import _ "go.bug.st/serial"
+
+func main() {}
+`,
+  )
+  await writeFile(
+    path.join(sourceRoot, 'compileopts', 'compileopts.go'),
+    `package compileopts
+
+import "time"
+
+type TestConfig struct{}
+
+type Options struct {
+	GOOS            string
+	GOARCH          string
+	GOARM           string
+	GOMIPS          string
+	Target          string
+	BuildMode       string
+	StackSize       uint64
+	Opt             string
+	GC              string
+	PanicStrategy   string
+	Scheduler       string
+	Serial          string
+	Work            bool
+	InterpTimeout   time.Duration
+	PrintIR         bool
+	DumpSSA         bool
+	VerifyIR        bool
+	SkipDWARF       bool
+	Semaphore       chan struct{}
+	Debug           bool
+	Nobounds        bool
+	PrintSizes      string
+	PrintStacks     bool
+	Tags            []string
+	TestConfig      TestConfig
+	GlobalValues    map[string]map[string]string
+	Programmer      string
+	OpenOCDCommands []string
+	LLVMFeatures    string
+	Monitor         bool
+	BaudRate        int
+	Timeout         time.Duration
+	WITPackage      string
+	WITWorld        string
+	GoCompatibility bool
+	PrintCommands   func(string, ...string)
+}
+
+type Config struct {
+	Options *Options
+}
+
+func (o *Options) Verify() error {
+	return nil
+}
+
+func (c *Config) DefaultBinaryExtension() string {
+	return ".wasm"
+}
+`,
+  )
+  await writeFile(
+    path.join(sourceRoot, 'builder', 'builder.go'),
+    `package builder
+
+import "github.com/tinygo-org/tinygo/compileopts"
+
+type BuildResult struct {
+	Binary  string
+	MainDir string
+}
+
+func NewConfig(options *compileopts.Options) (*compileopts.Config, error) {
+	return &compileopts.Config{Options: options}, nil
+}
+
+func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildResult, error) {
+	return BuildResult{}, nil
+}
+`,
+  )
+
+  const outputPath = path.join(tempDir, 'tinygo-compiler.wasm')
+  const manifestPath = path.join(tempDir, 'tinygo-compiler.json')
+  const cwd = new URL('..', import.meta.url).pathname
+  const scriptPath = new URL('../scripts/build-tinygo-compiler.mjs', import.meta.url).pathname
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd,
+    env: {
+      ...process.env,
+      WASM_TINYGO_SOURCE_ROOT: sourceRoot,
+      WASM_TINYGO_COMPILER_OUTPUT_PATH: outputPath,
+      WASM_TINYGO_COMPILER_MANIFEST_PATH: manifestPath,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let output = ''
+  child.stdout.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+  child.stderr.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+
+  assert.equal(exitCode, 0, output)
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  assert.equal(manifest.buildMode, 'patched-browser-entry')
+  assert.equal(manifest.artifactKind, 'compiler')
+  assert.deepEqual(manifest.blockers, ['serial'])
+  assert.match(manifest.fallbackReason ?? '', /go\.bug\.st\/serial/)
+})
+
 test('build-tinygo-compiler falls back to a patched tinygo wasi probe when the direct build fails', async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-fallback-'))
   t.after(async () => {
@@ -123,7 +296,10 @@ go 1.22
   assert.equal(manifest.buildMode, 'patched-wasi-probe')
   assert.equal(manifest.artifactKind, 'bootstrap')
   assert.deepEqual(manifest.blockers, [])
-  assert.match(manifest.fallbackReason ?? '', /no Go files|build failed|directory not found/i)
+  assert.match(
+    manifest.fallbackReason ?? '',
+    /no Go files|build failed|directory not found|no required module provides package|package .* is not in std/i,
+  )
 })
 
 test('classifyTinyGoCompilerBlockers identifies the current upstream wasi blockers', () => {

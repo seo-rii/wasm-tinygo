@@ -84,6 +84,8 @@ export const buildTinyGoCompilerWasm = async () => {
 
   let buildMode = 'direct'
   let fallbackReason = null
+  let directFailureReason = null
+  let patchedEntryFailureReason = null
   let blockers = []
   const initialBuild = tryRunGo({
     argv: ['go', 'build', '-o', outputPath, resolvedMainPath],
@@ -92,14 +94,27 @@ export const buildTinyGoCompilerWasm = async () => {
   })
   if (initialBuild.status !== 0) {
     const patch = await patchTinyGoSourceForWasi(source.rootPath)
-    buildMode = 'patched-wasi-probe'
-    fallbackReason = [initialBuild.stdout, initialBuild.stderr].join('').trim()
-    blockers = classifyTinyGoCompilerBlockers(fallbackReason)
-    runGo({
+    directFailureReason = [initialBuild.stdout, initialBuild.stderr].join('').trim()
+    blockers = classifyTinyGoCompilerBlockers(directFailureReason)
+    const patchedBuild = tryRunGo({
       argv: ['go', 'build', '-o', outputPath, patch.commandPath],
       cwd: source.rootPath,
       env,
     })
+    if (patchedBuild.status === 0) {
+      buildMode = 'patched-browser-entry'
+      fallbackReason = directFailureReason
+    } else {
+      buildMode = 'patched-wasi-probe'
+      patchedEntryFailureReason = [patchedBuild.stdout, patchedBuild.stderr].join('').trim()
+      fallbackReason = patchedEntryFailureReason
+      blockers = classifyTinyGoCompilerBlockers(patchedEntryFailureReason)
+      runGo({
+        argv: ['go', 'build', '-o', outputPath, patch.probeCommandPath ?? patch.commandPath],
+        cwd: source.rootPath,
+        env,
+      })
+    }
   }
 
   const manifestPath =
@@ -115,8 +130,10 @@ export const buildTinyGoCompilerWasm = async () => {
         sourceVersion: source.sourceVersion,
         buildMode,
         fallbackReason,
+        directFailureReason,
+        patchedEntryFailureReason,
         blockers,
-        artifactKind: buildMode === 'direct' ? 'compiler' : 'bootstrap',
+        artifactKind: buildMode === 'patched-wasi-probe' ? 'bootstrap' : 'compiler',
         outputPath,
         wasmBytes: wasmBytes.length,
       },
