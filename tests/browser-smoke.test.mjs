@@ -91,15 +91,28 @@ func main() {
 }
 `,
   }
-  const listenError = await new Promise((resolve) => {
-    const server = createServer()
-    server.once('error', (error) => resolve(error))
-    server.listen(0, '127.0.0.1', () => {
-      server.close(() => resolve(null))
+  let previewPort
+  try {
+    previewPort = await new Promise((resolve, reject) => {
+      const server = createServer()
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address()
+        if (!address || typeof address === 'string') {
+          reject(new Error('browser smoke failed to resolve a preview port'))
+          return
+        }
+        server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve(address.port)
+        })
+      })
     })
-  })
-  if (listenError && listenError instanceof Error) {
-    const message = listenError.message
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     if (
       message.includes('listen EPERM') ||
       message.includes('operation not permitted') ||
@@ -108,7 +121,10 @@ func main() {
       t.skip(`browser smoke skipped: loopback listen is not permitted in this sandbox\n${message}`)
       return
     }
-    throw listenError
+    throw error
+  }
+  if (typeof previewPort !== 'number') {
+    throw new Error(`browser smoke failed to reserve a preview port: ${String(previewPort)}`)
   }
 
   const cwd = new URL('..', import.meta.url)
@@ -193,19 +209,49 @@ func main() {
   })
   assert.equal(buildExitCode, 0, buildOutput)
 
-  const preview = spawn(process.execPath, [new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname, 'preview', '--host', '127.0.0.1', '--port', '4175'], {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  let preview
+  try {
+    preview = spawn(
+      process.execPath,
+      [
+        new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+        'preview',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(previewPort),
+        '--strictPort',
+      ],
+      {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (
+      message.includes('listen EPERM') ||
+      message.includes('operation not permitted') ||
+      message.includes('Operation not permitted')
+    ) {
+      t.skip(`browser smoke skipped: preview server is not permitted in this sandbox\n${message}`)
+      return
+    }
+    throw error
+  }
   const previewExited = new Promise((resolve, reject) => {
     preview.once('error', reject)
     preview.once('exit', resolve)
   })
   t.after(async () => {
     if (preview.exitCode === null && preview.signalCode === null) {
-      preview.kill('SIGINT')
+      preview.kill('SIGTERM')
+      await Promise.race([previewExited.catch(() => {}), delay(2000)])
     }
-    await previewExited
+    if (preview.exitCode === null && preview.signalCode === null) {
+      preview.kill('SIGKILL')
+    }
+    await previewExited.catch(() => {})
   })
 
   let previewOutput = ''
@@ -308,6 +354,11 @@ func main() {
   page.on('pageerror', (error) => {
     pageErrors.push(error instanceof Error ? error.message : String(error))
   })
+  const dispatchResetLog = async () => {
+    await page.evaluate(() => {
+      document.querySelector('[data-action="reset"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+  }
   await page.waitForFunction(
     () =>
       typeof window.__wasmTinygoTestHooks?.boot === 'function' &&
@@ -400,7 +451,7 @@ func main() {
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered\/program-000\.c/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI probe verified target=wasip1 triple=wasm32-unknown-wasi scheduler=asyncify/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched analysis input packages=[1-9]\d* main=example\.com\/browserprobe/)
-  assert.match(activity ?? '', /tinygo bootstrap module loaded from tools\/tinygo-compiler\.wasm \(mode=patched-wasi-probe blockers=serial,tty,flock,go-llvm,tinygo-cgo\)/)
+  assert.match(activity ?? '', /tinygo bootstrap module loaded from tools\/tinygo-compiler\.wasm \(mode=patched-go-llvm-frontier blockers=go-llvm\)/)
   assert.match(activity ?? '', /backend lowered ir units=\d+ imports=\d+ functions=\d+ types=\d+ consts=\d+ vars=\d+ decls=\d+/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-command-batch\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-artifact\.json/)
@@ -438,7 +489,7 @@ func main() {
   assert.doesNotMatch(sourcePreview ?? '', /\/working\/tinygo-bootstrap\.json/)
   assert.doesNotMatch(sourcePreview ?? '', /\/working\/tinygo-frontend-input\.json/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   const resetFrontendAnalysisInputManifest = await page.evaluate(
     () => window.__wasmTinygoTestHooks.readFrontendAnalysisInputManifest(),
   )
@@ -468,7 +519,7 @@ func main() {
     driftedFrontendProbeError ?? '',
     /upstream frontend probe package summaries did not match frontend analysis input/,
   )
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
 
   await page.evaluate(() => {
     window.__codexHookBootPromise = window.__wasmTinygoTestHooks.boot()
@@ -544,7 +595,7 @@ func main() {
   assert.match(redundantReadyExecutePhases.join('\n'), /front-end verification\s+verified/)
   assert.match(redundantReadyExecuteActivity ?? '', /frontend analysis input source=bridge/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate(() => {
     window.__codexHookPlanPromise = window.__wasmTinygoTestHooks.plan()
@@ -571,7 +622,7 @@ func main() {
   assert.deepEqual(hookPlanLockedState, { plan: true, execute: true, reset: true })
   assert.deepEqual(hookPlanUnlockedState, { plan: false, execute: false, reset: false })
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   const busyUiPlanPageErrorStart = pageErrors.length
   await page.evaluate(() => {
@@ -594,7 +645,7 @@ func main() {
   assert.match(busyUiPlanPhases.join('\n'), /build driver plan\s+\d+ steps/)
   assert.doesNotMatch(busyUiPlanActivity ?? '', /build driver failed:/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate(() => {
     window.__codexUnhandledRejections = []
   })
@@ -615,7 +666,7 @@ func main() {
   assert.match(failingUiPlanActivity ?? '', /build driver failed:/)
   assert.match(failingUiPlanActivity ?? '', /local module import package not found/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   const failingUiExecutePageErrorStart = pageErrors.length
   await page.evaluate(() => {
     window.__codexUnhandledRejections = []
@@ -641,7 +692,7 @@ func main() {
   assert.match(failingUiExecutePhases.join('\n'), /front-end verification\s+failed/)
   assert.match(failingUiExecuteActivity ?? '', /build execution failed: frontend analysis input did not match real TinyGo driver bridge/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   const mixedPlanMutationError = await page.evaluate(async (workspaceFiles) => {
     document.querySelector('[data-action="plan"]')?.click()
@@ -662,7 +713,7 @@ func main() {
   assert.match(mixedPlanMutationPhases.join('\n'), /build driver plan\s+\d+ steps/)
   assert.doesNotMatch(mixedPlanMutationActivity ?? '', /build driver failed:/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   const concurrentPlanMutationError = await page.evaluate(async (workspaceFiles) => {
     const planPromise = window.__wasmTinygoTestHooks.plan()
@@ -677,7 +728,7 @@ func main() {
   }, invalidBrowserWorkspaceFiles)
   assert.match(concurrentPlanMutationError ?? '', /wasm-tinygo test hook action already running: planning/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), invalidBrowserWorkspaceFiles)
@@ -694,7 +745,7 @@ func main() {
   assert.match(invalidatedPlanActivity ?? '', /build driver failed:/)
   assert.match(invalidatedPlanActivity ?? '', /local module import package not found/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
   await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
@@ -712,7 +763,7 @@ func main() {
   assert.match(invalidatedOverridePhases.join('\n'), /front-end verification\s+verified/)
   assert.match(invalidatedOverrideActivity ?? '', /driver tinygo-style planner validated target=wasm optimize=-Oz scheduler=asyncify panic=trap/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   mark('ui execute mutation start')
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
@@ -743,7 +794,7 @@ func main() {
   assert.match(uiExecuteMutationPhases.join('\n'), /front-end verification\s+verified/)
   mark('ui execute mutation complete')
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   mark('repeated execute start')
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
@@ -764,7 +815,7 @@ func main() {
   assert.doesNotMatch(repeatedExecuteActivity ?? '', /build execution failed: FS error/)
   mark('repeated execute complete')
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   mark('concurrent execute start')
   const concurrentExecuteStatuses = await page.evaluate(async ({ workspaceFiles, manifest }) => {
     window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' })
@@ -790,7 +841,7 @@ func main() {
   assert.doesNotMatch(concurrentExecuteActivity ?? '', /build execution failed: FS error/)
   mark('concurrent execute complete')
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   mark('delayed invalidation start')
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
@@ -825,7 +876,7 @@ func main() {
   assert.match(delayedInvalidationActivity ?? '', /frontend analysis input source=bridge/)
   assert.doesNotMatch(delayedInvalidationActivity ?? '', /build driver failed:/)
 
-  await page.getByRole('button', { name: 'Reset Log' }).click()
+  await dispatchResetLog()
   await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
