@@ -47,6 +47,46 @@ func llvmVersionMajor() string {
 }
 `
 
+const BUILDER_LLVM_DEFAULT_SOURCE = `//go:build !wasip1
+
+package builder
+
+import (
+\t"strings"
+
+\t"tinygo.org/x/go-llvm"
+)
+
+func llvmVersionMajor() string {
+\treturn strings.Split(llvm.Version, ".")[0]
+}
+
+func llvmVersion() string {
+\treturn llvm.Version
+}
+`
+
+const BUILDER_LLVM_WASIP1_SOURCE = `//go:build wasip1
+
+package builder
+
+import "os"
+
+func llvmVersionMajor() string {
+\tif major := os.Getenv("TINYGO_LLVM_VERSION_MAJOR"); major != "" {
+\t\treturn major
+\t}
+\treturn "20"
+}
+
+func llvmVersion() string {
+\tif version := os.Getenv("TINYGO_LLVM_VERSION"); version != "" {
+\t\treturn version
+\t}
+\treturn "20.0.0"
+}
+`
+
 const readModulePath = async (sourceRoot) => {
   const goMod = await readFile(path.join(sourceRoot, 'go.mod'), 'utf8')
   const matched = goMod.match(/^module\s+(.+)$/m)
@@ -98,6 +138,40 @@ const patchGoenvForWasi = async (sourceRoot) => {
   await writeFile(path.join(sourceRoot, 'goenv', 'llvm_version_default.go'), GOENV_LLVM_DEFAULT_SOURCE)
   await writeFile(path.join(sourceRoot, 'goenv', 'llvm_version_wasip1.go'), GOENV_LLVM_WASIP1_SOURCE)
   return 3
+}
+
+const patchBuilderLLVMVersionForWasi = async (sourceRoot) => {
+  const builderDir = path.join(sourceRoot, 'builder')
+  let patchedFiles = 0
+  for (const fileName of ['commands.go', 'cc.go']) {
+    const filePath = path.join(builderDir, fileName)
+    let original
+    try {
+      original = await readFile(filePath, 'utf8')
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        continue
+      }
+      throw error
+    }
+    const withoutLLVMImport = original
+      .replace('\n\t"tinygo.org/x/go-llvm"', '')
+      .replace('import "tinygo.org/x/go-llvm"\n', '')
+    let patched = withoutLLVMImport
+      .replaceAll('strings.Split(llvm.Version, ".")[0]', 'llvmVersionMajor()')
+      .replaceAll('llvm.Version', 'llvmVersion()')
+    if (patched === original) {
+      continue
+    }
+    await writeFile(filePath, patched)
+    patchedFiles += 1
+  }
+  if (patchedFiles === 0) {
+    return 0
+  }
+  await writeFile(path.join(builderDir, 'llvm_version_default.go'), BUILDER_LLVM_DEFAULT_SOURCE)
+  await writeFile(path.join(builderDir, 'llvm_version_wasip1.go'), BUILDER_LLVM_WASIP1_SOURCE)
+  return patchedFiles + 2
 }
 
 export const patchTinyGoSourceForWasi = async (sourceRoot) => {
@@ -210,6 +284,7 @@ func Process(files []*ast.File, dir, importPath string, fset *token.FileSet, cfl
     }
   }
   const patchedGoenvFiles = await patchGoenvForWasi(sourceRoot)
+  const patchedBuilderLLVMFiles = await patchBuilderLLVMVersionForWasi(sourceRoot)
 
   const browserCommandDir = path.join(sourceRoot, 'cmd', 'tinygo-browser')
   await mkdir(browserCommandDir, { recursive: true })
@@ -412,7 +487,8 @@ func main() {
   return {
     commandPath: './cmd/tinygo-browser',
     probeCommandPath: './cmd/tinygo-wasi',
-    copiedFileCount: copiedFiles.length + patchedBuilderFiles + patchedLoaderFiles + patchedGoenvFiles + 4,
+    copiedFileCount:
+      copiedFiles.length + patchedBuilderFiles + patchedLoaderFiles + patchedGoenvFiles + patchedBuilderLLVMFiles + 4,
     modulePath,
     sourceRoot,
   }
