@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ConsoleStdout, Directory, File, OpenFile, PreopenDirectory, WASI, WASIProcExit } from '@bjorn3/browser_wasi_shim'
@@ -107,11 +107,13 @@ test('build-tinygo-upstream-frontend-probe parses a file-backed package graph wi
     readFile(result.runtimeSysPath, 'utf8'),
     readFile(result.deviceArmPath, 'utf8'),
   ])
+  const deviceDirStat = await lstat(path.join(result.gorootPath, 'src', 'device'))
 
   assert.equal(wasmBytes[0], 0x00)
   assert.equal(wasmBytes[1], 0x61)
   assert.equal(wasmBytes[2], 0x73)
   assert.equal(wasmBytes[3], 0x6d)
+  assert.equal(deviceDirStat.isSymbolicLink(), false)
 
   const packageList = [
     {

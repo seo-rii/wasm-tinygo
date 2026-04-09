@@ -123,7 +123,7 @@ export const buildTinyGoUpstreamFrontendProbeWasm = async () => {
   )
   await cp(path.join(source.patchedRoot, 'src'), path.join(probeAssetRoot, 'src'), { recursive: true })
   await rm(gorootPath, { recursive: true, force: true })
-  await cp(cachedGoroot, gorootPath, { recursive: true })
+  await cp(cachedGoroot, gorootPath, { recursive: true, dereference: true })
   await rm(bridgeWorkDir, { recursive: true, force: true })
 
   const wasmBytes = await readFile(outputPath)
