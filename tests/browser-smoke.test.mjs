@@ -451,7 +451,7 @@ func main() {
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered\/program-000\.c/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI probe verified target=wasip1 triple=wasm32-unknown-wasi scheduler=asyncify/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched analysis input packages=[1-9]\d* main=example\.com\/browserprobe/)
-  assert.match(activity ?? '', /tinygo bootstrap module loaded from tools\/tinygo-compiler\.wasm \(mode=patched-go-llvm-frontier blockers=go-llvm\)/)
+  assert.match(activity ?? '', /tinygo compiler module loaded from tools\/tinygo-compiler\.wasm \(mode=direct\)/)
   assert.match(activity ?? '', /backend lowered ir units=\d+ imports=\d+ functions=\d+ types=\d+ consts=\d+ vars=\d+ decls=\d+/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-command-batch\.json/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-artifact\.json/)

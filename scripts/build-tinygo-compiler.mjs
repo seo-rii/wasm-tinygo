@@ -61,7 +61,13 @@ const resolveCompilerPaths = async () => {
   const outputPath =
     process.env.WASM_TINYGO_COMPILER_OUTPUT_PATH ??
     path.join(rootDir, 'public', 'tools', 'tinygo-compiler.wasm')
-  const mainPath = process.env.WASM_TINYGO_COMPILER_MAIN_PATH ?? '.'
+  const compilerGoos = process.env.WASM_TINYGO_COMPILER_GOOS ?? 'wasip1'
+  const compilerGoarch = process.env.WASM_TINYGO_COMPILER_GOARCH ?? 'wasm'
+  const defaultMainPath =
+    compilerGoos === 'wasip1' || compilerGoarch === 'wasm'
+      ? 'cmd/tinygo-wasi'
+      : '.'
+  const mainPath = process.env.WASM_TINYGO_COMPILER_MAIN_PATH ?? defaultMainPath
   return { outputPath, mainPath }
 }
 

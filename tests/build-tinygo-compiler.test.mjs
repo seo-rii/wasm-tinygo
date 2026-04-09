@@ -69,6 +69,67 @@ func main() {
   assert.equal(wasmBytes[3], 0x6d)
 })
 
+test('build-tinygo-compiler builds the cmd/tinygo-wasi entry when selected', async (t) => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-wasi-default-'))
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  const sourceRoot = path.join(tempDir, 'tinygo')
+  const mainDir = path.join(sourceRoot, 'cmd', 'tinygo-wasi')
+  await mkdir(mainDir, { recursive: true })
+  await writeFile(
+    path.join(sourceRoot, 'go.mod'),
+    `module example.com/tinygo
+
+go 1.22
+`,
+  )
+  await writeFile(
+    path.join(mainDir, 'main.go'),
+    `package main
+
+func main() {
+  println("tinygo-wasi-ok")
+}
+`,
+  )
+
+  const outputPath = path.join(tempDir, 'tinygo-compiler.wasm')
+  const manifestPath = path.join(tempDir, 'tinygo-compiler.json')
+  const cwd = new URL('..', import.meta.url).pathname
+  const scriptPath = new URL('../scripts/build-tinygo-compiler.mjs', import.meta.url).pathname
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd,
+    env: {
+      ...process.env,
+      WASM_TINYGO_SOURCE_ROOT: sourceRoot,
+      WASM_TINYGO_COMPILER_MAIN_PATH: 'cmd/tinygo-wasi',
+      WASM_TINYGO_COMPILER_OUTPUT_PATH: outputPath,
+      WASM_TINYGO_COMPILER_MANIFEST_PATH: manifestPath,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let output = ''
+  child.stdout.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+  child.stderr.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+
+  assert.equal(exitCode, 0, output)
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  assert.equal(manifest.buildMode, 'direct')
+  assert.equal(manifest.artifactKind, 'compiler')
+})
+
 test('patch-tinygo-wasi generates a browser-specific tinygo command', async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-browser-entry-'))
   t.after(async () => {
@@ -344,6 +405,7 @@ func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildRe
     env: {
       ...process.env,
       WASM_TINYGO_SOURCE_ROOT: sourceRoot,
+      WASM_TINYGO_COMPILER_MAIN_PATH: '.',
       WASM_TINYGO_COMPILER_OUTPUT_PATH: outputPath,
       WASM_TINYGO_COMPILER_MANIFEST_PATH: manifestPath,
     },
@@ -510,6 +572,7 @@ func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildRe
     env: {
       ...process.env,
       WASM_TINYGO_SOURCE_ROOT: sourceRoot,
+      WASM_TINYGO_COMPILER_MAIN_PATH: '.',
       WASM_TINYGO_COMPILER_OUTPUT_PATH: outputPath,
       WASM_TINYGO_COMPILER_MANIFEST_PATH: manifestPath,
     },
@@ -564,6 +627,7 @@ go 1.22
     env: {
       ...process.env,
       WASM_TINYGO_SOURCE_ROOT: sourceRoot,
+      WASM_TINYGO_COMPILER_MAIN_PATH: 'cmd/tinygo-wasi',
       WASM_TINYGO_COMPILER_OUTPUT_PATH: outputPath,
       WASM_TINYGO_COMPILER_MANIFEST_PATH: manifestPath,
     },
