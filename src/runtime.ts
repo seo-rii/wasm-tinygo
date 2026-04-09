@@ -457,6 +457,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
   }
 
   const runUpstreamFrontendProbe = async (): Promise<TinyGoUpstreamFrontendProbeResult> => {
+    const browserTinyGoRoot = '/working/.tinygo-root'
     const driverBridgeManifest =
       injectedDriverBridgeManifest === null ? null : cloneJsonValue(injectedDriverBridgeManifest)
     const workspaceFiles = injectedWorkspaceFiles ?? { 'main.go': bootstrapGoEntrySource }
@@ -482,9 +483,26 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     const buildContextModulePath = driverBridgeManifest?.frontendAnalysisInput?.buildContext?.modulePath ?? ''
     const resolvedModulePath = modulePathFromGoMod || buildContextModulePath
     const resolvedGoVersion = goVersionFromGoMod || '1.22'
+    const normalizePackageDirForProbe = (packageInfo: {
+      dir?: string
+      importPath?: string
+      standard?: boolean
+    }) => {
+      const packageDir = packageInfo.dir ?? ''
+      if (packageDir === '/workspace' || packageDir.startsWith('/workspace/')) {
+        return packageDir
+      }
+      if (packageDir === browserTinyGoRoot || packageDir.startsWith(`${browserTinyGoRoot}/`)) {
+        return packageDir
+      }
+      if (packageInfo.standard && (packageInfo.importPath ?? '') !== '') {
+        return `${browserTinyGoRoot}/src/${packageInfo.importPath}`
+      }
+      return packageDir
+    }
     const packageList = driverBridgeManifest?.packageGraph?.length
       ? driverBridgeManifest.packageGraph.map((packageInfo) => {
-        const dir = packageInfo.dir ?? ''
+        const dir = normalizePackageDirForProbe(packageInfo)
         const importPath = packageInfo.importPath ?? ''
         const name = packageInfo.name ?? (importPath !== '' ? importPath.split('/').pop() ?? 'main' : 'main')
         const goFiles = (packageInfo.goFiles ?? []).map((filePath: string) => {
@@ -541,33 +559,49 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         ]
       })()
     const packageListSource = `${JSON.stringify(packageList, null, 2)}\n`
-    const [probeBytes, targetSource, zversionSource, armSource] = await Promise.all([
+    const [probeBytes, targetSource] = await Promise.all([
       loadAssetBytes('tools/tinygo-upstream-frontend-probe.wasm', 'tinygo-upstream-frontend-probe.wasm'),
       loadAssetBytes(
         'tools/tinygo-upstream-frontend-probe/targets/wasip1.json',
         'tinygo-upstream-frontend-probe target wasip1.json',
       ),
-      loadAssetBytes(
-        'tools/tinygo-upstream-frontend-probe/src/runtime/internal/sys/zversion.go',
-        'tinygo-upstream-frontend-probe zversion.go',
-      ),
-      loadAssetBytes(
-        'tools/tinygo-upstream-frontend-probe/src/device/arm/arm.go',
-        'tinygo-upstream-frontend-probe arm.go',
-      ),
     ])
+    const tinygoRootEntries: Record<string, string> = {
+      'targets/wasip1.json': textDecoder.decode(targetSource),
+    }
+    const requiredTinyGoRootFiles = new Set<string>([
+      'src/runtime/internal/sys/zversion.go',
+      'src/device/arm/arm.go',
+    ])
+    for (const packageInfo of driverBridgeManifest?.packageGraph ?? []) {
+      const packageDir = normalizePackageDirForProbe(packageInfo)
+      if (!packageDir.startsWith(`${browserTinyGoRoot}/`)) {
+        continue
+      }
+      const assetDir = packageDir.slice(`${browserTinyGoRoot}/`.length)
+      for (const goFile of packageInfo.goFiles ?? []) {
+        requiredTinyGoRootFiles.add(`${assetDir}/${goFile}`.replace(/\\/g, '/'))
+      }
+    }
+    const tinygoRootFileReads = await Promise.all(
+      [...requiredTinyGoRootFiles].sort().map(async (relativeAssetPath) => [
+        relativeAssetPath,
+        textDecoder.decode(
+          await loadAssetBytes(
+            `tools/tinygo-upstream-frontend-probe/goroot/${relativeAssetPath}`,
+            `tinygo-upstream-frontend-probe ${relativeAssetPath}`,
+          ),
+        ),
+      ] as const),
+    )
+    for (const [relativeAssetPath, contents] of tinygoRootFileReads) {
+      tinygoRootEntries[relativeAssetPath] = contents
+    }
     const stdoutLines: string[] = []
     const stderrLines: string[] = []
     const tinygoRoot = new PreopenDirectory(
-      '/tinygo-root',
-      buildDirectoryContentsFromTextEntries(
-        {
-          'targets/wasip1.json': textDecoder.decode(targetSource),
-          'src/runtime/internal/sys/zversion.go': textDecoder.decode(zversionSource),
-          'src/device/arm/arm.go': textDecoder.decode(armSource),
-        },
-        textEncoder,
-      ),
+      browserTinyGoRoot,
+      buildDirectoryContentsFromTextEntries(tinygoRootEntries, textEncoder),
     )
     const workspace = new PreopenDirectory(
       '/workspace',
@@ -584,7 +618,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     const wasi = new WASI(
       ['tinygo-upstream-frontend-probe'],
       [
-        'TINYGOROOT=/tinygo-root',
+        `TINYGOROOT=${browserTinyGoRoot}`,
         'TINYGO_WASI_TARGET=wasip1',
         'TINYGO_WASI_WORKING_DIR=/workspace',
         'TINYGO_WASI_PACKAGE_JSON_PATH=/workspace/package-list.json',

@@ -305,6 +305,7 @@ func main() {
     () =>
       typeof window.__wasmTinygoTestHooks?.boot === 'function' &&
       typeof window.__wasmTinygoTestHooks?.runUpstreamProbe === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.runUpstreamFrontendProbe === 'function' &&
       typeof window.__wasmTinygoTestHooks?.readFrontendAnalysisInputManifest === 'function' &&
       typeof window.__wasmTinygoTestHooks?.setBuildRequestOverrides === 'function' &&
       typeof window.__wasmTinygoTestHooks?.setDriverBridgeManifest === 'function' &&
@@ -321,10 +322,16 @@ func main() {
   assert.equal(Array.isArray(upstreamProbe.buildTags), true)
   assert.equal(upstreamProbe.buildTags.includes('tinygo.wasm'), true)
   assert.equal(upstreamProbe.scheduler, 'asyncify')
-
-  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
   await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), driverBridgeManifest)
+  const frontendProbe = await page.evaluate(() => window.__wasmTinygoTestHooks.runUpstreamFrontendProbe())
+  assert.equal(frontendProbe.requestedTarget, 'wasip1')
+  assert.equal(frontendProbe.mainImportPath, driverBridgeManifest.entryPackage?.importPath ?? 'command-line-arguments')
+  assert.equal(frontendProbe.mainPackageName, driverBridgeManifest.entryPackage?.name ?? 'main')
+  assert.equal(frontendProbe.packageCount > 1, true)
+  assert.deepEqual(frontendProbe.imports, driverBridgeManifest.entryPackage?.imports ?? [])
+
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
   await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
   await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
   await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
