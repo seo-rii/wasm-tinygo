@@ -104,6 +104,215 @@ func main() {
 }
 `
 
+const tinyGoWasiFrontendProbeMainSource = `package main
+
+import (
+\t"encoding/json"
+\t"fmt"
+\t"go/types"
+\t"os"
+
+\t"github.com/tinygo-org/tinygo/compileopts"
+\t"github.com/tinygo-org/tinygo/loader"
+)
+
+type frontendProbeResult struct {
+\tRequestedTarget  string   \`json:"requestedTarget"\`
+\tMainImportPath   string   \`json:"mainImportPath"\`
+\tMainPackageName  string   \`json:"mainPackageName"\`
+\tPackageCount     int      \`json:"packageCount"\`
+\tFileCount        int      \`json:"fileCount"\`
+\tDeclarationCount int      \`json:"declarationCount"\`
+\tImports          []string \`json:"imports"\`
+}
+
+func main() {
+\ttargetName := os.Getenv("TINYGO_WASI_TARGET")
+\tif targetName == "" {
+\t\ttargetName = "wasip1"
+\t}
+\tpackageJSONPath := os.Getenv("TINYGO_WASI_PACKAGE_JSON_PATH")
+\tif packageJSONPath == "" {
+\t\tfmt.Fprintln(os.Stderr, "missing TINYGO_WASI_PACKAGE_JSON_PATH")
+\t\tos.Exit(1)
+\t}
+\tworkingDir := os.Getenv("TINYGO_WASI_WORKING_DIR")
+\tif workingDir == "" {
+\t\tworkingDir = "/workspace"
+\t}
+
+\toptions := &compileopts.Options{
+\t\tTarget: targetName,
+\t\tGOOS:   "wasip1",
+\t\tGOARCH: "wasm",
+\t\tOpt:    "z",
+\t}
+\tif err := options.Verify(); err != nil {
+\t\tfmt.Fprintln(os.Stderr, err)
+\t\tos.Exit(1)
+\t}
+
+\ttarget, err := compileopts.LoadTarget(options)
+\tif err != nil {
+\t\tfmt.Fprintln(os.Stderr, err)
+\t\tos.Exit(1)
+\t}
+\tconfig := &compileopts.Config{
+\t\tOptions:        options,
+\t\tTarget:         target,
+\t\tGoMinorVersion: 24,
+\t}
+
+\tpackageJSONBytes, err := os.ReadFile(packageJSONPath)
+\tif err != nil {
+\t\tfmt.Fprintln(os.Stderr, err)
+\t\tos.Exit(1)
+\t}
+\tvar packages []loader.PackageJSON
+\tif err := json.Unmarshal(packageJSONBytes, &packages); err != nil {
+\t\tfmt.Fprintln(os.Stderr, err)
+\t\tos.Exit(1)
+\t}
+
+\tprogram, err := loader.LoadFromPackageJSON(config, packages, types.Config{
+\t\tSizes: types.SizesFor("gc", "wasm"),
+\t}, workingDir)
+\tif err != nil {
+\t\tfmt.Fprintln(os.Stderr, err)
+\t\tos.Exit(1)
+\t}
+\tif err := program.Parse(); err != nil {
+\t\tfmt.Fprintln(os.Stderr, err)
+\t\tos.Exit(1)
+\t}
+
+\tmainPkg := program.MainPkg()
+\tfileCount := len(mainPkg.Files)
+\tdeclarationCount := 0
+\tfor _, file := range mainPkg.Files {
+\t\tdeclarationCount += len(file.Decls)
+\t}
+
+\tpayload := frontendProbeResult{
+\t\tRequestedTarget:  targetName,
+\t\tMainImportPath:   mainPkg.ImportPath,
+\t\tMainPackageName:  mainPkg.Name,
+\t\tPackageCount:     len(program.Sorted()),
+\t\tFileCount:        fileCount,
+\t\tDeclarationCount: declarationCount,
+\t\tImports:          append([]string{}, mainPkg.Imports...),
+\t}
+
+\tencoder := json.NewEncoder(os.Stdout)
+\tencoder.SetIndent("", "  ")
+\tif err := encoder.Encode(payload); err != nil {
+\t\tfmt.Fprintln(os.Stderr, err)
+\t\tos.Exit(1)
+\t}
+}
+`
+
+const cgoProcessWasip1Source = `//go:build wasip1
+
+package cgo
+
+import (
+\t"go/ast"
+\t"go/scanner"
+\t"go/token"
+)
+
+func Process(files []*ast.File, dir, importPath string, fset *token.FileSet, cflags []string, goos string) ([]*ast.File, []string, []string, []string, map[string][]byte, []error) {
+\tfor _, file := range files {
+\t\tfor _, importSpec := range file.Imports {
+\t\t\tif importSpec.Path != nil && importSpec.Path.Value == "\\"C\\"" {
+\t\t\t\treturn nil, nil, nil, nil, nil, []error{
+\t\t\t\t\tscanner.Error{
+\t\t\t\t\t\tPos: fset.Position(importSpec.Pos()),
+\t\t\t\t\t\tMsg: "cgo is not supported in TinyGo WASI frontend probe",
+\t\t\t\t\t},
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+\treturn nil, nil, nil, nil, nil, nil
+}
+`
+
+const loaderLoadFromPackageJSONWasip1Source = `//go:build wasip1
+
+package loader
+
+import (
+\t"errors"
+\t"go/ast"
+\t"go/token"
+\t"go/types"
+\t"strings"
+
+\t"github.com/tinygo-org/tinygo/compileopts"
+\t"github.com/tinygo-org/tinygo/goenv"
+)
+
+func LoadFromPackageJSON(config *compileopts.Config, packages []PackageJSON, typeChecker types.Config, workingDir string) (*Program, error) {
+\tif len(packages) == 0 {
+\t\treturn nil, errors.New("no package JSON supplied")
+\t}
+\tif workingDir == "" {
+\t\tworkingDir = packages[len(packages)-1].Dir
+\t}
+\tp := &Program{
+\t\tconfig:      config,
+\t\ttypeChecker: typeChecker,
+\t\tgoroot:      goenv.Get("TINYGOROOT"),
+\t\tworkingDir:  workingDir,
+\t\tPackages:    make(map[string]*Package),
+\t\tfset:        token.NewFileSet(),
+\t}
+
+\tfor _, packageJSON := range packages {
+\t\tpkg := &Package{
+\t\t\tPackageJSON: packageJSON,
+\t\t\tprogram:     p,
+\t\t\tFileHashes:  make(map[string][]byte),
+\t\t\tEmbedGlobals: make(map[string][]*EmbedFile),
+\t\t\tinfo: types.Info{
+\t\t\t\tTypes:      make(map[ast.Expr]types.TypeAndValue),
+\t\t\t\tInstances:  make(map[*ast.Ident]types.Instance),
+\t\t\t\tDefs:       make(map[*ast.Ident]types.Object),
+\t\t\t\tUses:       make(map[*ast.Ident]types.Object),
+\t\t\t\tImplicits:  make(map[ast.Node]types.Object),
+\t\t\t\tScopes:     make(map[ast.Node]*types.Scope),
+\t\t\t\tSelections: make(map[*ast.SelectorExpr]*types.Selection),
+\t\t\t},
+\t\t}
+\t\tif config.TestConfig.CompileTestBinary {
+\t\t\tif pkg.ForTest != "" && strings.HasSuffix(pkg.ImportPath, " ["+pkg.ForTest+".test]") {
+\t\t\t\tnewImportPath := pkg.ImportPath[:len(pkg.ImportPath)-len(" ["+pkg.ForTest+".test]")]
+\t\t\t\tif _, ok := p.Packages[newImportPath]; ok {
+\t\t\t\t\tdelete(p.Packages, newImportPath)
+\t\t\t\t\tfor i, sortedPkg := range p.sorted {
+\t\t\t\t\t\tif sortedPkg.ImportPath == newImportPath {
+\t\t\t\t\t\t\tp.sorted = append(p.sorted[:i], p.sorted[i+1:]...)
+\t\t\t\t\t\t\tbreak
+\t\t\t\t\t\t}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t\tpkg.ImportPath = newImportPath
+\t\t\t}
+\t\t}
+\t\tp.sorted = append(p.sorted, pkg)
+\t\tp.Packages[pkg.ImportPath] = pkg
+\t}
+
+\tif config.TestConfig.CompileTestBinary && !strings.HasSuffix(p.sorted[len(p.sorted)-1].ImportPath, ".test") {
+\t\treturn p, NoTestFilesError{p.sorted[len(p.sorted)-1].ImportPath}
+\t}
+
+\treturn p, nil
+}
+`
+
 const patchGoenv = async (patchedRoot) => {
   const goenvPath = path.join(patchedRoot, 'goenv', 'goenv.go')
   const original = await readFile(goenvPath, 'utf8')
@@ -111,30 +320,66 @@ const patchGoenv = async (patchedRoot) => {
   if (withoutLLVMImport === original) {
     throw new Error('failed to patch TinyGo goenv.go: llvm import not found')
   }
-  const patched = withoutLLVMImport.replaceAll('strings.Split(llvm.Version, ".")[0]', 'llvmVersionMajor()')
+  let patched = withoutLLVMImport.replaceAll('strings.Split(llvm.Version, ".")[0]', 'llvmVersionMajor()')
   if (patched === withoutLLVMImport) {
     throw new Error('failed to patch TinyGo goenv.go: llvm version lookup not found')
   }
+  const goEnvGuardTarget = 'goEnvVarsOnce.Do(func() {'
+  if (!patched.includes(goEnvGuardTarget)) {
+    throw new Error('failed to patch TinyGo goenv.go: go env guard target not found')
+  }
+  patched = patched.replace(
+    goEnvGuardTarget,
+    `${goEnvGuardTarget}
+\t\tif runtime.GOOS == "wasip1" {
+\t\t\tgoEnvVars.GOPATH = os.Getenv("GOPATH")
+\t\t\tgoEnvVars.GOROOT = os.Getenv("GOROOT")
+\t\t\tgoEnvVars.GOVERSION = os.Getenv("GOVERSION")
+\t\t\tif goEnvVars.GOVERSION == "" {
+\t\t\t\tgoEnvVars.GOVERSION = "go1.24.0"
+\t\t\t}
+\t\t\treturn
+\t\t}`,
+  )
   await writeFile(goenvPath, patched)
   await writeFile(path.join(patchedRoot, 'goenv', 'llvm_version_default.go'), goenvLLVMDefaultSource)
   await writeFile(path.join(patchedRoot, 'goenv', 'llvm_version_wasip1.go'), goenvLLVMWasip1Source)
 }
 
-const writeProbeCommand = async (patchedRoot) => {
-  const commandDir = path.join(patchedRoot, 'cmd', 'tinygo-wasi-probe')
-  await mkdir(commandDir, { recursive: true })
-  await writeFile(path.join(commandDir, 'main.go'), tinyGoWasiProbeMainSource)
+const patchCgoForWasip1 = async (patchedRoot) => {
+  const cgoDir = path.join(patchedRoot, 'cgo')
+  const fileNames = ['cgo.go', 'cgo_go122.go', 'const.go', 'security.go', 'sync.go']
+  for (const fileName of fileNames) {
+    const filePath = path.join(cgoDir, fileName)
+    const original = await readFile(filePath, 'utf8')
+    if (original.startsWith('//go:build')) {
+      const patched = original.replace(/^\/\/go:build (.+)$/m, '//go:build !wasip1 && $1')
+      await writeFile(filePath, patched)
+      continue
+    }
+    await writeFile(filePath, `//go:build !wasip1\n\n${original}`)
+  }
+  await writeFile(path.join(cgoDir, 'process_wasip1.go'), cgoProcessWasip1Source)
 }
 
-export const prepareTinyGoWasiProbeSource = async () => {
+const patchLoaderForWasip1 = async (patchedRoot) => {
+  await writeFile(path.join(patchedRoot, 'loader', 'loadjson_wasip1.go'), loaderLoadFromPackageJSONWasip1Source)
+}
+
+const writeCommand = async (patchedRoot, commandName, source) => {
+  const commandDir = path.join(patchedRoot, 'cmd', commandName)
+  await mkdir(commandDir, { recursive: true })
+  await writeFile(path.join(commandDir, 'main.go'), source)
+}
+
+const preparePatchedSource = async ({ cacheDir, patches }) => {
   const source = await ensureTinyGoSourceReady()
-  const patchedRoot =
-    process.env.WASM_TINYGO_WASI_PROBE_SOURCE_ROOT ??
-    path.join(rootDir, '.cache', 'tinygo-src-wasi-probe')
+  const patchedRoot = cacheDir
   await rm(patchedRoot, { recursive: true, force: true })
   await cp(source.rootPath, patchedRoot, { recursive: true })
-  await patchGoenv(patchedRoot)
-  await writeProbeCommand(patchedRoot)
+  for (const patch of patches) {
+    await patch(patchedRoot)
+  }
   return {
     patchedRoot,
     sourceRef: source.sourceRef,
@@ -142,6 +387,34 @@ export const prepareTinyGoWasiProbeSource = async () => {
     sourceVersion: source.sourceVersion,
   }
 }
+
+export const prepareTinyGoWasiProbeSource = async () =>
+  await preparePatchedSource({
+    cacheDir:
+      process.env.WASM_TINYGO_WASI_PROBE_SOURCE_ROOT ??
+      path.join(rootDir, '.cache', 'tinygo-src-wasi-probe'),
+    patches: [
+      patchGoenv,
+      async (patchedRoot) => {
+        await writeCommand(patchedRoot, 'tinygo-wasi-probe', tinyGoWasiProbeMainSource)
+      },
+    ],
+  })
+
+export const prepareTinyGoWasiFrontendProbeSource = async () =>
+  await preparePatchedSource({
+    cacheDir:
+      process.env.WASM_TINYGO_WASI_FRONTEND_PROBE_SOURCE_ROOT ??
+      path.join(rootDir, '.cache', 'tinygo-src-wasi-frontend-probe'),
+    patches: [
+      patchGoenv,
+      patchCgoForWasip1,
+      patchLoaderForWasip1,
+      async (patchedRoot) => {
+        await writeCommand(patchedRoot, 'tinygo-wasi-frontend-probe', tinyGoWasiFrontendProbeMainSource)
+      },
+    ],
+  })
 
 const run = async () => {
   const result = await prepareTinyGoWasiProbeSource()

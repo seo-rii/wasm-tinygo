@@ -7,7 +7,8 @@
     "prepare:tinygo": "node ./scripts/fetch-tinygo-toolchain.mjs",
     "prepare:tinygo-compiler": "node ./scripts/build-tinygo-compiler.mjs",
     "prepare:tinygo-upstream-probe": "node ./scripts/build-tinygo-upstream-probe.mjs",
-    "prepare:assets": "node ./scripts/fetch-emception-worker.mjs && node ./scripts/build-go-probe.mjs && node ./scripts/build-tinygo-upstream-probe.mjs",
+    "prepare:tinygo-upstream-frontend-probe": "node ./scripts/build-tinygo-upstream-frontend-probe.mjs",
+    "prepare:assets": "node ./scripts/fetch-emception-worker.mjs && node ./scripts/build-go-probe.mjs && node ./scripts/build-tinygo-upstream-probe.mjs && node ./scripts/build-tinygo-upstream-frontend-probe.mjs",
     "build:runtime-pack": "node ./scripts/build-runtime-pack.mjs",
     "probe:tinygo-host": "npm run prepare:tinygo && node ./scripts/probe-tinygo-host.mjs",
     "probe:tinygo-driver-bridge": "npm run prepare:tinygo && node ./scripts/probe-tinygo-driver-bridge.mjs",
@@ -17,7 +18,7 @@
     "build": "tsc && vite build --base ./",
     "preview": "vite preview",
     "check": "tsc --noEmit",
-    "test:host": "node --test tests/bootstrap-exports.test.ts tests/build-go-probe.test.mjs tests/build-tinygo-upstream-probe.test.mjs tests/compile-unit.test.ts tests/emception-files.test.mjs tests/fetch-emception-worker.test.mjs tests/fetch-tinygo-toolchain.test.mjs tests/lowered-exports.test.ts tests/patch-emception-worker.test.mjs tests/tinygo-driver-bridge-script.test.mjs tests/tinygo-host.test.mjs",
+    "test:host": "node --test tests/bootstrap-exports.test.ts tests/build-go-probe.test.mjs tests/build-tinygo-upstream-probe.test.mjs tests/build-tinygo-upstream-frontend-probe.test.mjs tests/compile-unit.test.ts tests/emception-files.test.mjs tests/fetch-emception-worker.test.mjs tests/fetch-tinygo-toolchain.test.mjs tests/lowered-exports.test.ts tests/patch-emception-worker.test.mjs tests/tinygo-driver-bridge-script.test.mjs tests/tinygo-host.test.mjs",
     "test:tinygo-host": "npm run prepare:tinygo && node ./scripts/probe-tinygo-driver-bridge.mjs && node --test tests/tinygo-driver-bridge.test.ts",
     "test:wasi": "node --test --test-concurrency=1 tests/driver-wasi.test.mjs",
     "test:browser": "node --test tests/browser-smoke.test.mjs"
