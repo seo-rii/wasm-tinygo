@@ -292,6 +292,174 @@ func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildRe
   assert.match(manifest.fallbackReason ?? '', /go\.bug\.st\/serial/)
 })
 
+test('build-tinygo-compiler reports go-llvm as the remaining blocker after wasi patching', async (t) => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-go-llvm-frontier-'))
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  const sourceRoot = path.join(tempDir, 'tinygo')
+  await mkdir(path.join(sourceRoot, 'builder'), { recursive: true })
+  await mkdir(path.join(sourceRoot, 'compileopts'), { recursive: true })
+  await mkdir(path.join(sourceRoot, 'loader'), { recursive: true })
+  await writeFile(
+    path.join(sourceRoot, 'go.mod'),
+    `module github.com/tinygo-org/tinygo
+
+go 1.22
+`,
+  )
+  await writeFile(
+    path.join(sourceRoot, 'main.go'),
+    `package main
+
+import _ "go.bug.st/serial"
+
+func main() {}
+`,
+  )
+  await writeFile(
+    path.join(sourceRoot, 'compileopts', 'compileopts.go'),
+    `package compileopts
+
+import "time"
+
+type TestConfig struct{}
+
+type Options struct {
+	GOOS            string
+	GOARCH          string
+	GOARM           string
+	GOMIPS          string
+	Target          string
+	BuildMode       string
+	StackSize       uint64
+	Opt             string
+	GC              string
+	PanicStrategy   string
+	Scheduler       string
+	Serial          string
+	Work            bool
+	InterpTimeout   time.Duration
+	PrintIR         bool
+	DumpSSA         bool
+	VerifyIR        bool
+	SkipDWARF       bool
+	Semaphore       chan struct{}
+	Debug           bool
+	Nobounds        bool
+	PrintSizes      string
+	PrintStacks     bool
+	Tags            []string
+	TestConfig      TestConfig
+	GlobalValues    map[string]map[string]string
+	Programmer      string
+	OpenOCDCommands []string
+	LLVMFeatures    string
+	Monitor         bool
+	BaudRate        int
+	Timeout         time.Duration
+	WITPackage      string
+	WITWorld        string
+	GoCompatibility bool
+	PrintCommands   func(string, ...string)
+}
+
+type Config struct {
+	Options *Options
+}
+
+func (o *Options) Verify() error {
+	return nil
+}
+
+func (c *Config) DefaultBinaryExtension() string {
+	return ".wasm"
+}
+`,
+  )
+  await writeFile(
+    path.join(sourceRoot, 'loader', 'loader.go'),
+    `package loader
+
+import "github.com/tinygo-org/tinygo/cgo"
+
+var _ = cgo.Process
+
+func Load() {}
+`,
+  )
+  await writeFile(
+    path.join(sourceRoot, 'builder', 'build.go'),
+    `package builder
+
+import (
+	"github.com/gofrs/flock"
+	"github.com/tinygo-org/tinygo/compileopts"
+	"github.com/tinygo-org/tinygo/loader"
+	"tinygo.org/x/go-llvm"
+)
+
+var _ = llvm.Version
+
+type BuildResult struct {
+	Binary  string
+	MainDir string
+}
+
+func NewConfig(options *compileopts.Options) (*compileopts.Config, error) {
+	return &compileopts.Config{Options: options}, nil
+}
+
+func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildResult, error) {
+	loader.Load()
+	lock := flock.New(tmpdir + "/tinygo.lock")
+	if err := lock.Lock(); err != nil {
+		return BuildResult{}, err
+	}
+	return BuildResult{}, nil
+}
+`,
+  )
+
+  const outputPath = path.join(tempDir, 'tinygo-compiler.wasm')
+  const manifestPath = path.join(tempDir, 'tinygo-compiler.json')
+  const cwd = new URL('..', import.meta.url).pathname
+  const scriptPath = new URL('../scripts/build-tinygo-compiler.mjs', import.meta.url).pathname
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd,
+    env: {
+      ...process.env,
+      WASM_TINYGO_SOURCE_ROOT: sourceRoot,
+      WASM_TINYGO_COMPILER_OUTPUT_PATH: outputPath,
+      WASM_TINYGO_COMPILER_MANIFEST_PATH: manifestPath,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let output = ''
+  child.stdout.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+  child.stderr.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+
+  assert.equal(exitCode, 0, output)
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  assert.equal(manifest.buildMode, 'patched-wasi-probe')
+  assert.equal(manifest.artifactKind, 'bootstrap')
+  assert.deepEqual(manifest.blockers, ['go-llvm'])
+  assert.match(manifest.patchedEntryFailureReason ?? '', /tinygo\.org\/x\/go-llvm/)
+  assert.doesNotMatch(manifest.patchedEntryFailureReason ?? '', /github\.com\/gofrs\/flock/)
+  assert.doesNotMatch(manifest.patchedEntryFailureReason ?? '', /github\.com\/tinygo-org\/tinygo\/cgo/)
+})
+
 test('build-tinygo-compiler falls back to a patched tinygo wasi probe when the direct build fails', async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-fallback-'))
   t.after(async () => {
