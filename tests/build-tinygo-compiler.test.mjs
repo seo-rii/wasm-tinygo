@@ -531,7 +531,7 @@ func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildRe
 
   assert.equal(exitCode, 0, output)
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-  assert.equal(manifest.buildMode, 'patched-wasi-probe')
+  assert.equal(manifest.buildMode, 'patched-go-llvm-frontier')
   assert.equal(manifest.artifactKind, 'bootstrap')
   assert.deepEqual(manifest.blockers, ['go-llvm'])
   assert.match(manifest.patchedEntryFailureReason ?? '', /tinygo\.org\/x\/go-llvm/)

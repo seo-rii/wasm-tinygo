@@ -105,10 +105,13 @@ export const buildTinyGoCompilerWasm = async () => {
       buildMode = 'patched-browser-entry'
       fallbackReason = directFailureReason
     } else {
-      buildMode = 'patched-wasi-probe'
       patchedEntryFailureReason = [patchedBuild.stdout, patchedBuild.stderr].join('').trim()
       fallbackReason = patchedEntryFailureReason
       blockers = classifyTinyGoCompilerBlockers(patchedEntryFailureReason)
+      buildMode =
+        blockers.length === 1 && blockers[0] === 'go-llvm'
+          ? 'patched-go-llvm-frontier'
+          : 'patched-wasi-probe'
       runGo({
         argv: ['go', 'build', '-o', outputPath, patch.probeCommandPath ?? patch.commandPath],
         cwd: source.rootPath,
@@ -133,7 +136,8 @@ export const buildTinyGoCompilerWasm = async () => {
         directFailureReason,
         patchedEntryFailureReason,
         blockers,
-        artifactKind: buildMode === 'patched-wasi-probe' ? 'bootstrap' : 'compiler',
+        artifactKind:
+          buildMode === 'direct' || buildMode === 'patched-browser-entry' ? 'compiler' : 'bootstrap',
         outputPath,
         wasmBytes: wasmBytes.length,
       },
