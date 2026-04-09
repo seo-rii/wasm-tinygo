@@ -65,6 +65,9 @@ jobs:
       - name: Run emception file tests
         run: node --test tests/emception-files.test.ts
 
+      - name: Run TinyGo compiler build regressions
+        run: node --test tests/build-tinygo-compiler.test.mjs
+
       - name: Prepare browser and WASI assets
         run: npm run prepare:assets
 
