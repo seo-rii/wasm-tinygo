@@ -164,6 +164,13 @@ func main() {
   aliasOnlyDriverBridgeManifest.realFrontendAnalysis = driverBridgeManifest.frontendRealAdapter
   const driftedAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
   driftedAnalysisInputBridgeManifest.frontendAnalysisInput.buildContext.target = 'mismatch-target'
+  const driftedFrontendProbeAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
+  const driftedFrontendProbeProgramPackage =
+    driftedFrontendProbeAnalysisInputBridgeManifest.frontendAnalysisInput.packageGraph.find(
+      (packageInfo) => !packageInfo.standard && !packageInfo.depOnly,
+    )
+  assert.ok(driftedFrontendProbeProgramPackage)
+  driftedFrontendProbeProgramPackage.imports = ['fmt']
   const driftedDriverBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
   driftedDriverBridgeManifest.frontendAnalysis.buildContext.target = 'mismatch-target'
   assert.ok((driverBridgeManifest.packageGraph?.length ?? 0) >= 1)
@@ -443,6 +450,25 @@ func main() {
   assert.match(resetPhases.join('\n'), /build execution\s+idle/)
   assert.match(resetPhases.join('\n'), /front-end verification\s+idle/)
   assert.match(resetActivity ?? '', /log cleared/)
+
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
+  await page.evaluate(
+    (manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest),
+    driftedFrontendProbeAnalysisInputBridgeManifest,
+  )
+  const driftedFrontendProbeError = await page.evaluate(async () => {
+    try {
+      await window.__wasmTinygoTestHooks.runUpstreamFrontendProbe()
+      return null
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
+  })
+  assert.match(
+    driftedFrontendProbeError ?? '',
+    /upstream frontend probe package summaries did not match frontend analysis input/,
+  )
+  await page.getByRole('button', { name: 'Reset Log' }).click()
 
   await page.evaluate(() => {
     window.__codexHookBootPromise = window.__wasmTinygoTestHooks.boot()
