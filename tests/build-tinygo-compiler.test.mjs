@@ -85,7 +85,45 @@ go 1.22
 `,
   )
   await mkdir(path.join(sourceRoot, 'builder'), { recursive: true })
+  await mkdir(path.join(sourceRoot, 'goenv'), { recursive: true })
   await mkdir(path.join(sourceRoot, 'loader'), { recursive: true })
+  await writeFile(
+    path.join(sourceRoot, 'goenv', 'goenv.go'),
+    `package goenv
+
+import (
+\t"os"
+\t"runtime"
+\t"strings"
+\t"sync"
+
+\t"tinygo.org/x/go-llvm"
+)
+
+var goEnvVars struct {
+\tGOPATH    string
+\tGOROOT    string
+\tGOVERSION string
+}
+
+var goEnvVarsOnce sync.Once
+
+func readGoEnvVars() error {
+\tgoEnvVarsOnce.Do(func() {
+\t\tgoEnvVars.GOVERSION = "go1.24.0"
+\t})
+\treturn nil
+}
+
+func llvmMajor() string {
+\treturn strings.Split(llvm.Version, ".")[0]
+}
+
+func hostGOOS() string {
+\treturn runtime.GOOS + os.Getenv("GOOS") + llvmMajor()
+}
+`,
+  )
   await writeFile(
     path.join(sourceRoot, 'builder', 'build.go'),
     `package builder
@@ -113,14 +151,21 @@ var _ = cgo.Process
   const browserEntryPath = path.join(sourceRoot, 'cmd', 'tinygo-browser', 'main.go')
   const browserEntrySource = await readFile(browserEntryPath, 'utf8')
   const patchedBuilderSource = await readFile(path.join(sourceRoot, 'builder', 'build.go'), 'utf8')
+  const patchedGoenvSource = await readFile(path.join(sourceRoot, 'goenv', 'goenv.go'), 'utf8')
   const patchedLoaderSource = await readFile(path.join(sourceRoot, 'loader', 'loader.go'), 'utf8')
+  const goenvLLVMDefaultSource = await readFile(path.join(sourceRoot, 'goenv', 'llvm_version_default.go'), 'utf8')
+  const goenvLLVMWasip1Source = await readFile(path.join(sourceRoot, 'goenv', 'llvm_version_wasip1.go'), 'utf8')
   const flockStubSource = await readFile(path.join(sourceRoot, 'wasmbridge', 'flock', 'flock.go'), 'utf8')
   const cgoStubSource = await readFile(path.join(sourceRoot, 'wasmbridge', 'cgo', 'cgo.go'), 'utf8')
   assert.match(browserEntrySource, /package main/)
   assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/builder/)
   assert.match(browserEntrySource, /github\.com\/tinygo-org\/tinygo\/compileopts/)
   assert.match(patchedBuilderSource, /github\.com\/tinygo-org\/tinygo\/wasmbridge\/flock/)
+  assert.match(patchedGoenvSource, /llvmVersionMajor\(\)/)
+  assert.doesNotMatch(patchedGoenvSource, /tinygo\.org\/x\/go-llvm/)
   assert.match(patchedLoaderSource, /github\.com\/tinygo-org\/tinygo\/wasmbridge\/cgo/)
+  assert.match(goenvLLVMDefaultSource, /tinygo\.org\/x\/go-llvm/)
+  assert.match(goenvLLVMWasip1Source, /return "20"/)
   assert.match(flockStubSource, /func New\(string\) \*Flock/)
   assert.match(cgoStubSource, /func Process\(files \[\]\*ast\.File, dir, importPath string, fset \*token\.FileSet/)
   assert.doesNotMatch(browserEntrySource, /go\.bug\.st\/serial/)
