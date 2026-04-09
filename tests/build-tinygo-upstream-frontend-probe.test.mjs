@@ -8,6 +8,7 @@ import { ConsoleStdout, Directory, File, OpenFile, PreopenDirectory, WASI, WASIP
 
 import { buildTinyGoUpstreamFrontendProbeWasm } from '../scripts/build-tinygo-upstream-frontend-probe.mjs'
 import {
+  verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest,
   normalizeTinyGoDriverBridgeManifestForBrowser,
   verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
 } from '../src/compile-unit.ts'
@@ -332,6 +333,17 @@ func main() {
       mainPackageName: browserManifest.entryPackage?.name ?? 'main',
     },
   )
+  assert.deepEqual(
+    verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest(
+      payload,
+      browserManifest.frontendAnalysisInput,
+    ),
+    {
+      entryImportPath: browserManifest.entryPackage?.importPath ?? 'command-line-arguments',
+      graphPackageCount: browserManifest.frontendAnalysisInput?.packageGraph?.length ?? 0,
+      mainPackageName: browserManifest.entryPackage?.name ?? 'main',
+    },
+  )
 })
 
 test('verifyUpstreamFrontendProbeAgainstDriverBridgeManifest rejects mismatched package summaries', () => {
@@ -373,5 +385,96 @@ test('verifyUpstreamFrontendProbeAgainstDriverBridgeManifest rejects mismatched 
         },
       ),
     /upstream frontend probe package summaries did not match real TinyGo driver bridge/,
+  )
+})
+
+test('verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest rejects mismatched package summaries', () => {
+  assert.throws(
+    () =>
+      verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest(
+        {
+          requestedTarget: 'wasip1',
+          mainImportPath: 'command-line-arguments',
+          mainPackageName: 'main',
+          packageCount: 2,
+          fileCount: 1,
+          declarationCount: 1,
+          imports: ['fmt'],
+          packages: [
+            {
+              importPath: 'command-line-arguments',
+              name: 'main',
+              fileCount: 1,
+              imports: ['fmt'],
+            },
+            {
+              importPath: 'fmt',
+              name: 'fmt',
+              fileCount: 4,
+              imports: [],
+            },
+          ],
+        },
+        {
+          buildContext: {
+            target: 'wasm',
+            llvmTarget: 'wasm32-unknown-wasi',
+            goos: 'js',
+            goarch: 'wasm',
+            gc: 'conservative',
+            scheduler: 'asyncify',
+            buildTags: [],
+            modulePath: '',
+          },
+          entryFile: '/workspace/main.go',
+          modulePath: '',
+          optimizeFlag: '-Oz',
+          toolchain: {
+            target: 'wasm',
+            llvmTarget: 'wasm32-unknown-wasi',
+            linker: 'wasm-ld',
+            cflags: [],
+            ldflags: [],
+            translationUnitPath: '/working/tinygo-bootstrap.c',
+            objectOutputPath: '/working/tinygo-bootstrap.o',
+            artifactOutputPath: '/working/out.wasm',
+          },
+          sourceSelection: {
+            targetAssets: [],
+            runtimeSupport: [],
+            program: ['/workspace/main.go'],
+            imported: [],
+            stdlib: ['/working/.tinygo-root/src/fmt/print.go'],
+            allCompile: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+          },
+          packageGraph: [
+            {
+              depOnly: false,
+              dir: '/workspace',
+              files: {
+                goFiles: ['main.go'],
+              },
+              importPath: 'command-line-arguments',
+              imports: ['fmt'],
+              modulePath: '',
+              name: 'main',
+              standard: false,
+            },
+            {
+              depOnly: false,
+              dir: '/working/.tinygo-root/src/fmt',
+              files: {
+                goFiles: ['print.go'],
+              },
+              importPath: 'fmt',
+              imports: ['io'],
+              modulePath: '',
+              name: 'fmt',
+              standard: true,
+            },
+          ],
+        },
+      ),
+    /upstream frontend probe package summaries did not match frontend analysis input/,
   )
 })

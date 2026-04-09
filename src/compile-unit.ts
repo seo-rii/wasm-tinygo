@@ -1100,13 +1100,30 @@ export const normalizeTinyGoDriverBridgeManifestForBrowser = (
   }
 }
 
-export const verifyUpstreamFrontendProbeAgainstDriverBridgeManifest = (
+const verifyUpstreamFrontendProbeAgainstPackageGraph = (
   manifest: TinyGoUpstreamFrontendProbeResult,
-  bridgeManifest: TinyGoDriverBridgeManifest,
+  packageGraph: Array<{
+    files?: {
+      goFiles?: string[]
+    }
+    importPath?: string
+    imports?: string[]
+    name?: string
+  }>,
+  entryPackage: {
+    importPath?: string
+    imports?: string[]
+    name?: string
+  },
+  mismatchMessage: string,
+  options?: {
+    allowPartialPackageGraph?: boolean
+    allowPartialFileSelection?: boolean
+  },
 ) => {
   const packages = manifest.packages ?? []
   if ((manifest.packageCount ?? 0) !== packages.length) {
-    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    throw new Error(mismatchMessage)
   }
   const packageSummaryByImportPath = new Map(
     packages
@@ -1114,54 +1131,59 @@ export const verifyUpstreamFrontendProbeAgainstDriverBridgeManifest = (
       .filter(([importPath]) => importPath !== ''),
   )
   if (packageSummaryByImportPath.size !== packages.length) {
-    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    throw new Error(mismatchMessage)
   }
-  const entryImportPath = bridgeManifest.entryPackage?.importPath ?? 'command-line-arguments'
-  const mainPackageName = bridgeManifest.entryPackage?.name ?? 'main'
+  const entryImportPath = entryPackage.importPath ?? 'command-line-arguments'
+  const mainPackageName = entryPackage.name ?? 'main'
   if (
     (manifest.mainImportPath ?? '') !== entryImportPath ||
     (manifest.mainPackageName ?? '') !== mainPackageName
   ) {
-    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    throw new Error(mismatchMessage)
   }
-  const expectedEntryImports = [...(bridgeManifest.entryPackage?.imports ?? [])].sort()
+  const expectedEntryImports = [...(entryPackage.imports ?? [])].sort()
   const actualEntryImports = [...(manifest.imports ?? [])].sort()
   if (expectedEntryImports.length !== actualEntryImports.length) {
-    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    throw new Error(mismatchMessage)
   }
   for (const [index, importPath] of expectedEntryImports.entries()) {
     if (actualEntryImports[index] !== importPath) {
-      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+      throw new Error(mismatchMessage)
     }
   }
 
-  const graphPackages = (bridgeManifest.packageGraph ?? []).filter((packageInfo) => (packageInfo.importPath ?? '') !== '')
-  if (graphPackages.length !== packages.length) {
-    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+  const graphPackages = packageGraph.filter((packageInfo) => (packageInfo.importPath ?? '') !== '')
+  if (!(options?.allowPartialPackageGraph ?? false) && graphPackages.length !== packages.length) {
+    throw new Error(mismatchMessage)
   }
   for (const packageInfo of graphPackages) {
     const importPath = packageInfo.importPath ?? ''
     const packageSummary = packageSummaryByImportPath.get(importPath)
     if (!packageSummary) {
-      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+      throw new Error(mismatchMessage)
     }
     if ((packageInfo.name ?? '') !== '' && (packageSummary.name ?? '') !== packageInfo.name) {
-      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+      throw new Error(mismatchMessage)
     }
-    const expectedFileCount = (packageInfo.importPath ?? '') === 'unsafe'
+    const expectedFileCount = importPath === 'unsafe'
       ? 0
-      : (packageInfo.goFiles ?? []).length
-    if ((packageSummary.fileCount ?? 0) !== expectedFileCount) {
-      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+      : (packageInfo.files?.goFiles ?? []).length
+    const actualFileCount = packageSummary.fileCount ?? 0
+    if (options?.allowPartialFileSelection ?? false) {
+      if (actualFileCount < expectedFileCount) {
+        throw new Error(mismatchMessage)
+      }
+    } else if (actualFileCount !== expectedFileCount) {
+      throw new Error(mismatchMessage)
     }
     const expectedImports = [...(packageInfo.imports ?? [])].sort()
     const actualImports = [...(packageSummary.imports ?? [])].sort()
     if (expectedImports.length !== actualImports.length) {
-      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+      throw new Error(mismatchMessage)
     }
     for (const [index, dependencyImportPath] of expectedImports.entries()) {
       if (actualImports[index] !== dependencyImportPath) {
-        throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+        throw new Error(mismatchMessage)
       }
     }
   }
@@ -1171,6 +1193,49 @@ export const verifyUpstreamFrontendProbeAgainstDriverBridgeManifest = (
     graphPackageCount: graphPackages.length,
     mainPackageName,
   }
+}
+
+export const verifyUpstreamFrontendProbeAgainstDriverBridgeManifest = (
+  manifest: TinyGoUpstreamFrontendProbeResult,
+  bridgeManifest: TinyGoDriverBridgeManifest,
+) =>
+  verifyUpstreamFrontendProbeAgainstPackageGraph(
+    manifest,
+    (bridgeManifest.packageGraph ?? []).map((packageInfo) => ({
+      files: {
+        goFiles: packageInfo.goFiles ?? [],
+      },
+      importPath: packageInfo.importPath,
+      imports: packageInfo.imports,
+      name: packageInfo.name,
+    })),
+    bridgeManifest.entryPackage ?? {},
+    'upstream frontend probe package summaries did not match real TinyGo driver bridge',
+  )
+
+export const verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest = (
+  manifest: TinyGoUpstreamFrontendProbeResult,
+  frontendAnalysisInputManifest?: TinyGoFrontendInputManifest,
+) => {
+  const packageGraph = frontendAnalysisInputManifest?.packageGraph ?? []
+  const programPackages = packageGraph.filter((packageInfo) => !packageInfo.standard && !packageInfo.depOnly)
+  if (programPackages.length !== 1) {
+    throw new Error('upstream frontend probe package summaries did not match frontend analysis input')
+  }
+  return verifyUpstreamFrontendProbeAgainstPackageGraph(
+    manifest,
+    packageGraph,
+    {
+      importPath: programPackages[0].importPath,
+      imports: programPackages[0].imports,
+      name: programPackages[0].name,
+    },
+    'upstream frontend probe package summaries did not match frontend analysis input',
+    {
+      allowPartialFileSelection: true,
+      allowPartialPackageGraph: true,
+    },
+  )
 }
 
 const defaultTargetProfiles: Record<string, { llvmTarget: string; linker: string; cflags: string[]; ldflags: string[] }> = {
