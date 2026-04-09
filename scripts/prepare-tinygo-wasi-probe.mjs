@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -334,21 +334,23 @@ func LoadFromPackageJSON(config *compileopts.Config, packages []PackageJSON, typ
 const patchGoenv = async (patchedRoot) => {
   const goenvPath = path.join(patchedRoot, 'goenv', 'goenv.go')
   const original = await readFile(goenvPath, 'utf8')
-  const withoutLLVMImport = original.replace('\n\t"tinygo.org/x/go-llvm"', '')
-  if (withoutLLVMImport === original) {
-    throw new Error('failed to patch TinyGo goenv.go: llvm import not found')
+  let patched = original
+  if (patched.includes('\n\t"tinygo.org/x/go-llvm"')) {
+    patched = patched.replace('\n\t"tinygo.org/x/go-llvm"', '')
   }
-  let patched = withoutLLVMImport.replaceAll('strings.Split(llvm.Version, ".")[0]', 'llvmVersionMajor()')
-  if (patched === withoutLLVMImport) {
+  if (patched.includes('strings.Split(llvm.Version, ".")[0]')) {
+    patched = patched.replaceAll('strings.Split(llvm.Version, ".")[0]', 'llvmVersionMajor()')
+  } else if (!patched.includes('llvmVersionMajor()')) {
     throw new Error('failed to patch TinyGo goenv.go: llvm version lookup not found')
   }
   const goEnvGuardTarget = 'goEnvVarsOnce.Do(func() {'
   if (!patched.includes(goEnvGuardTarget)) {
     throw new Error('failed to patch TinyGo goenv.go: go env guard target not found')
   }
-  patched = patched.replace(
-    goEnvGuardTarget,
-    `${goEnvGuardTarget}
+  if (!patched.includes('if runtime.GOOS == "wasip1" {')) {
+    patched = patched.replace(
+      goEnvGuardTarget,
+      `${goEnvGuardTarget}
 \t\tif runtime.GOOS == "wasip1" {
 \t\t\tgoEnvVars.GOPATH = os.Getenv("GOPATH")
 \t\t\tgoEnvVars.GOROOT = os.Getenv("GOROOT")
@@ -358,7 +360,8 @@ const patchGoenv = async (patchedRoot) => {
 \t\t\t}
 \t\t\treturn
 \t\t}`,
-  )
+    )
+  }
   await writeFile(goenvPath, patched)
   await writeFile(path.join(patchedRoot, 'goenv', 'llvm_version_default.go'), goenvLLVMDefaultSource)
   await writeFile(path.join(patchedRoot, 'goenv', 'llvm_version_wasip1.go'), goenvLLVMWasip1Source)
@@ -393,10 +396,40 @@ const writeCommand = async (patchedRoot, commandName, source) => {
 const preparePatchedSource = async ({ cacheDir, patches }) => {
   const source = await ensureTinyGoSourceReady()
   const patchedRoot = cacheDir
-  await rm(patchedRoot, { recursive: true, force: true })
-  await cp(source.rootPath, patchedRoot, { recursive: true })
-  for (const patch of patches) {
-    await patch(patchedRoot)
+  const stagedRoot = `${cacheDir}.next-${process.pid}-${Date.now()}`
+  const staleRoot = `${cacheDir}.stale-${process.pid}-${Date.now()}`
+  await rm(stagedRoot, { recursive: true, force: true })
+  await cp(source.rootPath, stagedRoot, { recursive: true })
+  let movedExistingCache = false
+  let swappedStagedCache = false
+  try {
+    for (const patch of patches) {
+      await patch(stagedRoot)
+    }
+    try {
+      await rename(patchedRoot, staleRoot)
+      movedExistingCache = true
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error
+      }
+    }
+    try {
+      await rename(stagedRoot, patchedRoot)
+      swappedStagedCache = true
+    } catch (error) {
+      if (movedExistingCache) {
+        await rename(staleRoot, patchedRoot).catch(() => {})
+      }
+      throw error
+    }
+  } finally {
+    if (!swappedStagedCache) {
+      await rm(stagedRoot, { recursive: true, force: true })
+    }
+    if (movedExistingCache) {
+      await rm(staleRoot, { recursive: true, force: true }).catch(() => {})
+    }
   }
   return {
     patchedRoot,
