@@ -42,6 +42,7 @@ import {
   verifyLoweringPlanAgainstWorkItemsManifest,
   verifyIntermediateManifestAgainstCompileUnitManifest,
   verifyCompileUnitManifestAgainstCompileRequest,
+  verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest,
   verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
   verifyWorkItemsManifestAgainstLoweringManifest,
   type TinyGoBackendInputManifest,
@@ -644,7 +645,21 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
 
     const result = JSON.parse(stdoutLines.join('\n')) as TinyGoUpstreamFrontendProbeResult
     if (driverBridgeManifest?.packageGraph?.length) {
-      verifyUpstreamFrontendProbeAgainstDriverBridgeManifest(result, driverBridgeManifest)
+      const bridgeVerification = verifyUpstreamFrontendProbeAgainstDriverBridgeManifest(result, driverBridgeManifest)
+      appendLog(
+        `patched upstream TinyGo WASI frontend probe matched driver bridge packages=${bridgeVerification.graphPackageCount} main=${bridgeVerification.entryImportPath}`,
+        'success',
+      )
+    }
+    if (driverBridgeManifest?.frontendAnalysisInput?.packageGraph?.length) {
+      const analysisInputVerification = verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest(
+        result,
+        driverBridgeManifest.frontendAnalysisInput,
+      )
+      appendLog(
+        `patched upstream TinyGo WASI frontend probe matched analysis input packages=${analysisInputVerification.graphPackageCount} main=${analysisInputVerification.entryImportPath}`,
+        'success',
+      )
     }
     return result
   }
