@@ -42,6 +42,7 @@ import {
   verifyLoweringPlanAgainstWorkItemsManifest,
   verifyIntermediateManifestAgainstCompileUnitManifest,
   verifyCompileUnitManifestAgainstCompileRequest,
+  verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
   verifyWorkItemsManifestAgainstLoweringManifest,
   type TinyGoBackendInputManifest,
   type TinyGoBackendResultManifest,
@@ -54,6 +55,7 @@ import {
   type TinyGoLoweringManifest,
   type TinyGoLoweredSourcesManifest,
   type TinyGoLoweringPlanManifest,
+  type TinyGoUpstreamFrontendProbeResult,
   type TinyGoWorkItemsManifest,
 } from './compile-unit'
 
@@ -161,22 +163,7 @@ export type TinyGoUpstreamProbeResult = {
   scheduler: string
   linker: string
 }
-
-export type TinyGoUpstreamFrontendProbeResult = {
-  requestedTarget: string
-  mainImportPath: string
-  mainPackageName: string
-  packageCount: number
-  fileCount: number
-  declarationCount: number
-  imports: string[]
-  packages: Array<{
-    importPath: string
-    name: string
-    fileCount: number
-    imports: string[]
-  }>
-}
+export type { TinyGoUpstreamFrontendProbeResult } from './compile-unit'
 
 export type TinyGoTestHooks = {
   boot(): Promise<void>
@@ -655,7 +642,11 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       throw new Error(stderrLines.join('\n'))
     }
 
-    return JSON.parse(stdoutLines.join('\n')) as TinyGoUpstreamFrontendProbeResult
+    const result = JSON.parse(stdoutLines.join('\n')) as TinyGoUpstreamFrontendProbeResult
+    if (driverBridgeManifest?.packageGraph?.length) {
+      verifyUpstreamFrontendProbeAgainstDriverBridgeManifest(result, driverBridgeManifest)
+    }
+    return result
   }
 
   void loadRustRuntimeAssetBytes('runtime-manifest.v3.json', 'wasm-rust runtime manifest')
