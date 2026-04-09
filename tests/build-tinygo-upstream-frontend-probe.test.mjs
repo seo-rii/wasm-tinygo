@@ -7,7 +7,10 @@ import path from 'node:path'
 import { ConsoleStdout, Directory, File, OpenFile, PreopenDirectory, WASI, WASIProcExit } from '@bjorn3/browser_wasi_shim'
 
 import { buildTinyGoUpstreamFrontendProbeWasm } from '../scripts/build-tinygo-upstream-frontend-probe.mjs'
-import { normalizeTinyGoDriverBridgeManifestForBrowser } from '../src/compile-unit.ts'
+import {
+  normalizeTinyGoDriverBridgeManifestForBrowser,
+  verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
+} from '../src/compile-unit.ts'
 
 const textEncoder = new TextEncoder()
 const repoRoot = new URL('..', import.meta.url)
@@ -320,5 +323,55 @@ func main() {
   assert.equal(
     payload.packages.some((pkg) => pkg.importPath === 'fmt'),
     true,
+  )
+  assert.deepEqual(
+    verifyUpstreamFrontendProbeAgainstDriverBridgeManifest(payload, browserManifest),
+    {
+      entryImportPath: browserManifest.entryPackage?.importPath ?? 'command-line-arguments',
+      graphPackageCount: browserManifest.packageGraph?.length ?? 0,
+      mainPackageName: browserManifest.entryPackage?.name ?? 'main',
+    },
+  )
+})
+
+test('verifyUpstreamFrontendProbeAgainstDriverBridgeManifest rejects mismatched package summaries', () => {
+  assert.throws(
+    () =>
+      verifyUpstreamFrontendProbeAgainstDriverBridgeManifest(
+        {
+          requestedTarget: 'wasip1',
+          mainImportPath: 'command-line-arguments',
+          mainPackageName: 'main',
+          packageCount: 1,
+          fileCount: 1,
+          declarationCount: 1,
+          imports: [],
+          packages: [
+            {
+              importPath: 'command-line-arguments',
+              name: 'main',
+              fileCount: 2,
+              imports: [],
+            },
+          ],
+        },
+        {
+          entryPackage: {
+            importPath: 'command-line-arguments',
+            name: 'main',
+            imports: [],
+          },
+          packageGraph: [
+            {
+              dir: '/workspace',
+              goFiles: ['main.go'],
+              importPath: 'command-line-arguments',
+              imports: [],
+              name: 'main',
+            },
+          ],
+        },
+      ),
+    /upstream frontend probe package summaries did not match real TinyGo driver bridge/,
   )
 })

@@ -515,6 +515,22 @@ export type TinyGoDriverBridgeManifest = {
   }
 }
 
+export type TinyGoUpstreamFrontendProbeResult = {
+  requestedTarget?: string
+  mainImportPath?: string
+  mainPackageName?: string
+  packageCount?: number
+  fileCount?: number
+  declarationCount?: number
+  imports?: string[]
+  packages?: Array<{
+    importPath?: string
+    name?: string
+    fileCount?: number
+    imports?: string[]
+  }>
+}
+
 export const normalizeTinyGoDriverBridgeManifestForBrowser = (
   manifest: TinyGoDriverBridgeManifest,
   options?: {
@@ -1081,6 +1097,79 @@ export const normalizeTinyGoDriverBridgeManifestForBrowser = (
     realFrontendAnalysis: normalizedFrontendRealAdapter,
     packageGraph: normalizedPackageGraph,
     toolchain: normalizedToolchain,
+  }
+}
+
+export const verifyUpstreamFrontendProbeAgainstDriverBridgeManifest = (
+  manifest: TinyGoUpstreamFrontendProbeResult,
+  bridgeManifest: TinyGoDriverBridgeManifest,
+) => {
+  const packages = manifest.packages ?? []
+  if ((manifest.packageCount ?? 0) !== packages.length) {
+    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+  }
+  const packageSummaryByImportPath = new Map(
+    packages
+      .map((packageInfo) => [packageInfo.importPath ?? '', packageInfo] as const)
+      .filter(([importPath]) => importPath !== ''),
+  )
+  if (packageSummaryByImportPath.size !== packages.length) {
+    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+  }
+  const entryImportPath = bridgeManifest.entryPackage?.importPath ?? 'command-line-arguments'
+  const mainPackageName = bridgeManifest.entryPackage?.name ?? 'main'
+  if (
+    (manifest.mainImportPath ?? '') !== entryImportPath ||
+    (manifest.mainPackageName ?? '') !== mainPackageName
+  ) {
+    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+  }
+  const expectedEntryImports = [...(bridgeManifest.entryPackage?.imports ?? [])].sort()
+  const actualEntryImports = [...(manifest.imports ?? [])].sort()
+  if (expectedEntryImports.length !== actualEntryImports.length) {
+    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+  }
+  for (const [index, importPath] of expectedEntryImports.entries()) {
+    if (actualEntryImports[index] !== importPath) {
+      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    }
+  }
+
+  const graphPackages = (bridgeManifest.packageGraph ?? []).filter((packageInfo) => (packageInfo.importPath ?? '') !== '')
+  if (graphPackages.length !== packages.length) {
+    throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+  }
+  for (const packageInfo of graphPackages) {
+    const importPath = packageInfo.importPath ?? ''
+    const packageSummary = packageSummaryByImportPath.get(importPath)
+    if (!packageSummary) {
+      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    }
+    if ((packageInfo.name ?? '') !== '' && (packageSummary.name ?? '') !== packageInfo.name) {
+      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    }
+    const expectedFileCount = (packageInfo.importPath ?? '') === 'unsafe'
+      ? 0
+      : (packageInfo.goFiles ?? []).length
+    if ((packageSummary.fileCount ?? 0) !== expectedFileCount) {
+      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    }
+    const expectedImports = [...(packageInfo.imports ?? [])].sort()
+    const actualImports = [...(packageSummary.imports ?? [])].sort()
+    if (expectedImports.length !== actualImports.length) {
+      throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+    }
+    for (const [index, dependencyImportPath] of expectedImports.entries()) {
+      if (actualImports[index] !== dependencyImportPath) {
+        throw new Error('upstream frontend probe package summaries did not match real TinyGo driver bridge')
+      }
+    }
+  }
+
+  return {
+    entryImportPath,
+    graphPackageCount: graphPackages.length,
+    mainPackageName,
   }
 }
 
