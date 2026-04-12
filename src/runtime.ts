@@ -359,17 +359,21 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     try {
       const compilerManifest = await loadCompilerManifest()
       const compilerBytes = await loadAssetBytes('tools/tinygo-compiler.wasm', 'tinygo-compiler.wasm')
-      if (compilerManifest?.artifactKind === 'bootstrap' || compilerManifest?.buildMode === 'patched-wasi-probe') {
-        const blockers =
-          Array.isArray(compilerManifest.blockers) && compilerManifest.blockers.length > 0
-            ? ` blockers=${compilerManifest.blockers.join(',')}`
-            : ''
+      if (compilerManifest?.artifactKind === 'compiler') {
         appendLog(
-          `tinygo bootstrap module loaded from tools/tinygo-compiler.wasm (mode=${compilerManifest.buildMode ?? 'unknown'}${blockers})`,
+          `tinygo compiler module loaded from tools/tinygo-compiler.wasm (mode=${compilerManifest.buildMode ?? 'direct'})`,
           'success',
         )
       } else {
-        appendLog('tinygo compiler module loaded from tools/tinygo-compiler.wasm (mode=direct)', 'success')
+        const compilerBuildMode = compilerManifest?.buildMode ?? 'unknown'
+        const blockers =
+          Array.isArray(compilerManifest?.blockers) && compilerManifest.blockers.length > 0
+            ? ` blockers=${compilerManifest.blockers.join(',')}`
+            : ''
+        appendLog(
+          `tinygo bootstrap module loaded from tools/tinygo-compiler.wasm (mode=${compilerBuildMode}${blockers})`,
+          'success',
+        )
       }
       return compilerBytes
     } catch (error) {
@@ -1607,10 +1611,14 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           artifactProbeVerified = true
         } else {
           if (lastBuildArtifactKind !== 'bootstrap') {
-            setPhase('verify', 'failed', 'error')
-            appendLog('frontend bootstrap probe skipped: final artifact is not bootstrap', 'error')
-            return
-          }
+            if (!frontendCommandArtifactVerification) {
+              setPhase('verify', 'failed', 'error')
+              appendLog('frontend bootstrap probe skipped: final artifact is not bootstrap', 'error')
+              return
+            }
+            appendLog('frontend bootstrap probe skipped: final artifact is not bootstrap', 'idle')
+            artifactProbeVerified = true
+          } else {
           if (!frontendBootstrapArtifactBytes) {
             setPhase('verify', 'failed', 'error')
             appendLog('frontend bootstrap probe skipped: bootstrap artifact missing', 'error')
@@ -1733,6 +1741,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
               `bootstrap verification failed: ${bootstrapVerification.reason}`,
               'error',
             )
+          }
           }
         }
       } catch (error) {

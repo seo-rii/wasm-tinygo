@@ -99,6 +99,47 @@ const readModulePath = async (sourceRoot) => {
 const rewriteImports = (source, modulePath) =>
   source.replaceAll('"wasm-tinygo/internal/', `"${modulePath}/wasmbridge/`)
 
+export const syncTinyGoBridgeSources = async (sourceRoot) => {
+  const modulePath = await readModulePath(sourceRoot)
+  const bridgeRoot = path.join(sourceRoot, 'wasmbridge')
+  await mkdir(bridgeRoot, { recursive: true })
+
+  const copiedFiles = []
+  for (const directory of BRIDGE_DIRECTORIES) {
+    const sourceDir = path.join(rootDir, directory)
+    const targetDir = path.join(bridgeRoot, directory.replace(/^internal\//, ''))
+    await cp(sourceDir, targetDir, { recursive: true, force: true })
+  }
+
+  for (const directory of BRIDGE_DIRECTORIES) {
+    const targetDir = path.join(bridgeRoot, directory.replace(/^internal\//, ''))
+    const stack = [targetDir]
+    while (stack.length > 0) {
+      const currentDir = stack.pop()
+      const names = await readdir(currentDir, { withFileTypes: true })
+      for (const entry of names) {
+        const entryPath = path.join(currentDir, entry.name)
+        if (entry.isDirectory()) {
+          stack.push(entryPath)
+          continue
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.go')) {
+          continue
+        }
+        const contents = await readFile(entryPath, 'utf8')
+        await writeFile(entryPath, rewriteImports(contents, modulePath))
+        copiedFiles.push(entryPath)
+      }
+    }
+  }
+
+  return {
+    copiedFileCount: copiedFiles.length,
+    modulePath,
+    sourceRoot,
+  }
+}
+
 const patchGoenvForWasi = async (sourceRoot) => {
   const goenvPath = path.join(sourceRoot, 'goenv', 'goenv.go')
   let original
@@ -117,6 +158,12 @@ const patchGoenvForWasi = async (sourceRoot) => {
   let patched = withoutLLVMImport.replaceAll('strings.Split(llvm.Version, ".")[0]', 'llvmVersionMajor()')
   if (patched === withoutLLVMImport) {
     throw new Error('failed to patch TinyGo goenv.go: llvm version lookup not found')
+  }
+  if (!patched.includes('strings.')) {
+    patched = patched
+      .replace('\n\t"strings"', '')
+      .replace('import "strings"\n', '')
+      .replace(/import \(\n\s*\)/m, '')
   }
   const goEnvGuardTarget = 'goEnvVarsOnce.Do(func() {'
   if (patched.includes(goEnvGuardTarget)) {
@@ -160,6 +207,12 @@ const patchBuilderLLVMVersionForWasi = async (sourceRoot) => {
     let patched = withoutLLVMImport
       .replaceAll('strings.Split(llvm.Version, ".")[0]', 'llvmVersionMajor()')
       .replaceAll('llvm.Version', 'llvmVersion()')
+    if (!patched.includes('strings.')) {
+      patched = patched
+        .replace('\n\t"strings"', '')
+        .replace('import "strings"\n', '')
+        .replace(/import \(\n\s*\)/m, '')
+    }
     if (patched === original) {
       continue
     }
@@ -175,38 +228,8 @@ const patchBuilderLLVMVersionForWasi = async (sourceRoot) => {
 }
 
 export const patchTinyGoSourceForWasi = async (sourceRoot) => {
-  const modulePath = await readModulePath(sourceRoot)
+  const { copiedFileCount, modulePath } = await syncTinyGoBridgeSources(sourceRoot)
   const bridgeRoot = path.join(sourceRoot, 'wasmbridge')
-  await mkdir(bridgeRoot, { recursive: true })
-
-  for (const directory of BRIDGE_DIRECTORIES) {
-    const sourceDir = path.join(rootDir, directory)
-    const targetDir = path.join(bridgeRoot, directory.replace(/^internal\//, ''))
-    await cp(sourceDir, targetDir, { recursive: true, force: true })
-  }
-
-  const copiedFiles = []
-  for (const directory of BRIDGE_DIRECTORIES) {
-    const targetDir = path.join(bridgeRoot, directory.replace(/^internal\//, ''))
-    const stack = [targetDir]
-    while (stack.length > 0) {
-      const currentDir = stack.pop()
-      const names = await readdir(currentDir, { withFileTypes: true })
-      for (const entry of names) {
-        const entryPath = path.join(currentDir, entry.name)
-        if (entry.isDirectory()) {
-          stack.push(entryPath)
-          continue
-        }
-        if (!entry.isFile() || !entry.name.endsWith('.go')) {
-          continue
-        }
-        const contents = await readFile(entryPath, 'utf8')
-        await writeFile(entryPath, rewriteImports(contents, modulePath))
-        copiedFiles.push(entryPath)
-      }
-    }
-  }
 
   const flockStubDir = path.join(bridgeRoot, 'flock')
   await mkdir(flockStubDir, { recursive: true })
@@ -488,7 +511,7 @@ func main() {
     commandPath: './cmd/tinygo-browser',
     probeCommandPath: './cmd/tinygo-wasi',
     copiedFileCount:
-      copiedFiles.length + patchedBuilderFiles + patchedLoaderFiles + patchedGoenvFiles + patchedBuilderLLVMFiles + 4,
+      copiedFileCount + patchedBuilderFiles + patchedLoaderFiles + patchedGoenvFiles + patchedBuilderLLVMFiles + 4,
     modulePath,
     sourceRoot,
   }

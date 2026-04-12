@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { ensureTinyGoSourceReady } from './fetch-tinygo-source.mjs'
-import { patchTinyGoSourceForWasi } from './patch-tinygo-wasi.mjs'
+import { patchTinyGoSourceForWasi, syncTinyGoBridgeSources } from './patch-tinygo-wasi.mjs'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -73,6 +73,7 @@ const resolveCompilerPaths = async () => {
 
 export const buildTinyGoCompilerWasm = async () => {
   const source = await ensureTinyGoSourceReady()
+  await syncTinyGoBridgeSources(source.rootPath)
   const { outputPath, mainPath } = await resolveCompilerPaths()
   const resolvedMainPath = path.isAbsolute(mainPath)
     ? mainPath
@@ -91,6 +92,7 @@ export const buildTinyGoCompilerWasm = async () => {
   let buildMode = 'direct'
   let fallbackReason = null
   let directFailureReason = null
+  let patchedDirectFailureReason = null
   let patchedEntryFailureReason = null
   let blockers = []
   const initialBuild = tryRunGo({
@@ -102,6 +104,29 @@ export const buildTinyGoCompilerWasm = async () => {
     const patch = await patchTinyGoSourceForWasi(source.rootPath)
     directFailureReason = [initialBuild.stdout, initialBuild.stderr].join('').trim()
     blockers = classifyTinyGoCompilerBlockers(directFailureReason)
+    const resolvedPatchCommandPath = path.join(source.rootPath, patch.commandPath.replace(/^\.\//, ''))
+    const resolvedPatchProbeCommandPath = patch.probeCommandPath
+      ? path.join(source.rootPath, patch.probeCommandPath.replace(/^\.\//, ''))
+      : null
+    const canRetryPatchedMainPath =
+      resolvedMainPath !== resolvedPatchCommandPath &&
+      (resolvedPatchProbeCommandPath === null || resolvedMainPath !== resolvedPatchProbeCommandPath)
+    if (canRetryPatchedMainPath) {
+      const patchedDirectBuild = tryRunGo({
+        argv: ['go', 'build', '-o', outputPath, resolvedMainPath],
+        cwd: source.rootPath,
+        env,
+      })
+      if (patchedDirectBuild.status === 0) {
+        buildMode = 'patched-upstream-direct'
+        fallbackReason = directFailureReason
+      } else {
+        patchedDirectFailureReason = [patchedDirectBuild.stdout, patchedDirectBuild.stderr].join('').trim()
+      }
+    }
+    if (buildMode === 'patched-upstream-direct') {
+      // The original TinyGo main package built successfully once WASI compatibility patches were applied.
+    } else {
     const patchedBuild = tryRunGo({
       argv: ['go', 'build', '-o', outputPath, patch.commandPath],
       cwd: source.rootPath,
@@ -124,6 +149,7 @@ export const buildTinyGoCompilerWasm = async () => {
         env,
       })
     }
+    }
   }
 
   const manifestPath =
@@ -140,10 +166,10 @@ export const buildTinyGoCompilerWasm = async () => {
         buildMode,
         fallbackReason,
         directFailureReason,
+        patchedDirectFailureReason,
         patchedEntryFailureReason,
         blockers,
-        artifactKind:
-          buildMode === 'direct' || buildMode === 'patched-browser-entry' ? 'compiler' : 'bootstrap',
+        artifactKind: buildMode === 'direct' || buildMode === 'patched-upstream-direct' ? 'compiler' : 'bootstrap',
         outputPath,
         wasmBytes: wasmBytes.length,
       },
