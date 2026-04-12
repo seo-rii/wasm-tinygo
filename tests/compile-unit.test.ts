@@ -3871,6 +3871,84 @@ test('normalizeTinyGoDriverBridgeManifestForBrowser promotes alias-only realFron
   assert.equal(verification.frontendRealAdapter?.compileUnitManifestPath, '/working/tinygo-compile-unit.json')
 })
 
+test('normalizeTinyGoDriverBridgeManifestForBrowser rewrites frontendAnalysis toolchain output paths for browser workdirs', () => {
+  const verification = normalizeTinyGoDriverBridgeManifestForBrowser({
+    artifactOutputPath: '/tmp/bridge/out.wasm',
+    entryFile: '/tmp/bridge/main.go',
+    frontendAnalysis: {
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/tmp/bridge/main.go',
+      compileUnitManifestPath: '/tmp/bridge/tinygo-compile-unit.json',
+      allCompileFiles: ['/tmp/bridge/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/tmp/bridge',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/tmp/bridge',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        linker: 'wasm-ld',
+        cflags: ['-mbulk-memory'],
+        ldflags: ['--stack-first', '--no-entry'],
+        translationUnitPath: '/tmp/bridge/tinygo-bootstrap.c',
+        objectOutputPath: '/tmp/bridge/tinygo-bootstrap.o',
+        artifactOutputPath: '/tmp/bridge/out.wasm',
+      },
+    },
+    target: 'wasm',
+    toolchain: {
+      rootPath: '/tmp/tinygo-root',
+      version: 'tinygo version 0.40.1',
+    },
+  })
+
+  assert.deepEqual(verification.frontendAnalysis?.toolchain, {
+    target: 'wasm',
+    llvmTarget: 'wasm32-unknown-wasi',
+    linker: 'wasm-ld',
+    cflags: ['-mbulk-memory'],
+    ldflags: ['--stack-first', '--no-entry'],
+    translationUnitPath: '/working/tinygo-bootstrap.c',
+    objectOutputPath: '/working/tinygo-bootstrap.o',
+    artifactOutputPath: '/working/out.wasm',
+  })
+})
+
 test('verifyIntermediateManifestAgainstCompileUnitManifest accepts a resolved intermediate manifest', () => {
   const verification = verifyIntermediateManifestAgainstCompileUnitManifest({
     entryFile: '/workspace/main.go',

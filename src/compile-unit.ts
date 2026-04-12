@@ -148,6 +148,12 @@ export type TinyGoFrontendAnalysisManifest = {
   toolchain?: {
     target?: string
     llvmTarget?: string
+    linker?: string
+    cflags?: string[]
+    ldflags?: string[]
+    translationUnitPath?: string
+    objectOutputPath?: string
+    artifactOutputPath?: string
   }
   packageGraph?: Array<{
     depOnly?: boolean
@@ -938,6 +944,30 @@ export const normalizeTinyGoDriverBridgeManifestForBrowser = (
         dir: packageDir,
       }
     })
+    let analysisToolchain = normalizedFrontendAnalysis.toolchain
+    if (analysisToolchain) {
+      let artifactOutputPath = analysisToolchain.artifactOutputPath ?? ''
+      if (analysisToolchain.artifactOutputPath !== undefined && artifactOutputPath !== '') {
+        const artifactOutputPathSlashIndex = artifactOutputPath.lastIndexOf('/')
+        artifactOutputPath = `/working/${artifactOutputPathSlashIndex >= 0 ? artifactOutputPath.slice(artifactOutputPathSlashIndex + 1) : artifactOutputPath}`
+      }
+      let translationUnitPath = analysisToolchain.translationUnitPath ?? ''
+      if (analysisToolchain.translationUnitPath !== undefined && translationUnitPath !== '') {
+        const translationUnitPathSlashIndex = translationUnitPath.lastIndexOf('/')
+        translationUnitPath = `/working/${translationUnitPathSlashIndex >= 0 ? translationUnitPath.slice(translationUnitPathSlashIndex + 1) : translationUnitPath}`
+      }
+      let objectOutputPath = analysisToolchain.objectOutputPath ?? ''
+      if (analysisToolchain.objectOutputPath !== undefined && objectOutputPath !== '') {
+        const objectOutputPathSlashIndex = objectOutputPath.lastIndexOf('/')
+        objectOutputPath = `/working/${objectOutputPathSlashIndex >= 0 ? objectOutputPath.slice(objectOutputPathSlashIndex + 1) : objectOutputPath}`
+      }
+      analysisToolchain = {
+        ...analysisToolchain,
+        ...(analysisToolchain.artifactOutputPath !== undefined ? { artifactOutputPath } : {}),
+        ...(analysisToolchain.objectOutputPath !== undefined ? { objectOutputPath } : {}),
+        ...(analysisToolchain.translationUnitPath !== undefined ? { translationUnitPath } : {}),
+      }
+    }
     normalizedFrontendAnalysis = {
       ...normalizedFrontendAnalysis,
       entryFile: analysisEntryFile,
@@ -945,6 +975,7 @@ export const normalizeTinyGoDriverBridgeManifestForBrowser = (
       allCompileFiles,
       compileGroups,
       compileUnits,
+      ...(analysisToolchain !== undefined ? { toolchain: analysisToolchain } : {}),
       ...(normalizedFrontendAnalysis.packageGraph !== undefined ? { packageGraph } : {}),
     }
   }

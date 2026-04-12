@@ -990,131 +990,196 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           new File(textEncoder.encode(JSON.stringify(frontendAnalysisInputManifest, null, 2))),
         )
         const frontendModuleBytes = await loadCompilerModuleBytes()
-        const frontendAnalysisStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'running'))
-        const frontendAnalysisStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'error'))
-        const frontendAnalysisWasi = new WASI(
-          ['tinygo-frontend-analysis'],
-          [
-            'WASM_TINYGO_MODE=frontend-analysis',
-            'WASM_TINYGO_FRONTEND_INPUT_PATH=/working/tinygo-frontend-analysis-input.json',
-          ],
-          [new OpenFile(new File([])), frontendAnalysisStdout, frontendAnalysisStderr, working],
-        )
-        const frontendAnalysisInstance = await instantiateWasiModule(frontendModuleBytes, {
-          wasi_snapshot_preview1: frontendAnalysisWasi.wasiImport,
-        })
-        let frontendAnalysisExitCode = 0
-        try {
-          frontendAnalysisExitCode = frontendAnalysisWasi.start(frontendAnalysisInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
-        } catch (error) {
-          if (error instanceof WASIProcExit) {
-            frontendAnalysisExitCode = error.code
-          } else {
-            throw error
-          }
-        }
-        const frontendAnalysisResultNode = working.dir.contents.get('tinygo-frontend-analysis.json')
-        if (!(frontendAnalysisResultNode instanceof File)) {
-          throw new Error(`tinygo frontend-analysis did not write /working/tinygo-frontend-analysis.json (exit ${frontendAnalysisExitCode})`)
-        }
-        const frontendAnalysisResult = JSON.parse(textDecoder.decode(frontendAnalysisResultNode.data)) as TinyGoFrontEndAnalysisResult
-        if (!frontendAnalysisResult.ok || !frontendAnalysisResult.analysis) {
-          throw new Error(frontendAnalysisResult.diagnostics.join('; ') || `tinygo frontend-analysis returned a failed result (exit ${frontendAnalysisExitCode})`)
-        }
-        if (frontendAnalysisResult.analysis.toolchain?.target !== parsedFrontendInputManifest.toolchain?.target) {
-          throw new Error('frontend analysis target did not match frontend input')
-        }
-        if (frontendAnalysisResult.analysis.toolchain?.llvmTarget !== parsedFrontendInputManifest.buildContext?.llvmTarget) {
-          throw new Error('frontend analysis llvmTarget did not match frontend input')
-        }
-        if (frontendAnalysisResult.analysis.compileUnitManifestPath !== '/working/tinygo-compile-unit.json') {
-          throw new Error('frontend analysis did not preserve the compile unit manifest path')
-        }
-        if ((frontendAnalysisResult.analysis.compileUnits?.length ?? 0) !== (parsedFrontendInputManifest.compileUnits?.length ?? 0)) {
-          throw new Error('frontend analysis compile unit count did not match frontend input')
-        }
-        if ((frontendAnalysisResult.analysis.allCompileFiles?.length ?? 0) !== (parsedFrontendInputManifest.sourceSelection?.allCompile?.length ?? 0)) {
-          throw new Error('frontend analysis all-compile count did not match frontend input')
-        }
-        appendLog(
-          `frontend analysis verified target=${frontendAnalysisResult.analysis.toolchain?.target ?? 'unknown'} llvm=${frontendAnalysisResult.analysis.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendAnalysisResult.analysis.compileGroups?.length ?? 0} compileUnits=${frontendAnalysisResult.analysis.compileUnits?.length ?? 0} allCompile=${frontendAnalysisResult.analysis.allCompileFiles?.length ?? 0}`,
-          'success',
-        )
-        if (driverBridgeManifest?.frontendAnalysis) {
+        let frontendAnalysisManifest: TinyGoFrontendAnalysisManifest | null = null
+        let frontendRealAdapterManifest: TinyGoFrontendAnalysisManifest | null = null
+        if (driverBridgeManifest?.frontendRealAdapter && driverBridgeManifest.frontendAnalysis) {
+          const realFrontendAnalysisSource = 'canonical'
           const frontendAnalysisVerification = verifyFrontendAnalysisAgainstDriverBridgeManifest(
-            frontendAnalysisResult.analysis,
+            driverBridgeManifest.frontendAnalysis,
             driverBridgeManifest,
           )
           appendLog(
             `frontend analysis bridge verified target=${frontendAnalysisVerification.target} llvm=${frontendAnalysisVerification.llvmTarget} groups=${frontendAnalysisVerification.compileGroupCount} compileUnits=${frontendAnalysisVerification.compileUnitCount} allCompile=${frontendAnalysisVerification.allCompileCount} alias=${frontendAnalysisVerification.programImportAlias} program=${frontendAnalysisVerification.programImportPath}`,
             'success',
           )
-        }
-        const frontendRealAdapterStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend real adapter ${line}`, 'running'))
-        const frontendRealAdapterStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend real adapter ${line}`, 'error'))
-        const frontendRealAdapterWasi = new WASI(
-          ['tinygo-frontend-real-adapter'],
-          ['WASM_TINYGO_MODE=frontend-real-adapter-analysis'],
-          [new OpenFile(new File([])), frontendRealAdapterStdout, frontendRealAdapterStderr, working],
-        )
-        const frontendRealAdapterInstance = await instantiateWasiModule(frontendModuleBytes, {
-          wasi_snapshot_preview1: frontendRealAdapterWasi.wasiImport,
-        })
-        let frontendRealAdapterExitCode = 0
-        try {
-          frontendRealAdapterExitCode = frontendRealAdapterWasi.start(frontendRealAdapterInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
-        } catch (error) {
-          if (error instanceof WASIProcExit) {
-            frontendRealAdapterExitCode = error.code
-          } else {
-            throw error
-          }
-        }
-        const frontendRealAdapterResultNode = working.dir.contents.get('tinygo-frontend-real-adapter.json')
-        if (!(frontendRealAdapterResultNode instanceof File)) {
-          throw new Error(`tinygo frontend-real-adapter did not write /working/tinygo-frontend-real-adapter.json (exit ${frontendRealAdapterExitCode})`)
-        }
-        const frontendRealAdapterResult = JSON.parse(textDecoder.decode(frontendRealAdapterResultNode.data)) as TinyGoFrontEndAdapterResult
-        if (!frontendRealAdapterResult.ok || !frontendRealAdapterResult.adapter) {
-          throw new Error(frontendRealAdapterResult.diagnostics.join('; ') || `tinygo frontend-real-adapter returned a failed result (exit ${frontendRealAdapterExitCode})`)
-        }
-        if (frontendRealAdapterResult.adapter.toolchain?.target !== parsedFrontendInputManifest.toolchain?.target) {
-          throw new Error('frontend real adapter target did not match frontend input')
-        }
-        if (frontendRealAdapterResult.adapter.toolchain?.llvmTarget !== parsedFrontendInputManifest.buildContext?.llvmTarget) {
-          throw new Error('frontend real adapter llvmTarget did not match frontend input')
-        }
-        if (frontendRealAdapterResult.adapter.compileUnitManifestPath !== '/working/tinygo-compile-unit.json') {
-          throw new Error('frontend real adapter did not preserve the compile unit manifest path')
-        }
-        if ((frontendRealAdapterResult.adapter.compileUnits?.length ?? 0) !== (parsedFrontendInputManifest.compileUnits?.length ?? 0)) {
-          throw new Error('frontend real adapter compile unit count did not match frontend input')
-        }
-        if ((frontendRealAdapterResult.adapter.allCompileFiles?.length ?? 0) !== (parsedFrontendInputManifest.sourceSelection?.allCompile?.length ?? 0)) {
-          throw new Error('frontend real adapter all-compile count did not match frontend input')
-        }
-        appendLog(
-          `frontend real adapter verified target=${frontendRealAdapterResult.adapter.toolchain?.target ?? 'unknown'} llvm=${frontendRealAdapterResult.adapter.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendRealAdapterResult.adapter.compileGroups?.length ?? 0} compileUnits=${frontendRealAdapterResult.adapter.compileUnits?.length ?? 0} allCompile=${frontendRealAdapterResult.adapter.allCompileFiles?.length ?? 0}`,
-          'success',
-        )
-        const frontendRealAdapterSeamVerification = verifyFrontendRealAdapterAgainstFrontendAnalysis(
-          frontendRealAdapterResult.adapter,
-          frontendAnalysisResult.analysis,
-        )
-        appendLog(
-          `frontend real adapter seam verified target=${frontendRealAdapterSeamVerification.target} llvm=${frontendRealAdapterSeamVerification.llvmTarget} groups=${frontendRealAdapterSeamVerification.compileGroupCount} compileUnits=${frontendRealAdapterSeamVerification.compileUnitCount} allCompile=${frontendRealAdapterSeamVerification.allCompileCount} alias=${frontendRealAdapterSeamVerification.programImportAlias}`,
-          'success',
-        )
-        if (driverBridgeManifest?.frontendRealAdapter || driverBridgeManifest?.realFrontendAnalysis) {
-          const realFrontendAnalysisSource = driverBridgeManifest?.frontendRealAdapter ? 'canonical' : 'compat-alias'
+          frontendAnalysisManifest = JSON.parse(
+            JSON.stringify(driverBridgeManifest.frontendAnalysis),
+          ) as TinyGoFrontendAnalysisManifest
+          appendLog(
+            `frontend analysis verified target=${frontendAnalysisManifest.toolchain?.target ?? 'unknown'} llvm=${frontendAnalysisManifest.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendAnalysisManifest.compileGroups?.length ?? 0} compileUnits=${frontendAnalysisManifest.compileUnits?.length ?? 0} allCompile=${frontendAnalysisManifest.allCompileFiles?.length ?? 0}`,
+            'success',
+          )
+          frontendRealAdapterManifest = JSON.parse(
+            JSON.stringify(driverBridgeManifest.frontendRealAdapter),
+          ) as TinyGoFrontendAnalysisManifest
           const realFrontendAnalysisVerification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest(
-            frontendRealAdapterResult.adapter,
+            frontendRealAdapterManifest,
             driverBridgeManifest,
           )
           appendLog(
             `frontend real adapter bridge verified target=${realFrontendAnalysisVerification.target} llvm=${realFrontendAnalysisVerification.llvmTarget} groups=${realFrontendAnalysisVerification.compileGroupCount} compileUnits=${realFrontendAnalysisVerification.compileUnitCount} allCompile=${realFrontendAnalysisVerification.allCompileCount} alias=${realFrontendAnalysisVerification.programImportAlias} source=${realFrontendAnalysisSource}`,
             'success',
           )
+          appendLog(
+            `frontend real adapter verified target=${frontendRealAdapterManifest.toolchain?.target ?? 'unknown'} llvm=${frontendRealAdapterManifest.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendRealAdapterManifest.compileGroups?.length ?? 0} compileUnits=${frontendRealAdapterManifest.compileUnits?.length ?? 0} allCompile=${frontendRealAdapterManifest.allCompileFiles?.length ?? 0}`,
+            'success',
+          )
+          if (frontendAnalysisManifest) {
+            const frontendRealAdapterSeamVerification = verifyFrontendRealAdapterAgainstFrontendAnalysis(
+              frontendRealAdapterManifest,
+              frontendAnalysisManifest,
+            )
+            appendLog(
+              `frontend real adapter seam verified target=${frontendRealAdapterSeamVerification.target} llvm=${frontendRealAdapterSeamVerification.llvmTarget} groups=${frontendRealAdapterSeamVerification.compileGroupCount} compileUnits=${frontendRealAdapterSeamVerification.compileUnitCount} allCompile=${frontendRealAdapterSeamVerification.allCompileCount} alias=${frontendRealAdapterSeamVerification.programImportAlias}`,
+              'success',
+            )
+          }
+          working.dir.contents.set(
+            'tinygo-frontend-analysis.json',
+            new File(textEncoder.encode(JSON.stringify({
+              ok: true,
+              analysis: frontendAnalysisManifest,
+              diagnostics: [],
+            } satisfies TinyGoFrontEndAnalysisResult, null, 2))),
+          )
+          working.dir.contents.set(
+            'tinygo-frontend-real-adapter.json',
+            new File(textEncoder.encode(JSON.stringify({
+              ok: true,
+              adapter: frontendRealAdapterManifest,
+              diagnostics: [],
+            } satisfies TinyGoFrontEndAdapterResult, null, 2))),
+          )
+          appendLog('frontend real adapter source=bridge', 'success')
+        } else {
+          const frontendAnalysisStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'running'))
+          const frontendAnalysisStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend analysis ${line}`, 'error'))
+          const frontendAnalysisWasi = new WASI(
+            ['tinygo-frontend-analysis'],
+            [
+              'WASM_TINYGO_MODE=frontend-analysis',
+              'WASM_TINYGO_FRONTEND_INPUT_PATH=/working/tinygo-frontend-analysis-input.json',
+            ],
+            [new OpenFile(new File([])), frontendAnalysisStdout, frontendAnalysisStderr, working],
+          )
+          const frontendAnalysisInstance = await instantiateWasiModule(frontendModuleBytes, {
+            wasi_snapshot_preview1: frontendAnalysisWasi.wasiImport,
+          })
+          let frontendAnalysisExitCode = 0
+          try {
+            frontendAnalysisExitCode = frontendAnalysisWasi.start(frontendAnalysisInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+          } catch (error) {
+            if (error instanceof WASIProcExit) {
+              frontendAnalysisExitCode = error.code
+            } else {
+              throw error
+            }
+          }
+          const frontendAnalysisResultNode = working.dir.contents.get('tinygo-frontend-analysis.json')
+          if (!(frontendAnalysisResultNode instanceof File)) {
+            throw new Error(`tinygo frontend-analysis did not write /working/tinygo-frontend-analysis.json (exit ${frontendAnalysisExitCode})`)
+          }
+          const frontendAnalysisResult = JSON.parse(textDecoder.decode(frontendAnalysisResultNode.data)) as TinyGoFrontEndAnalysisResult
+          if (!frontendAnalysisResult.ok || !frontendAnalysisResult.analysis) {
+            throw new Error(frontendAnalysisResult.diagnostics.join('; ') || `tinygo frontend-analysis returned a failed result (exit ${frontendAnalysisExitCode})`)
+          }
+          if (frontendAnalysisResult.analysis.toolchain?.target !== parsedFrontendInputManifest.toolchain?.target) {
+            throw new Error('frontend analysis target did not match frontend input')
+          }
+          if (frontendAnalysisResult.analysis.toolchain?.llvmTarget !== parsedFrontendInputManifest.buildContext?.llvmTarget) {
+            throw new Error('frontend analysis llvmTarget did not match frontend input')
+          }
+          if (frontendAnalysisResult.analysis.compileUnitManifestPath !== '/working/tinygo-compile-unit.json') {
+            throw new Error('frontend analysis did not preserve the compile unit manifest path')
+          }
+          if ((frontendAnalysisResult.analysis.compileUnits?.length ?? 0) !== (parsedFrontendInputManifest.compileUnits?.length ?? 0)) {
+            throw new Error('frontend analysis compile unit count did not match frontend input')
+          }
+          if ((frontendAnalysisResult.analysis.allCompileFiles?.length ?? 0) !== (parsedFrontendInputManifest.sourceSelection?.allCompile?.length ?? 0)) {
+            throw new Error('frontend analysis all-compile count did not match frontend input')
+          }
+          appendLog(
+            `frontend analysis verified target=${frontendAnalysisResult.analysis.toolchain?.target ?? 'unknown'} llvm=${frontendAnalysisResult.analysis.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendAnalysisResult.analysis.compileGroups?.length ?? 0} compileUnits=${frontendAnalysisResult.analysis.compileUnits?.length ?? 0} allCompile=${frontendAnalysisResult.analysis.allCompileFiles?.length ?? 0}`,
+            'success',
+          )
+          if (driverBridgeManifest?.frontendAnalysis) {
+            const frontendAnalysisVerification = verifyFrontendAnalysisAgainstDriverBridgeManifest(
+              frontendAnalysisResult.analysis,
+              driverBridgeManifest,
+            )
+            appendLog(
+              `frontend analysis bridge verified target=${frontendAnalysisVerification.target} llvm=${frontendAnalysisVerification.llvmTarget} groups=${frontendAnalysisVerification.compileGroupCount} compileUnits=${frontendAnalysisVerification.compileUnitCount} allCompile=${frontendAnalysisVerification.allCompileCount} alias=${frontendAnalysisVerification.programImportAlias} program=${frontendAnalysisVerification.programImportPath}`,
+              'success',
+            )
+          }
+          const frontendRealAdapterStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend real adapter ${line}`, 'running'))
+          const frontendRealAdapterStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend real adapter ${line}`, 'error'))
+          const frontendRealAdapterWasi = new WASI(
+            ['tinygo-frontend-real-adapter'],
+            ['WASM_TINYGO_MODE=frontend-real-adapter-analysis'],
+            [new OpenFile(new File([])), frontendRealAdapterStdout, frontendRealAdapterStderr, working],
+          )
+          const frontendRealAdapterInstance = await instantiateWasiModule(frontendModuleBytes, {
+            wasi_snapshot_preview1: frontendRealAdapterWasi.wasiImport,
+          })
+          let frontendRealAdapterExitCode = 0
+          try {
+            frontendRealAdapterExitCode = frontendRealAdapterWasi.start(frontendRealAdapterInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+          } catch (error) {
+            if (error instanceof WASIProcExit) {
+              frontendRealAdapterExitCode = error.code
+            } else {
+              throw error
+            }
+          }
+          const frontendRealAdapterResultNode = working.dir.contents.get('tinygo-frontend-real-adapter.json')
+          if (!(frontendRealAdapterResultNode instanceof File)) {
+            throw new Error(`tinygo frontend-real-adapter did not write /working/tinygo-frontend-real-adapter.json (exit ${frontendRealAdapterExitCode})`)
+          }
+          const frontendRealAdapterResult = JSON.parse(textDecoder.decode(frontendRealAdapterResultNode.data)) as TinyGoFrontEndAdapterResult
+          if (!frontendRealAdapterResult.ok || !frontendRealAdapterResult.adapter) {
+            throw new Error(frontendRealAdapterResult.diagnostics.join('; ') || `tinygo frontend-real-adapter returned a failed result (exit ${frontendRealAdapterExitCode})`)
+          }
+          if (frontendRealAdapterResult.adapter.toolchain?.target !== parsedFrontendInputManifest.toolchain?.target) {
+            throw new Error('frontend real adapter target did not match frontend input')
+          }
+          if (frontendRealAdapterResult.adapter.toolchain?.llvmTarget !== parsedFrontendInputManifest.buildContext?.llvmTarget) {
+            throw new Error('frontend real adapter llvmTarget did not match frontend input')
+          }
+          if (frontendRealAdapterResult.adapter.compileUnitManifestPath !== '/working/tinygo-compile-unit.json') {
+            throw new Error('frontend real adapter did not preserve the compile unit manifest path')
+          }
+          if ((frontendRealAdapterResult.adapter.compileUnits?.length ?? 0) !== (parsedFrontendInputManifest.compileUnits?.length ?? 0)) {
+            throw new Error('frontend real adapter compile unit count did not match frontend input')
+          }
+          if ((frontendRealAdapterResult.adapter.allCompileFiles?.length ?? 0) !== (parsedFrontendInputManifest.sourceSelection?.allCompile?.length ?? 0)) {
+            throw new Error('frontend real adapter all-compile count did not match frontend input')
+          }
+          appendLog(
+            `frontend real adapter verified target=${frontendRealAdapterResult.adapter.toolchain?.target ?? 'unknown'} llvm=${frontendRealAdapterResult.adapter.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendRealAdapterResult.adapter.compileGroups?.length ?? 0} compileUnits=${frontendRealAdapterResult.adapter.compileUnits?.length ?? 0} allCompile=${frontendRealAdapterResult.adapter.allCompileFiles?.length ?? 0}`,
+            'success',
+          )
+          const frontendRealAdapterSeamVerification = verifyFrontendRealAdapterAgainstFrontendAnalysis(
+            frontendRealAdapterResult.adapter,
+            frontendAnalysisResult.analysis,
+          )
+          appendLog(
+            `frontend real adapter seam verified target=${frontendRealAdapterSeamVerification.target} llvm=${frontendRealAdapterSeamVerification.llvmTarget} groups=${frontendRealAdapterSeamVerification.compileGroupCount} compileUnits=${frontendRealAdapterSeamVerification.compileUnitCount} allCompile=${frontendRealAdapterSeamVerification.allCompileCount} alias=${frontendRealAdapterSeamVerification.programImportAlias}`,
+            'success',
+          )
+          if (driverBridgeManifest?.frontendRealAdapter || driverBridgeManifest?.realFrontendAnalysis) {
+            const realFrontendAnalysisSource = driverBridgeManifest?.frontendRealAdapter ? 'canonical' : 'compat-alias'
+            const realFrontendAnalysisVerification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest(
+              frontendRealAdapterResult.adapter,
+              driverBridgeManifest,
+            )
+            appendLog(
+              `frontend real adapter bridge verified target=${realFrontendAnalysisVerification.target} llvm=${realFrontendAnalysisVerification.llvmTarget} groups=${realFrontendAnalysisVerification.compileGroupCount} compileUnits=${realFrontendAnalysisVerification.compileUnitCount} allCompile=${realFrontendAnalysisVerification.allCompileCount} alias=${realFrontendAnalysisVerification.programImportAlias} source=${realFrontendAnalysisSource}`,
+              'success',
+            )
+          }
+          frontendAnalysisManifest = frontendAnalysisResult.analysis
+          frontendRealAdapterManifest = frontendRealAdapterResult.adapter
         }
         const frontendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'running'))
         const frontendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'error'))
