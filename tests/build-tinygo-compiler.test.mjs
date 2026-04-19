@@ -362,6 +362,70 @@ func main() {
   assert.equal(copiedBackendSource, localBackendSource)
 })
 
+test('build-tinygo-compiler refreshes a stale tinygo-wasi probe entry before direct compilation', async (t) => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-entry-refresh-'))
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  const sourceRoot = path.join(tempDir, 'tinygo')
+  const mainDir = path.join(sourceRoot, 'cmd', 'tinygo-wasi')
+  await mkdir(mainDir, { recursive: true })
+  await writeFile(
+    path.join(sourceRoot, 'go.mod'),
+    `module github.com/tinygo-org/tinygo
+
+go 1.22
+`,
+  )
+  await writeFile(
+    path.join(mainDir, 'main.go'),
+    `package main
+
+func main() {
+  println("stale-tinygo-wasi-entry")
+}
+`,
+  )
+
+  const outputPath = path.join(tempDir, 'tinygo-compiler.wasm')
+  const manifestPath = path.join(tempDir, 'tinygo-compiler.json')
+  const cwd = new URL('..', import.meta.url).pathname
+  const scriptPath = new URL('../scripts/build-tinygo-compiler.mjs', import.meta.url).pathname
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd,
+    env: {
+      ...process.env,
+      WASM_TINYGO_SOURCE_ROOT: sourceRoot,
+      WASM_TINYGO_COMPILER_MAIN_PATH: 'cmd/tinygo-wasi',
+      WASM_TINYGO_COMPILER_OUTPUT_PATH: outputPath,
+      WASM_TINYGO_COMPILER_MANIFEST_PATH: manifestPath,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let output = ''
+  child.stdout.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+  child.stderr.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+
+  assert.equal(exitCode, 0, output)
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  assert.equal(manifest.buildMode, 'direct')
+  const refreshedEntrySource = await readFile(path.join(mainDir, 'main.go'), 'utf8')
+  assert.doesNotMatch(refreshedEntrySource, /stale-tinygo-wasi-entry/)
+  assert.match(refreshedEntrySource, /wasmbridge\/tinygofrontend/)
+  assert.match(refreshedEntrySource, /ExecuteAdapterPaths/)
+})
+
 test('build-tinygo-compiler retries the original main package after wasi patching before using a custom browser entry', async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-patched-direct-'))
   t.after(async () => {

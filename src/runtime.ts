@@ -992,8 +992,11 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         const frontendModuleBytes = await loadCompilerModuleBytes()
         let frontendAnalysisManifest: TinyGoFrontendAnalysisManifest | null = null
         let frontendRealAdapterManifest: TinyGoFrontendAnalysisManifest | null = null
-        if (driverBridgeManifest?.frontendRealAdapter && driverBridgeManifest.frontendAnalysis) {
-          const realFrontendAnalysisSource = 'canonical'
+        if (
+          driverBridgeManifest?.frontendAnalysis &&
+          (driverBridgeManifest.frontendRealAdapter || driverBridgeManifest.realFrontendAnalysis)
+        ) {
+          const realFrontendAnalysisSource = driverBridgeManifest.frontendRealAdapter ? 'canonical' : 'compat-alias'
           const frontendAnalysisVerification = verifyFrontendAnalysisAgainstDriverBridgeManifest(
             driverBridgeManifest.frontendAnalysis,
             driverBridgeManifest,
@@ -1010,7 +1013,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             'success',
           )
           frontendRealAdapterManifest = JSON.parse(
-            JSON.stringify(driverBridgeManifest.frontendRealAdapter),
+            JSON.stringify(driverBridgeManifest.frontendRealAdapter ?? driverBridgeManifest.realFrontendAnalysis),
           ) as TinyGoFrontendAnalysisManifest
           const realFrontendAnalysisVerification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest(
             frontendRealAdapterManifest,

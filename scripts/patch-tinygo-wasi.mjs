@@ -103,6 +103,7 @@ export const syncTinyGoBridgeSources = async (sourceRoot) => {
   const modulePath = await readModulePath(sourceRoot)
   const bridgeRoot = path.join(sourceRoot, 'wasmbridge')
   await mkdir(bridgeRoot, { recursive: true })
+  const probeCommandDir = path.join(sourceRoot, 'cmd', 'tinygo-wasi')
 
   const copiedFiles = []
   for (const directory of BRIDGE_DIRECTORIES) {
@@ -132,6 +133,12 @@ export const syncTinyGoBridgeSources = async (sourceRoot) => {
       }
     }
   }
+
+  await mkdir(probeCommandDir, { recursive: true })
+  const probeCommandSource = await readFile(PROBE_COMMAND_SOURCE, 'utf8')
+  const probeCommandPath = path.join(probeCommandDir, 'main.go')
+  await writeFile(probeCommandPath, rewriteImports(probeCommandSource, modulePath))
+  copiedFiles.push(probeCommandPath)
 
   return {
     copiedFileCount: copiedFiles.length,
