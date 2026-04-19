@@ -1324,6 +1324,119 @@ test('wasi frontend prefers frontend-real-adapter handoff when present', async (
   assert.match(execution.logs.join('\n'), /tinygo frontend consuming real adapter handoff/)
 })
 
+test('wasi frontend consumes frontend-real-adapter handoff without analysis when input is present', async () => {
+  const input = {
+    buildTags: ['tinygo.wasm', 'scheduler.tasks'],
+    buildContext: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      goos: 'js',
+      goarch: 'wasm',
+      gc: 'precise',
+      scheduler: 'tasks',
+      buildTags: ['scheduler.tasks', 'tinygo.wasm'],
+      modulePath: 'example.com/app',
+    },
+    toolchain: {
+      target: 'wasm',
+      artifactOutputPath: '/working/out.wasm',
+    },
+    optimizeFlag: '-Oz',
+    entryFile: '/workspace/main.go',
+    modulePath: 'example.com/app',
+    sourceSelection: {
+      allCompile: [
+        '/working/.tinygo-root/src/fmt/print.go',
+        '/workspace/lib/helper.go',
+        '/workspace/main.go',
+      ],
+    },
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/lib'],
+        modulePath: 'example.com/app',
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+      {
+        kind: 'imported',
+        importPath: 'example.com/app/lib',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        packageName: 'helper',
+        packageDir: '/workspace/lib',
+        files: ['/workspace/lib/helper.go'],
+      },
+      {
+        kind: 'stdlib',
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        modulePath: '',
+        packageName: 'fmt',
+        packageDir: '/working/.tinygo-root/src/fmt',
+        files: ['/working/.tinygo-root/src/fmt/print.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'command-line-arguments',
+        imports: ['example.com/app/lib'],
+        modulePath: 'example.com/app',
+        name: 'main',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/workspace/lib',
+        files: { goFiles: ['helper.go'] },
+        importPath: 'example.com/app/lib',
+        imports: ['fmt'],
+        modulePath: 'example.com/app',
+        name: 'helper',
+        standard: false,
+      },
+      {
+        depOnly: true,
+        dir: '/working/.tinygo-root/src/fmt',
+        files: { goFiles: ['print.go'] },
+        importPath: 'fmt',
+        imports: ['errors', 'io'],
+        modulePath: '',
+        name: 'fmt',
+        standard: true,
+      },
+    ],
+  }
+  const adapterExecution = await runFrontendRealAdapter({
+    input,
+    files: {},
+  })
+  assert.equal(adapterExecution.exitCode, 0)
+  assert.equal(adapterExecution.result.ok, true)
+  adapterExecution.result.adapter.compileUnits[0].importPath = 'example.com/app'
+  adapterExecution.result.adapter.packageGraph[0].importPath = 'example.com/app'
+
+  const execution = await runFrontend({
+    input,
+    adapterResult: adapterExecution.result,
+    files: {},
+  })
+
+  assert.equal(execution.exitCode, 0)
+  assert.equal(execution.result.ok, true)
+  const compileUnitFile = execution.result.generatedFiles.find((file) => file.path === '/working/tinygo-compile-unit.json')
+  assert.ok(compileUnitFile)
+  const compileUnitManifest = JSON.parse(compileUnitFile.contents)
+  assert.equal(compileUnitManifest.compileUnits[0].importPath, 'example.com/app')
+  assert.match(execution.logs.join('\n'), /tinygo frontend consuming real adapter handoff/)
+})
+
 test('wasi frontend-analysis writes normalized handoff analysis', async () => {
   const execution = await runFrontendAnalysis({
     input: {

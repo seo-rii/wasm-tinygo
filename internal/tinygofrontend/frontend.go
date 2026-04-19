@@ -1604,6 +1604,137 @@ func ExecuteAnalysisResultPaths(analysisPath, resultPath string) error {
 
 func ExecuteResultPaths(inputPath, analysisPath, adapterPath, resultPath string) error {
 	if _, err := os.Stat(adapterPath); err == nil {
+		if _, analysisErr := os.Stat(analysisPath); os.IsNotExist(analysisErr) {
+			inputData, err := os.ReadFile(inputPath)
+			if err != nil {
+				return err
+			}
+
+			var input Input
+			if err := json.Unmarshal(inputData, &input); err != nil {
+				return err
+			}
+
+			adapterData, err := os.ReadFile(adapterPath)
+			if err != nil {
+				return err
+			}
+
+			var adapterResult AdapterResult
+			if err := json.Unmarshal(adapterData, &adapterResult); err != nil {
+				return err
+			}
+			if !adapterResult.OK || adapterResult.Adapter == nil {
+				result := Result{
+					OK:          false,
+					Diagnostics: append([]string{}, adapterResult.Diagnostics...),
+				}
+				if len(result.Diagnostics) == 0 {
+					result.Diagnostics = []string{"frontend real adapter result is required"}
+				}
+				resultData, marshalErr := json.Marshal(result)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+					return writeErr
+				}
+				return fmt.Errorf("%s", result.Diagnostics[0])
+			}
+
+			adapter := adapterResult.Adapter
+			if adapter.Toolchain.Target != "" && input.Toolchain.Target != "" && adapter.Toolchain.Target != input.Toolchain.Target {
+				result := Result{
+					OK:          false,
+					Diagnostics: []string{"frontend real adapter target did not match input"},
+				}
+				resultData, marshalErr := json.Marshal(result)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+					return writeErr
+				}
+				return fmt.Errorf("%s", result.Diagnostics[0])
+			}
+			if adapter.Toolchain.LLVMTarget != "" && input.BuildContext.LLVMTarget != "" && adapter.Toolchain.LLVMTarget != input.BuildContext.LLVMTarget {
+				result := Result{
+					OK:          false,
+					Diagnostics: []string{"frontend real adapter llvmTarget did not match input"},
+				}
+				resultData, marshalErr := json.Marshal(result)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+					return writeErr
+				}
+				return fmt.Errorf("%s", result.Diagnostics[0])
+			}
+
+			buildTags := append([]string{}, adapter.BuildContext.BuildTags...)
+			if len(buildTags) == 0 {
+				buildTags = append([]string{}, input.BuildTags...)
+			}
+			buildContext := adapter.BuildContext
+			if buildContext.Target == "" {
+				buildContext = input.BuildContext
+			}
+			modulePath := buildContext.ModulePath
+			if modulePath == "" {
+				modulePath = input.ModulePath
+			}
+			entryFile := adapter.EntryFile
+			if entryFile == "" {
+				entryFile = input.EntryFile
+			}
+			toolchain := input.Toolchain
+			if toolchain.Target == "" {
+				toolchain.Target = adapter.Toolchain.Target
+			}
+			if toolchain.LLVMTarget == "" {
+				toolchain.LLVMTarget = adapter.Toolchain.LLVMTarget
+			}
+			result, err := Build(Input{
+				BuildTags:    buildTags,
+				BuildContext: buildContext,
+				Toolchain:    toolchain,
+				ModulePath:   modulePath,
+				PackageGraph: append([]PackageGraphPackage{}, adapter.PackageGraph...),
+				OptimizeFlag: input.OptimizeFlag,
+				EntryFile:    entryFile,
+				SourceSelection: SourceSelection{
+					AllCompile: append([]string{}, adapter.AllCompileFiles...),
+				},
+				CompileUnits: append([]IntermediateCompileUnit{}, adapter.CompileUnits...),
+			})
+			if err != nil {
+				failedResult := Result{
+					OK:          false,
+					Diagnostics: []string{err.Error()},
+				}
+				resultData, marshalErr := json.Marshal(failedResult)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+					return writeErr
+				}
+				return err
+			}
+
+			result.Diagnostics = []string{
+				fmt.Sprintf("tinygo frontend prepared bootstrap compile request for %s", toolchain.Target),
+			}
+			resultData, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+
+			return os.WriteFile(resultPath, resultData, 0o644)
+		} else if analysisErr != nil {
+			return analysisErr
+		}
 		return ExecuteAdapterBuildPaths(analysisPath, adapterPath, resultPath)
 	} else if !os.IsNotExist(err) {
 		return err
