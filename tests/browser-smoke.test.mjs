@@ -157,6 +157,7 @@ func main() {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
       WASM_TINYGO_DRIVER_BRIDGE_REQUEST_PATH: bridgeRequestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_DRIVER_BRIDGE_WORK_DIR: bridgeWorkDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -178,8 +179,6 @@ func main() {
   )
   const { frontendRealAdapter, ...aliasOnlyDriverBridgeManifest } = driverBridgeManifest
   aliasOnlyDriverBridgeManifest.realFrontendAnalysis = driverBridgeManifest.frontendRealAdapter
-  const adapterOnlyDriverBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
-  delete adapterOnlyDriverBridgeManifest.frontendAnalysis
   const driftedAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
   driftedAnalysisInputBridgeManifest.frontendAnalysisInput.buildContext.target = 'mismatch-target'
   const driftedFrontendProbeAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
@@ -190,7 +189,9 @@ func main() {
   assert.ok(driftedFrontendProbeProgramPackage)
   driftedFrontendProbeProgramPackage.imports = ['fmt']
   const driftedDriverBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
+  driftedDriverBridgeManifest.frontendAnalysis = JSON.parse(JSON.stringify(driverBridgeManifest.frontendRealAdapter))
   driftedDriverBridgeManifest.frontendAnalysis.buildContext.target = 'mismatch-target'
+  assert.equal(driverBridgeManifest.frontendAnalysis, undefined)
   assert.ok((driverBridgeManifest.packageGraph?.length ?? 0) >= 1)
   assert.match(driverBridgeManifest.toolchain?.version ?? '', /0\.40\.1/)
 
@@ -453,7 +454,6 @@ func main() {
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered\/program-000\.c/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI probe verified target=wasip1 triple=wasm32-unknown-wasi scheduler=asyncify/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched analysis input packages=[1-9]\d* main=example\.com\/browserprobe/)
-  assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend analysis packages=[1-9]\d* main=example\.com\/browserprobe/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=[1-9]\d* main=example\.com\/browserprobe/)
   assert.match(activity ?? '', /tinygo compiler module loaded from tools\/tinygo-compiler\.wasm \(mode=direct\)/)
   assert.match(activity ?? '', /backend lowered ir units=\d+ imports=\d+ functions=\d+ types=\d+ consts=\d+ vars=\d+ decls=\d+/)
@@ -476,18 +476,19 @@ func main() {
   assert.match(activity ?? '', /frontend input bridge verified target=wasm llvm=wasm32-unknown-wasi scheduler=asyncify packages=[1-9]\d*/)
   assert.match(activity ?? '', /frontend analysis input bridge verified target=wasm llvm=wasm32-unknown-wasi scheduler=asyncify packages=[1-9]\d*/)
   assert.match(activity ?? '', /frontend analysis input source=bridge/)
-  assert.match(activity ?? '', /frontend analysis verified target=wasm llvm=wasm32-unknown-wasi groups=6 compileUnits=[1-9]\d* allCompile=[1-9]\d*/)
   assert.match(activity ?? '', /frontend build mode=frontend/)
   assert.match(activity ?? '', /frontend build source=real-adapter/)
-  assert.match(activity ?? '', /frontend analysis bridge verified target=wasm llvm=wasm32-unknown-wasi groups=6 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct program=example\.com\/browserprobe/)
   assert.match(activity ?? '', /frontend real adapter verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d*/)
-  assert.match(activity ?? '', /frontend real adapter seam verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct/)
   assert.match(activity ?? '', /frontend real adapter bridge verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct source=canonical/)
   assert.match(activity ?? '', /frontend real adapter source=bridge/)
   assert.match(activity ?? '', /frontend bridge verified target=wasm llvm=wasm32-unknown-wasi program=main imports=1 packages=[1-9]\d*/)
   assert.match(activity ?? '', /frontend bridge coverage compileUnits=[1-9]\d* graphPackages=[1-9]\d* coveredPackages=[1-9]\d*\/[1-9]\d* compileUnitFiles=[1-9]\d* coveredFiles=[1-9]\d*\/[1-9]\d* depOnly=[1-9]\d* standard=[1-9]\d* local=2 alias=direct/)
   assert.match(activity ?? '', /frontend bridge toolchain version=.*0\.40\.1/)
   assert.match(activity ?? '', /frontend bootstrap tool plan skipped: backend lowering is active/)
+  assert.doesNotMatch(activity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend analysis packages=/)
+  assert.doesNotMatch(activity ?? '', /frontend analysis verified target=/)
+  assert.doesNotMatch(activity ?? '', /frontend analysis bridge verified/)
+  assert.doesNotMatch(activity ?? '', /frontend real adapter seam verified/)
   assert.doesNotMatch(activity ?? '', /frontend analysis tinygo frontend prepared analysis handoff/)
   assert.doesNotMatch(activity ?? '', /frontend real adapter tinygo frontend prepared real adapter handoff/)
   assert.doesNotMatch(activity ?? '', /\$ \/usr\/bin\/clang .*tinygo-bootstrap\.c .* -o .*tinygo-bootstrap\.o/)
@@ -933,43 +934,6 @@ func main() {
   const aliasOnlyActivity = await page.locator('#terminal-output').textContent()
   assert.match(aliasOnlyActivity ?? '', /frontend real adapter bridge verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct source=compat-alias/)
   assert.match(aliasOnlyActivity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=[1-9]\d* main=example\.com\/browserprobe/)
-
-  await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
-  await page.waitForFunction(
-    () =>
-      typeof window.__wasmTinygoTestHooks?.boot === 'function' &&
-      typeof window.__wasmTinygoTestHooks?.readBuildArtifact === 'function' &&
-      typeof window.__wasmTinygoTestHooks?.setBuildRequestOverrides === 'function' &&
-      typeof window.__wasmTinygoTestHooks?.setDriverBridgeManifest === 'function' &&
-      typeof window.__wasmTinygoTestHooks?.setWorkspaceFiles === 'function',
-    null,
-    { timeout: 120000 },
-  )
-  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
-  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
-  await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), adapterOnlyDriverBridgeManifest)
-  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
-  await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
-  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
-
-  const adapterOnlyActivity = await page.locator('#terminal-output').textContent()
-  const adapterOnlyArtifact = await page.evaluate(() => {
-    const artifact = window.__wasmTinygoTestHooks.readBuildArtifact()
-    if (!artifact) {
-      return null
-    }
-    return {
-      artifactKind: artifact.artifactKind,
-      runnable: artifact.runnable,
-    }
-  })
-  assert.equal(adapterOnlyArtifact?.artifactKind, 'execution')
-  assert.equal(adapterOnlyArtifact?.runnable, true)
-  assert.match(adapterOnlyActivity ?? '', /frontend real adapter bridge verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct source=canonical/)
-  assert.match(adapterOnlyActivity ?? '', /frontend real adapter source=bridge/)
-  assert.match(adapterOnlyActivity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=[1-9]\d* main=example\.com\/browserprobe/)
-  assert.doesNotMatch(adapterOnlyActivity ?? '', /frontend analysis bridge verified/)
-  assert.doesNotMatch(adapterOnlyActivity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend analysis packages=/)
 
   await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
   await page.waitForFunction(
