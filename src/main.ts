@@ -83,12 +83,6 @@ func main() {
             os.Exit(1)
         }
         fmt.Println("tinygo frontend prepared real adapter handoff")
-    case "frontend-real-adapter-analysis":
-        if err := tinygofrontend.ExecuteAdapterAnalysisPaths("/working/tinygo-frontend-analysis.json", "/working/tinygo-frontend-real-adapter.json"); err != nil {
-            fmt.Println("tinygo frontend real adapter analysis failed:", err)
-            os.Exit(1)
-        }
-        fmt.Println("tinygo frontend prepared real adapter handoff")
     default:
         if err := driver.ExecutePaths("/workspace/tinygo-request.json", "/workspace/tinygo-result.json"); err != nil {
             fmt.Println("tinygo driver failed:", err)

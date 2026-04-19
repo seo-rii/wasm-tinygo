@@ -361,7 +361,8 @@ const frontendRealAdapter = spawnSync(goBin, ['run', './cmd/go-probe'], {
   cwd: repoRoot,
   env: {
     ...process.env,
-    WASM_TINYGO_MODE: 'frontend-real-adapter-analysis',
+    WASM_TINYGO_MODE: 'frontend-real-adapter',
+    WASM_TINYGO_FRONTEND_INPUT_PATH: frontendInputPath,
     WASM_TINYGO_FRONTEND_ANALYSIS_PATH: frontendAnalysisPath,
     WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH: frontendRealAdapterPath,
   },

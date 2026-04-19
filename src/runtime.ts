@@ -1116,7 +1116,11 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           const frontendRealAdapterStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend real adapter ${line}`, 'error'))
           const frontendRealAdapterWasi = new WASI(
             ['tinygo-frontend-real-adapter'],
-            ['WASM_TINYGO_MODE=frontend-real-adapter-analysis'],
+            [
+              'WASM_TINYGO_MODE=frontend-real-adapter',
+              'WASM_TINYGO_FRONTEND_INPUT_PATH=/working/tinygo-frontend-input.json',
+              'WASM_TINYGO_FRONTEND_ANALYSIS_PATH=/working/tinygo-frontend-analysis.json',
+            ],
             [new OpenFile(new File([])), frontendRealAdapterStdout, frontendRealAdapterStderr, working],
           )
           const frontendRealAdapterInstance = await instantiateWasiModule(frontendModuleBytes, {

@@ -76,6 +76,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
     importPath: packageInfo.importPath,
     imports: packageInfo.imports ?? [],
     kind: packageInfo.depOnly ? (packageInfo.standard ? 'stdlib' : 'imported') : 'program',
+    modulePath: packageInfo.modulePath ?? '',
     packageDir: packageInfo.dir,
     packageName: packageInfo.name,
     standard: packageInfo.standard ?? false,
@@ -101,35 +102,42 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
-  const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
-  const analysis = analysisResult.analysis ?? {}
-  const entryPackage = (analysis.packageGraph ?? []).find((packageInfo) => !packageInfo.depOnly && packageInfo.importPath)
-  const compileUnits = (analysis.compileUnits ?? []).map((compileUnit) => ({
-    ...compileUnit,
-    importPath: compileUnit.kind === 'program' && compileUnit.importPath === 'command-line-arguments' && entryPackage?.importPath ? entryPackage.importPath : compileUnit.importPath,
-    imports: compileUnit.kind === 'program' && (compileUnit.imports ?? []).length === 0 && (entryPackage?.imports ?? []).length > 0 ? entryPackage.imports : (compileUnit.imports ?? []),
-    depOnly: compileUnit.kind === 'program' ? false : (compileUnit.depOnly ?? true),
-    standard: compileUnit.kind === 'stdlib' ? true : (compileUnit.standard ?? false),
-  }))
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
+  const input = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_INPUT_PATH, 'utf8'))
+  const entryPackage = (input.packageGraph ?? []).find((packageInfo) => !packageInfo.depOnly && packageInfo.importPath)
+  const compileUnits = (input.compileUnits ?? []).map((compileUnit) => {
+    const packageInfo = (input.packageGraph ?? []).find((candidate) => candidate.importPath === compileUnit.importPath)
+      ?? (compileUnit.kind === 'program' && compileUnit.importPath === 'command-line-arguments' ? entryPackage : undefined)
+    return {
+      ...compileUnit,
+      modulePath: compileUnit.modulePath ?? packageInfo?.modulePath ?? '',
+      importPath: compileUnit.kind === 'program' && compileUnit.importPath === 'command-line-arguments' && entryPackage?.importPath ? entryPackage.importPath : compileUnit.importPath,
+      imports: (compileUnit.imports ?? []).length === 0 && (packageInfo?.imports ?? []).length > 0 ? packageInfo.imports : (compileUnit.imports ?? []),
+      depOnly: compileUnit.kind === 'program' ? false : (compileUnit.depOnly ?? true),
+      packageDir: compileUnit.packageDir ?? packageInfo?.dir,
+      packageName: compileUnit.packageName ?? packageInfo?.name,
+      files: (compileUnit.files ?? []).length === 0 && packageInfo?.dir ? (packageInfo.files?.goFiles ?? []).map((goFile) => path.join(packageInfo.dir, goFile)) : (compileUnit.files ?? []),
+      standard: compileUnit.kind === 'stdlib' ? true : (compileUnit.standard ?? false),
+    }
+  })
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
     ok: true,
     adapter: {
-      buildContext: analysis.buildContext,
-      entryFile: analysis.entryFile,
-      compileUnitManifestPath: analysis.compileUnitManifestPath ?? '/working/tinygo-compile-unit.json',
-      allCompileFiles: analysis.allCompileFiles ?? [],
+      buildContext: input.buildContext,
+      entryFile: input.entryFile,
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: input.sourceSelection?.allCompile ?? [],
       compileGroups: [
         { name: 'program', files: compileUnits.filter((compileUnit) => compileUnit.kind === 'program').flatMap((compileUnit) => compileUnit.files ?? []) },
         { name: 'imported', files: compileUnits.filter((compileUnit) => compileUnit.kind === 'imported').flatMap((compileUnit) => compileUnit.files ?? []) },
         { name: 'stdlib', files: compileUnits.filter((compileUnit) => compileUnit.kind === 'stdlib').flatMap((compileUnit) => compileUnit.files ?? []) },
-        { name: 'all-compile', files: analysis.allCompileFiles ?? [] },
+        { name: 'all-compile', files: input.sourceSelection?.allCompile ?? [] },
       ],
       compileUnits,
-      packageGraph: analysis.packageGraph ?? [],
+      packageGraph: input.packageGraph ?? [],
       toolchain: {
-        target: analysis.toolchain?.target,
-        llvmTarget: analysis.toolchain?.llvmTarget ?? 'wasm32-unknown-wasi',
+        target: input.toolchain?.target,
+        llvmTarget: input.buildContext?.llvmTarget ?? 'wasm32-unknown-wasi',
       },
     },
   }, null, 2))
@@ -464,6 +472,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
         kind: 'program',
         importPath: 'example.com/fake',
         imports: ['fmt'],
+        modulePath: 'example.com/fake',
         packageDir: workspaceDir,
         packageName: 'main',
         standard: false,
@@ -474,6 +483,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
         kind: 'stdlib',
         importPath: 'fmt',
         imports: ['errors'],
+        modulePath: '',
         packageDir: '/working/.tinygo-root/src/fmt',
         packageName: 'fmt',
         standard: true,
@@ -578,6 +588,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
         importPath: 'example.com/fake',
         imports: ['fmt'],
         kind: 'program',
+        modulePath: 'example.com/fake',
         packageDir: workspaceDir,
         packageName: 'main',
         standard: false,
@@ -588,6 +599,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
         importPath: 'fmt',
         imports: ['errors'],
         kind: 'stdlib',
+        modulePath: '',
         packageDir: '/working/.tinygo-root/src/fmt',
         packageName: 'fmt',
         standard: true,
@@ -698,7 +710,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   const compileUnits = analysis.compileUnits ?? []
@@ -1027,7 +1039,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   const entryPackage = (analysis.packageGraph ?? []).find((packageInfo) => !packageInfo.depOnly && packageInfo.importPath)
@@ -1422,7 +1434,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -1872,7 +1884,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -2145,7 +2157,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -2459,7 +2471,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -2811,7 +2823,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -3100,7 +3112,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -3350,7 +3362,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -3639,7 +3651,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
@@ -3923,7 +3935,7 @@ if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
   }, null, 2))
   process.exit(0)
 }
-if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter-analysis') {
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
   const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
   const analysis = analysisResult.analysis ?? {}
   fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({

@@ -348,6 +348,62 @@ func TestBuildRealAdapterRejectsMismatchedPackageGraphFacts(t *testing.T) {
 	}
 }
 
+func TestBuildRealAdapterMatchesAnalysisSeamForCanonicalProgramPackageGraph(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.PackageGraph[0].ImportPath = "example.com/app"
+
+	analysis, err := Analyze(input)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	adapterFromAnalysis, err := AdaptReal(analysis)
+	if err != nil {
+		t.Fatalf("AdaptReal returned error: %v", err)
+	}
+
+	adapterFromInput, err := BuildRealAdapter(input)
+	if err != nil {
+		t.Fatalf("BuildRealAdapter returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(adapterFromInput, adapterFromAnalysis) {
+		t.Fatalf("direct adapter did not match analysis seam:\nfrom input: %#v\nfrom analysis: %#v", adapterFromInput, adapterFromAnalysis)
+	}
+}
+
+func TestBuildRealAdapterMatchesPackageGraphOnlyAnalysisSeamForCanonicalProgramPackageGraph(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.PackageGraph[0].ImportPath = "example.com/app"
+	for index := range input.CompileUnits {
+		if input.CompileUnits[index].Kind == "stdlib" {
+			input.CompileUnits[index].Imports = nil
+		}
+	}
+
+	analysisInput := input
+	analysisInput.CompileUnits = nil
+
+	analysis, err := Analyze(analysisInput)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	adapterFromAnalysis, err := AdaptReal(analysis)
+	if err != nil {
+		t.Fatalf("AdaptReal returned error: %v", err)
+	}
+
+	adapterFromInput, err := BuildRealAdapter(input)
+	if err != nil {
+		t.Fatalf("BuildRealAdapter returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(adapterFromInput, adapterFromAnalysis) {
+		t.Fatalf("direct adapter did not match packageGraph-only analysis seam:\nfrom input: %#v\nfrom analysis: %#v", adapterFromInput, adapterFromAnalysis)
+	}
+}
+
 func TestEmitSyntheticMatchesBuildForAnalyzedInput(t *testing.T) {
 	input := analysisSplitTestInput()
 
