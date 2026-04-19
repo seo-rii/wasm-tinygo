@@ -1269,6 +1269,31 @@ export const verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest = (
   )
 }
 
+export const verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest = (
+  manifest: TinyGoUpstreamFrontendProbeResult,
+  frontendAnalysisManifest?: TinyGoFrontendAnalysisManifest,
+) => {
+  const packageGraph = frontendAnalysisManifest?.packageGraph ?? []
+  const programPackages = packageGraph.filter((packageInfo) => !packageInfo.standard && !packageInfo.depOnly)
+  if (programPackages.length !== 1) {
+    throw new Error('upstream frontend probe package summaries did not match frontend analysis')
+  }
+  return verifyUpstreamFrontendProbeAgainstPackageGraph(
+    manifest,
+    packageGraph,
+    {
+      importPath: programPackages[0].importPath,
+      imports: programPackages[0].imports,
+      name: programPackages[0].name,
+    },
+    'upstream frontend probe package summaries did not match frontend analysis',
+    {
+      allowPartialFileSelection: true,
+      allowPartialPackageGraph: true,
+    },
+  )
+}
+
 const defaultTargetProfiles: Record<string, { llvmTarget: string; linker: string; cflags: string[]; ldflags: string[] }> = {
   wasm: {
     llvmTarget: 'wasm32-unknown-wasi',

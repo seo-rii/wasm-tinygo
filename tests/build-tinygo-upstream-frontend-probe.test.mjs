@@ -9,6 +9,7 @@ import { ConsoleStdout, Directory, File, OpenFile, PreopenDirectory, WASI, WASIP
 import { buildTinyGoUpstreamFrontendProbeWasm } from '../scripts/build-tinygo-upstream-frontend-probe.mjs'
 import {
   verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest,
+  verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest,
   normalizeTinyGoDriverBridgeManifestForBrowser,
   verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
 } from '../src/compile-unit.ts'
@@ -359,6 +360,17 @@ func main() {
       mainPackageName: browserManifest.entryPackage?.name ?? 'main',
     },
   )
+  assert.deepEqual(
+    verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest(
+      payload,
+      browserManifest.frontendAnalysis,
+    ),
+    {
+      entryImportPath: browserManifest.entryPackage?.importPath ?? 'command-line-arguments',
+      graphPackageCount: browserManifest.frontendAnalysis?.packageGraph?.length ?? 0,
+      mainPackageName: browserManifest.entryPackage?.name ?? 'main',
+    },
+  )
 })
 
 test('verifyUpstreamFrontendProbeAgainstDriverBridgeManifest rejects mismatched package summaries', () => {
@@ -491,5 +503,122 @@ test('verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest rejects mi
         },
       ),
     /upstream frontend probe package summaries did not match frontend analysis input/,
+  )
+})
+
+test('verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest rejects mismatched package summaries', () => {
+  assert.throws(
+    () =>
+      verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest(
+        {
+          requestedTarget: 'wasip1',
+          mainImportPath: 'command-line-arguments',
+          mainPackageName: 'main',
+          packageCount: 2,
+          fileCount: 1,
+          declarationCount: 1,
+          imports: ['fmt'],
+          packages: [
+            {
+              importPath: 'command-line-arguments',
+              name: 'main',
+              fileCount: 1,
+              imports: ['fmt'],
+            },
+            {
+              importPath: 'fmt',
+              name: 'fmt',
+              fileCount: 4,
+              imports: [],
+            },
+          ],
+        },
+        {
+          buildContext: {
+            target: 'wasm',
+            llvmTarget: 'wasm32-unknown-wasi',
+            goos: 'js',
+            goarch: 'wasm',
+            gc: 'conservative',
+            scheduler: 'asyncify',
+            buildTags: [],
+            modulePath: '',
+          },
+          entryFile: '/workspace/main.go',
+          compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+          allCompileFiles: ['/workspace/main.go', '/working/.tinygo-root/src/fmt/print.go'],
+          compileGroups: [
+            {
+              name: 'program',
+              files: ['/workspace/main.go'],
+            },
+            {
+              name: 'stdlib',
+              files: ['/working/.tinygo-root/src/fmt/print.go'],
+            },
+          ],
+          compileUnits: [
+            {
+              kind: 'program',
+              importPath: 'command-line-arguments',
+              imports: ['fmt'],
+              modulePath: '',
+              depOnly: false,
+              packageName: 'main',
+              packageDir: '/workspace',
+              files: ['/workspace/main.go'],
+              standard: false,
+            },
+            {
+              kind: 'stdlib',
+              importPath: 'fmt',
+              imports: ['io'],
+              modulePath: '',
+              depOnly: false,
+              packageName: 'fmt',
+              packageDir: '/working/.tinygo-root/src/fmt',
+              files: ['/working/.tinygo-root/src/fmt/print.go'],
+              standard: true,
+            },
+          ],
+          packageGraph: [
+            {
+              depOnly: false,
+              dir: '/workspace',
+              files: {
+                goFiles: ['main.go'],
+              },
+              importPath: 'command-line-arguments',
+              imports: ['fmt'],
+              modulePath: '',
+              name: 'main',
+              standard: false,
+            },
+            {
+              depOnly: false,
+              dir: '/working/.tinygo-root/src/fmt',
+              files: {
+                goFiles: ['print.go'],
+              },
+              importPath: 'fmt',
+              imports: ['io'],
+              modulePath: '',
+              name: 'fmt',
+              standard: true,
+            },
+          ],
+          toolchain: {
+            target: 'wasm',
+            llvmTarget: 'wasm32-unknown-wasi',
+            linker: 'wasm-ld',
+            cflags: [],
+            ldflags: [],
+            translationUnitPath: '/working/tinygo-bootstrap.c',
+            objectOutputPath: '/working/tinygo-bootstrap.o',
+            artifactOutputPath: '/working/out.wasm',
+          },
+        },
+      ),
+    /upstream frontend probe package summaries did not match frontend analysis/,
   )
 })

@@ -42,6 +42,7 @@ import {
   verifyLoweringPlanAgainstWorkItemsManifest,
   verifyIntermediateManifestAgainstCompileUnitManifest,
   verifyCompileUnitManifestAgainstCompileRequest,
+  verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest,
   verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest,
   verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
   verifyWorkItemsManifestAgainstLoweringManifest,
@@ -454,7 +455,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     return JSON.parse(stdoutLines.join('\n')) as TinyGoUpstreamProbeResult
   }
 
-  const runUpstreamFrontendProbe = async (): Promise<TinyGoUpstreamFrontendProbeResult> => {
+  const runUpstreamFrontendProbe = async (
+    frontendAnalysisManifest?: TinyGoFrontendAnalysisManifest | null,
+  ): Promise<TinyGoUpstreamFrontendProbeResult> => {
     const browserTinyGoRoot = '/working/.tinygo-root'
     const driverBridgeManifest =
       injectedDriverBridgeManifest === null ? null : cloneJsonValue(injectedDriverBridgeManifest)
@@ -662,6 +665,16 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       )
       appendLog(
         `patched upstream TinyGo WASI frontend probe matched analysis input packages=${analysisInputVerification.graphPackageCount} main=${analysisInputVerification.entryImportPath}`,
+        'success',
+      )
+    }
+    if (frontendAnalysisManifest?.packageGraph?.length) {
+      const frontendAnalysisVerification = verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest(
+        result,
+        frontendAnalysisManifest,
+      )
+      appendLog(
+        `patched upstream TinyGo WASI frontend probe matched frontend analysis packages=${frontendAnalysisVerification.graphPackageCount} main=${frontendAnalysisVerification.entryImportPath}`,
         'success',
       )
     }
@@ -1190,6 +1203,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         }
         const frontendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'running'))
         const frontendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'error'))
+        if (driverBridgeManifest?.packageGraph?.length && frontendAnalysisManifest?.packageGraph?.length) {
+          await runUpstreamFrontendProbe(frontendAnalysisManifest)
+        }
         appendLog('frontend build mode=frontend', 'success')
         appendLog('frontend build source=real-adapter', 'success')
         const frontendWasi = new WASI(
