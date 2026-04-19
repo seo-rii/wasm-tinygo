@@ -54,9 +54,14 @@ const runProbe = async ({ mode, rootPath, entries, resultFileName }) => {
 
   const resultNode = rootDirectory.dir.contents.get(resultFileName)
   const compileRequestNode = rootDirectory.dir.contents.get('tinygo-compile-request.json')
+  const rootFiles = Object.fromEntries(
+    [...rootDirectory.dir.contents.entries()]
+      .filter(([, node]) => node instanceof File)
+      .map(([name, node]) => [name, textDecoder.decode(node.data)]),
+  )
   const result = resultNode ? JSON.parse(textDecoder.decode(resultNode.data)) : null
   const compileRequest = compileRequestNode ? JSON.parse(textDecoder.decode(compileRequestNode.data)) : null
-  return { exitCode, result, compileRequest, logs }
+  return { exitCode, result, compileRequest, logs, rootFiles }
 }
 
 const runDriver = async ({ source, files, request }) => runProbe({
@@ -871,7 +876,7 @@ test('wasi frontend emits synthetic artifacts from frontend-analysis handoff', a
   assert.equal(execution.result.generatedFiles[0].contents.includes('module: '), false)
   assert.match(execution.result.generatedFiles[0].contents, /\\"materializedFiles\\":\[\\"\/working\/\.tinygo-root\/src\/device\/arm\/arm\.go\\"/)
   assert.match(execution.result.generatedFiles[1].contents, /"entryFile":"\/workspace\/main.go"/)
-  assert.match(execution.result.generatedFiles[1].contents, /"toolchain":\{"target":"wasm","artifactOutputPath":"\/working\/out\.wasm"\}/)
+  assert.match(execution.result.generatedFiles[1].contents, /"toolchain":\{"target":"wasm".*"artifactOutputPath":"\/working\/out\.wasm"\}/)
   assert.match(execution.result.generatedFiles[1].contents, /"compileUnits":\[\{"kind":"program","importPath":"command-line-arguments","imports":\["fmt"\],"modulePath":"","depOnly":false,"packageName":"main","packageDir":"\/workspace","files":\["\/workspace\/main\.go"\],"standard":false\},\{"kind":"stdlib","importPath":"errors","imports":\[\],"modulePath":"","depOnly":true,"packageName":"errors","packageDir":"\/working\/\.tinygo-root\/src\/errors","files":\["\/working\/\.tinygo-root\/src\/errors\/errors\.go"\],"standard":true\},\{"kind":"stdlib","importPath":"fmt","imports":\["errors","io"\],"modulePath":"","depOnly":true,"packageName":"fmt","packageDir":"\/working\/\.tinygo-root\/src\/fmt","files":\["\/working\/\.tinygo-root\/src\/fmt\/print\.go"\],"standard":true\}\]/)
   assert.match(execution.result.generatedFiles[1].contents, /"sourceSelection":\{"allCompile":\["\/working\/\.tinygo-root\/src\/errors\/errors\.go","\/working\/\.tinygo-root\/src\/fmt\/print\.go","\/workspace\/main\.go"\]\}/)
   assert.match(execution.result.generatedFiles[1].contents, /"materializedFiles":\["\/working\/\.tinygo-root\/src\/device\/arm\/arm\.go"/)
@@ -1095,7 +1100,8 @@ test('wasi frontend emits synthetic artifacts from frontend-analysis handoff', a
   assert.equal(execution.result.compileGroups, undefined)
   assert.equal(execution.result.summary, undefined)
   assert.equal(execution.compileRequest, null)
-  assert.match(execution.result.diagnostics[0], /frontend prepared 6 compile groups/)
+  assert.match(execution.result.diagnostics[0], /frontend prepared bootstrap compile request for wasm/)
+  assert.ok(execution.rootFiles['tinygo-frontend-real-adapter.json'])
   assert.match(execution.logs.join('\n'), /tinygo frontend prepared bootstrap compile request/)
 })
 
@@ -1196,7 +1202,7 @@ test('wasi frontend consumes frontend-analysis handoff without rereading input',
   assert.equal(execution.exitCode, 0)
   assert.equal(execution.result.ok, true)
   assert.equal(execution.result.generatedFiles.length, 7)
-  assert.match(execution.result.diagnostics[0], /frontend prepared 6 compile groups/)
+  assert.match(execution.result.diagnostics[0], /frontend prepared bootstrap compile request for wasm/)
   assert.match(execution.logs.join('\n'), /tinygo frontend prepared bootstrap compile request/)
   assert.match(execution.logs.join('\n'), /tinygo frontend consuming analysis handoff/)
 })
@@ -1796,7 +1802,10 @@ test('wasi frontend-analysis-build consumes normalized analysis handoff', async 
   const directExecution = await runFrontend({ analysisResult: analysisExecution.result, files: {} })
   assert.equal(directExecution.exitCode, 0)
   assert.equal(directExecution.result.ok, true)
-  assert.deepEqual(execution.result.generatedFiles, directExecution.result.generatedFiles)
+  assert.equal(directExecution.result.generatedFiles.length, 7)
+  assert.ok(directExecution.rootFiles['tinygo-frontend-real-adapter.json'])
+  const directAdapterResult = JSON.parse(directExecution.rootFiles['tinygo-frontend-real-adapter.json'])
+  assert.equal(directAdapterResult.ok, true)
   assert.match(execution.logs.join('\n'), /tinygo frontend prepared bootstrap compile request/)
   assert.match(execution.logs.join('\n'), /tinygo frontend consuming analysis handoff/)
 })
@@ -2512,18 +2521,26 @@ test('wasi backend consumes backend input', async () => {
   const loweredArtifactManifest = JSON.parse(execution.result.generatedFiles[6].contents)
   assert.deepEqual(loweredArtifactManifest, {
     artifactOutputPath: '/working/tinygo-lowered-out.wasm',
+    artifactKind: 'probe',
+    entrypoint: null,
     objectFiles: [
       '/working/tinygo-lowered/program-000.o',
       '/working/tinygo-lowered/stdlib-000.o',
     ],
+    reason: 'missing-wasi-entrypoint',
+    runnable: false,
   })
   const commandArtifactManifest = JSON.parse(execution.result.generatedFiles[7].contents)
   assert.deepEqual(commandArtifactManifest, {
     artifactOutputPath: '/working/out.wasm',
+    artifactKind: 'probe',
     bitcodeFiles: [
       '/working/tinygo-work/program-000.bc',
       '/working/tinygo-work/stdlib-000.bc',
     ],
+    entrypoint: null,
+    reason: 'missing-wasi-entrypoint',
+    runnable: false,
   })
   const commandBatchManifest = JSON.parse(execution.result.generatedFiles[8].contents)
   assert.deepEqual(commandBatchManifest.compileCommands, [
