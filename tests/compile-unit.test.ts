@@ -109,6 +109,10 @@ test('verifyCompileUnitManifestAgainstCompileRequest accepts compile requests th
   assert.equal(verification.summary.importedCount, 1)
   assert.equal(verification.summary.stdlibCount, 1)
   assert.equal(verification.summary.allCompileCount, 3)
+  assert.deepEqual(verification.toolchain.ldflags, [
+    '--stack-first',
+    '--no-demangle',
+  ])
   assert.deepEqual(verification.compileUnits, [
     { kind: 'program', importPath: 'command-line-arguments', modulePath: '', packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'] },
     { kind: 'imported', importPath: 'example.com/app/lib', modulePath: '', packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'] },
@@ -146,6 +150,44 @@ test('verifyCompileUnitManifestAgainstCompileRequest accepts compile requests th
       cwd: '/working',
     },
   ])
+})
+
+test('verifyCompileUnitManifestAgainstCompileRequest preserves explicit execution ldflags while toolPlan appends probe-only flags', () => {
+  const verification = verifyCompileUnitManifestAgainstCompileRequest({
+    optimizeFlag: '-Oz',
+    materializedFiles: [
+      '/working/.tinygo-root/targets/wasm.json',
+      '/working/tinygo-bootstrap.c',
+      '/working/tinygo-compile-unit.json',
+    ],
+    entryFile: '/workspace/main.go',
+    toolchain: {
+      target: 'wasm',
+      ldflags: ['--stack-first', '--import-memory'],
+      artifactOutputPath: '/working/out.wasm',
+    },
+    sourceSelection: {
+      allCompile: ['/workspace/main.go'],
+    },
+  }, {})
+
+  assert.deepEqual(verification.toolchain.ldflags, [
+    '--stack-first',
+    '--import-memory',
+  ])
+  assert.deepEqual(verification.toolPlan[1], {
+    argv: [
+      '/usr/bin/wasm-ld',
+      '--stack-first',
+      '--import-memory',
+      '--no-entry',
+      '--export-all',
+      'tinygo-bootstrap.o',
+      '-o',
+      '/working/out.wasm',
+    ],
+    cwd: '/working',
+  })
 })
 
 test('verifyCompileUnitManifestAgainstCompileRequest rejects mismatched tool plans', () => {

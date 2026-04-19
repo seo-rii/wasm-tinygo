@@ -1384,14 +1384,14 @@ const normalizeCompileUnitToolchain = (manifest: TinyGoCompileUnitManifest) => {
   }
 }
 
-const normalizeExecutionLdflags = (ldflags: string[]) => {
-  const executionLdflags = [...ldflags]
+const normalizeProbeLdflags = (ldflags: string[]) => {
+  const probeLdflags = [...ldflags]
   for (const flag of ['--no-entry', '--export-all']) {
-    if (!executionLdflags.includes(flag)) {
-      executionLdflags.push(flag)
+    if (!probeLdflags.includes(flag)) {
+      probeLdflags.push(flag)
     }
   }
-  return executionLdflags
+  return probeLdflags
 }
 
 const normalizePackageFactsByKind = (
@@ -1476,9 +1476,7 @@ export const buildToolPlanFromCompileUnitManifest = (
     {
       argv: [
         `/usr/bin/${normalizedToolchain.linker}`,
-        ...normalizedToolchain.ldflags,
-        '--no-entry',
-        '--export-all',
+        ...normalizeProbeLdflags(normalizedToolchain.ldflags),
         objectOutputName,
         '-o',
         artifactOutputPath,
@@ -3110,10 +3108,7 @@ export const verifyCompileUnitManifestAgainstCompileRequest = (
 
   return {
     toolPlan,
-    toolchain: {
-      ...normalizedToolchain,
-      ldflags: normalizeExecutionLdflags(normalizedToolchain.ldflags),
-    },
+    toolchain: normalizedToolchain,
     sourceSelection: {
       targetAssets: targetAssetFiles,
       runtimeSupport: runtimeSupportFiles,
@@ -3144,7 +3139,11 @@ export const verifyIntermediateManifestAgainstCompileUnitManifest = (
   if ((compileUnitManifest.optimizeFlag ?? '') !== (intermediateManifest.optimizeFlag ?? '')) {
     throw new Error('frontend intermediate optimize flag did not match compile unit manifest')
   }
-  if (JSON.stringify(compileUnitVerification.toolchain) !== JSON.stringify(intermediateManifest.toolchain ?? {})) {
+  const intermediateExpectedToolchain = {
+    ...compileUnitVerification.toolchain,
+    ldflags: normalizeProbeLdflags(compileUnitVerification.toolchain.ldflags),
+  }
+  if (JSON.stringify(intermediateExpectedToolchain) !== JSON.stringify(intermediateManifest.toolchain ?? {})) {
     throw new Error('frontend intermediate toolchain did not match compile unit manifest')
   }
   if (JSON.stringify(compileUnitVerification.sourceSelection) !== JSON.stringify(intermediateManifest.sourceSelection ?? {})) {
@@ -3335,7 +3334,7 @@ export const verifyLoweredCommandBatchAgainstCompileUnitAndLoweredSourcesManifes
   const linkCommand = {
     argv: [
       `/usr/bin/${normalizedToolchain.linker}`,
-      ...normalizeExecutionLdflags(normalizedToolchain.ldflags),
+      ...normalizeProbeLdflags(normalizedToolchain.ldflags),
       ...(loweredSourcesManifest.units ?? []).map((unit) => {
         const loweredSourcePath = unit.loweredSourcePath ?? ''
         return loweredSourcePath.endsWith('.c') ? `${loweredSourcePath.slice(0, -2)}.o` : `${loweredSourcePath}.o`
