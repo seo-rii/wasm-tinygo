@@ -205,13 +205,20 @@ type AnalysisResult struct {
 }
 
 type AdapterToolchain struct {
-	Target     string `json:"target"`
-	LLVMTarget string `json:"llvmTarget"`
+	Target              string   `json:"target"`
+	LLVMTarget          string   `json:"llvmTarget"`
+	Linker              string   `json:"linker,omitempty"`
+	CFlags              []string `json:"cflags,omitempty"`
+	LDFlags             []string `json:"ldflags,omitempty"`
+	TranslationUnitPath string   `json:"translationUnitPath,omitempty"`
+	ObjectOutputPath    string   `json:"objectOutputPath,omitempty"`
+	ArtifactOutputPath  string   `json:"artifactOutputPath,omitempty"`
 }
 
 type Adapter struct {
 	BuildContext            BuildContext              `json:"buildContext"`
 	EntryFile               string                    `json:"entryFile"`
+	OptimizeFlag            string                    `json:"optimizeFlag,omitempty"`
 	CompileUnitManifestPath string                    `json:"compileUnitManifestPath"`
 	AllCompileFiles         []string                  `json:"allCompileFiles"`
 	CompileGroups           []CompileGroup            `json:"compileGroups"`
@@ -1204,14 +1211,21 @@ func AdaptReal(analysis Analysis) (Adapter, error) {
 	return Adapter{
 		BuildContext:            analysis.BuildContext,
 		EntryFile:               analysis.EntryFile,
+		OptimizeFlag:            analysis.OptimizeFlag,
 		CompileUnitManifestPath: analysis.CompileUnitManifestPath,
 		AllCompileFiles:         append([]string{}, analysis.AllCompileFiles...),
 		CompileGroups:           compileGroups,
 		CompileUnits:            compileUnits,
 		PackageGraph:            append([]PackageGraphPackage{}, analysis.PackageGraph...),
 		Toolchain: AdapterToolchain{
-			Target:     analysis.Toolchain.Target,
-			LLVMTarget: analysis.Toolchain.LLVMTarget,
+			Target:              analysis.Toolchain.Target,
+			LLVMTarget:          analysis.Toolchain.LLVMTarget,
+			Linker:              analysis.Toolchain.Linker,
+			CFlags:              append([]string{}, analysis.Toolchain.CFlags...),
+			LDFlags:             append([]string{}, analysis.Toolchain.LDFlags...),
+			TranslationUnitPath: analysis.Toolchain.TranslationUnitPath,
+			ObjectOutputPath:    analysis.Toolchain.ObjectOutputPath,
+			ArtifactOutputPath:  analysis.Toolchain.ArtifactOutputPath,
 		},
 	}, nil
 }
@@ -1414,33 +1428,6 @@ func ExecuteAnalysisBuildPaths(analysisPath, resultPath string) error {
 }
 
 func ExecuteAdapterBuildPaths(analysisPath, adapterPath, resultPath string) error {
-	analysisData, err := os.ReadFile(analysisPath)
-	if err != nil {
-		return err
-	}
-
-	var analysisResult AnalysisResult
-	if err := json.Unmarshal(analysisData, &analysisResult); err != nil {
-		return err
-	}
-	if !analysisResult.OK || analysisResult.Analysis == nil {
-		result := Result{
-			OK:          false,
-			Diagnostics: append([]string{}, analysisResult.Diagnostics...),
-		}
-		if len(result.Diagnostics) == 0 {
-			result.Diagnostics = []string{"frontend analysis result is required"}
-		}
-		resultData, marshalErr := json.Marshal(result)
-		if marshalErr != nil {
-			return marshalErr
-		}
-		if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-			return writeErr
-		}
-		return fmt.Errorf("%s", result.Diagnostics[0])
-	}
-
 	adapterData, err := os.ReadFile(adapterPath)
 	if err != nil {
 		return err
@@ -1467,105 +1454,223 @@ func ExecuteAdapterBuildPaths(analysisPath, adapterPath, resultPath string) erro
 		}
 		return fmt.Errorf("%s", result.Diagnostics[0])
 	}
-	if adapterResult.Adapter.Toolchain.Target != analysisResult.Analysis.Toolchain.Target {
-		result := Result{
-			OK:          false,
-			Diagnostics: []string{"frontend real adapter target did not match analysis"},
+
+	var analysisResult AnalysisResult
+	analysisAvailable := false
+	analysisData, err := os.ReadFile(analysisPath)
+	if err == nil {
+		analysisAvailable = true
+		if err := json.Unmarshal(analysisData, &analysisResult); err != nil {
+			return err
 		}
-		resultData, marshalErr := json.Marshal(result)
-		if marshalErr != nil {
-			return marshalErr
+		if !analysisResult.OK || analysisResult.Analysis == nil {
+			result := Result{
+				OK:          false,
+				Diagnostics: append([]string{}, analysisResult.Diagnostics...),
+			}
+			if len(result.Diagnostics) == 0 {
+				result.Diagnostics = []string{"frontend analysis result is required"}
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-			return writeErr
-		}
-		return fmt.Errorf("%s", result.Diagnostics[0])
+	} else if !os.IsNotExist(err) {
+		return err
 	}
-	if adapterResult.Adapter.Toolchain.LLVMTarget != analysisResult.Analysis.Toolchain.LLVMTarget {
-		result := Result{
-			OK:          false,
-			Diagnostics: []string{"frontend real adapter llvmTarget did not match analysis"},
+
+	if analysisAvailable {
+		if adapterResult.Adapter.Toolchain.Target != analysisResult.Analysis.Toolchain.Target {
+			result := Result{
+				OK:          false,
+				Diagnostics: []string{"frontend real adapter target did not match analysis"},
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		resultData, marshalErr := json.Marshal(result)
-		if marshalErr != nil {
-			return marshalErr
+		if adapterResult.Adapter.Toolchain.LLVMTarget != analysisResult.Analysis.Toolchain.LLVMTarget {
+			result := Result{
+				OK:          false,
+				Diagnostics: []string{"frontend real adapter llvmTarget did not match analysis"},
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-			return writeErr
+		if adapterResult.Adapter.CompileUnitManifestPath != analysisResult.Analysis.CompileUnitManifestPath {
+			result := Result{
+				OK:          false,
+				Diagnostics: []string{"frontend real adapter compile unit manifest path did not match analysis"},
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		return fmt.Errorf("%s", result.Diagnostics[0])
-	}
-	if adapterResult.Adapter.CompileUnitManifestPath != analysisResult.Analysis.CompileUnitManifestPath {
-		result := Result{
-			OK:          false,
-			Diagnostics: []string{"frontend real adapter compile unit manifest path did not match analysis"},
+		if len(adapterResult.Adapter.CompileUnits) != len(analysisResult.Analysis.CompileUnits) {
+			result := Result{
+				OK:          false,
+				Diagnostics: []string{"frontend real adapter compile unit count did not match analysis"},
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		resultData, marshalErr := json.Marshal(result)
-		if marshalErr != nil {
-			return marshalErr
+		if len(adapterResult.Adapter.AllCompileFiles) != len(analysisResult.Analysis.AllCompileFiles) {
+			result := Result{
+				OK:          false,
+				Diagnostics: []string{"frontend real adapter all-compile count did not match analysis"},
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-			return writeErr
+		if adapterResult.Adapter.OptimizeFlag != "" && adapterResult.Adapter.OptimizeFlag != analysisResult.Analysis.OptimizeFlag {
+			result := Result{
+				OK:          false,
+				Diagnostics: []string{"frontend real adapter optimize flag did not match analysis"},
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		return fmt.Errorf("%s", result.Diagnostics[0])
-	}
-	if len(adapterResult.Adapter.CompileUnits) != len(analysisResult.Analysis.CompileUnits) {
-		result := Result{
-			OK:          false,
-			Diagnostics: []string{"frontend real adapter compile unit count did not match analysis"},
+		if adapterResult.Adapter.Toolchain.ArtifactOutputPath != "" && adapterResult.Adapter.Toolchain.ArtifactOutputPath != analysisResult.Analysis.Toolchain.ArtifactOutputPath {
+			result := Result{
+				OK:          false,
+				Diagnostics: []string{"frontend real adapter artifact output path did not match analysis"},
+			}
+			resultData, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return fmt.Errorf("%s", result.Diagnostics[0])
 		}
-		resultData, marshalErr := json.Marshal(result)
-		if marshalErr != nil {
-			return marshalErr
-		}
-		if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-			return writeErr
-		}
-		return fmt.Errorf("%s", result.Diagnostics[0])
-	}
-	if len(adapterResult.Adapter.AllCompileFiles) != len(analysisResult.Analysis.AllCompileFiles) {
-		result := Result{
-			OK:          false,
-			Diagnostics: []string{"frontend real adapter all-compile count did not match analysis"},
-		}
-		resultData, marshalErr := json.Marshal(result)
-		if marshalErr != nil {
-			return marshalErr
-		}
-		if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-			return writeErr
-		}
-		return fmt.Errorf("%s", result.Diagnostics[0])
 	}
 
 	buildTags := append([]string{}, adapterResult.Adapter.BuildContext.BuildTags...)
-	if len(buildTags) == 0 {
+	if len(buildTags) == 0 && analysisAvailable {
 		buildTags = append([]string{}, analysisResult.Analysis.BuildTags...)
 	}
+	buildContext := adapterResult.Adapter.BuildContext
+	if analysisAvailable {
+		if buildContext.Target == "" {
+			buildContext.Target = analysisResult.Analysis.BuildContext.Target
+		}
+		if buildContext.LLVMTarget == "" {
+			buildContext.LLVMTarget = analysisResult.Analysis.BuildContext.LLVMTarget
+		}
+		if buildContext.GOOS == "" {
+			buildContext.GOOS = analysisResult.Analysis.BuildContext.GOOS
+		}
+		if buildContext.GOARCH == "" {
+			buildContext.GOARCH = analysisResult.Analysis.BuildContext.GOARCH
+		}
+		if buildContext.GC == "" {
+			buildContext.GC = analysisResult.Analysis.BuildContext.GC
+		}
+		if buildContext.Scheduler == "" {
+			buildContext.Scheduler = analysisResult.Analysis.BuildContext.Scheduler
+		}
+		if len(buildContext.BuildTags) == 0 {
+			buildContext.BuildTags = append([]string{}, analysisResult.Analysis.BuildContext.BuildTags...)
+		}
+		if buildContext.ModulePath == "" {
+			buildContext.ModulePath = analysisResult.Analysis.BuildContext.ModulePath
+		}
+	}
 	modulePath := adapterResult.Adapter.BuildContext.ModulePath
-	if modulePath == "" {
+	if modulePath == "" && analysisAvailable {
 		modulePath = analysisResult.Analysis.ModulePath
 	}
 	entryFile := adapterResult.Adapter.EntryFile
-	if entryFile == "" {
+	if entryFile == "" && analysisAvailable {
 		entryFile = analysisResult.Analysis.EntryFile
+	}
+	optimizeFlag := adapterResult.Adapter.OptimizeFlag
+	if optimizeFlag == "" && analysisAvailable {
+		optimizeFlag = analysisResult.Analysis.OptimizeFlag
+	}
+	toolchain := Toolchain{
+		Target:              adapterResult.Adapter.Toolchain.Target,
+		LLVMTarget:          adapterResult.Adapter.Toolchain.LLVMTarget,
+		Linker:              adapterResult.Adapter.Toolchain.Linker,
+		CFlags:              append([]string{}, adapterResult.Adapter.Toolchain.CFlags...),
+		LDFlags:             append([]string{}, adapterResult.Adapter.Toolchain.LDFlags...),
+		TranslationUnitPath: adapterResult.Adapter.Toolchain.TranslationUnitPath,
+		ObjectOutputPath:    adapterResult.Adapter.Toolchain.ObjectOutputPath,
+		ArtifactOutputPath:  adapterResult.Adapter.Toolchain.ArtifactOutputPath,
+	}
+	if analysisAvailable {
+		if toolchain.Target == "" {
+			toolchain.Target = analysisResult.Analysis.Toolchain.Target
+		}
+		if toolchain.LLVMTarget == "" {
+			toolchain.LLVMTarget = analysisResult.Analysis.Toolchain.LLVMTarget
+		}
+		if toolchain.Linker == "" {
+			toolchain.Linker = analysisResult.Analysis.Toolchain.Linker
+		}
+		if len(toolchain.CFlags) == 0 {
+			toolchain.CFlags = append([]string{}, analysisResult.Analysis.Toolchain.CFlags...)
+		}
+		if len(toolchain.LDFlags) == 0 {
+			toolchain.LDFlags = append([]string{}, analysisResult.Analysis.Toolchain.LDFlags...)
+		}
+		if toolchain.TranslationUnitPath == "" {
+			toolchain.TranslationUnitPath = analysisResult.Analysis.Toolchain.TranslationUnitPath
+		}
+		if toolchain.ObjectOutputPath == "" {
+			toolchain.ObjectOutputPath = analysisResult.Analysis.Toolchain.ObjectOutputPath
+		}
+		if toolchain.ArtifactOutputPath == "" {
+			toolchain.ArtifactOutputPath = analysisResult.Analysis.Toolchain.ArtifactOutputPath
+		}
 	}
 	result, err := Build(Input{
 		BuildTags:    buildTags,
-		BuildContext: adapterResult.Adapter.BuildContext,
-		Toolchain: Toolchain{
-			Target:              adapterResult.Adapter.Toolchain.Target,
-			LLVMTarget:          adapterResult.Adapter.Toolchain.LLVMTarget,
-			Linker:              analysisResult.Analysis.Toolchain.Linker,
-			CFlags:              append([]string{}, analysisResult.Analysis.Toolchain.CFlags...),
-			LDFlags:             append([]string{}, analysisResult.Analysis.Toolchain.LDFlags...),
-			TranslationUnitPath: analysisResult.Analysis.Toolchain.TranslationUnitPath,
-			ObjectOutputPath:    analysisResult.Analysis.Toolchain.ObjectOutputPath,
-			ArtifactOutputPath:  analysisResult.Analysis.Toolchain.ArtifactOutputPath,
-		},
+		BuildContext: buildContext,
+		Toolchain:    toolchain,
 		ModulePath:   modulePath,
 		PackageGraph: append([]PackageGraphPackage{}, adapterResult.Adapter.PackageGraph...),
-		OptimizeFlag: analysisResult.Analysis.OptimizeFlag,
+		OptimizeFlag: optimizeFlag,
 		EntryFile:    entryFile,
 		SourceSelection: SourceSelection{
 			AllCompile: append([]string{}, adapterResult.Adapter.AllCompileFiles...),
@@ -1588,7 +1693,7 @@ func ExecuteAdapterBuildPaths(analysisPath, adapterPath, resultPath string) erro
 	}
 
 	result.Diagnostics = []string{
-		fmt.Sprintf("tinygo frontend prepared bootstrap compile request for %s", analysisResult.Analysis.Toolchain.Target),
+		fmt.Sprintf("tinygo frontend prepared bootstrap compile request for %s", toolchain.Target),
 	}
 	resultData, err := json.Marshal(result)
 	if err != nil {

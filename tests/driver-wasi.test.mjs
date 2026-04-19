@@ -130,7 +130,7 @@ const runFrontendFromRealAdapter = async ({ analysisResult, adapterResult, files
   mode: 'frontend-real-adapter-build',
   rootPath: '/working',
   entries: {
-    'tinygo-frontend-analysis.json': JSON.stringify(analysisResult),
+    ...(analysisResult ? { 'tinygo-frontend-analysis.json': JSON.stringify(analysisResult) } : {}),
     'tinygo-frontend-real-adapter.json': JSON.stringify(adapterResult),
     ...(files ?? {}),
   },
@@ -2175,7 +2175,6 @@ test('wasi frontend-real-adapter-build consumes normalized real-adapter handoff'
   adapterExecution.result.adapter.packageGraph[0].importPath = 'example.com/app'
 
   const execution = await runFrontendFromRealAdapter({
-    analysisResult: analysisExecution.result,
     adapterResult: adapterExecution.result,
     files: {},
   })
@@ -2193,6 +2192,8 @@ test('wasi frontend-real-adapter-build consumes normalized real-adapter handoff'
   assert.ok(compileUnitFile)
   const compileUnitManifest = JSON.parse(compileUnitFile.contents)
   assert.equal(compileUnitManifest.compileUnits[0].importPath, 'example.com/app')
+  assert.equal(compileUnitManifest.optimizeFlag, '-Oz')
+  assert.equal(compileUnitManifest.toolchain.artifactOutputPath, '/working/out.wasm')
 })
 
 test('wasi frontend-real-adapter writes package-focused adapter analysis', async () => {

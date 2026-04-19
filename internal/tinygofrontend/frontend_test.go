@@ -1079,6 +1079,8 @@ func TestExecuteAdapterPathsWritesFrontendAdapter(t *testing.T) {
 	}
 	if result.Adapter.Toolchain.Target != "wasm" ||
 		result.Adapter.Toolchain.LLVMTarget != "wasm32-unknown-wasi" ||
+		result.Adapter.Toolchain.ArtifactOutputPath != "/working/out.wasm" ||
+		result.Adapter.OptimizeFlag != "-Oz" ||
 		result.Adapter.CompileUnitManifestPath != "/working/tinygo-compile-unit.json" {
 		t.Fatalf("unexpected adapter payload: %#v", result.Adapter)
 	}
@@ -1258,6 +1260,90 @@ func TestExecuteAdapterBuildPathsWritesFrontendResult(t *testing.T) {
 		}
 		if err := json.Unmarshal([]byte(generatedFile.Contents), &compileUnitManifest); err != nil {
 			t.Fatalf("json.Unmarshal(compileUnitManifest): %v", err)
+		}
+		if len(compileUnitManifest.CompileUnits) == 0 {
+			t.Fatalf("expected compile units: %#v", compileUnitManifest)
+		}
+		if got := compileUnitManifest.CompileUnits[0].ImportPath; got != "example.com/app" {
+			t.Fatalf("unexpected emitted program import path: %q", got)
+		}
+	}
+	if !compileUnitFileFound {
+		t.Fatalf("expected tinygo-compile-unit.json in generated files: %#v", result.GeneratedFiles)
+	}
+}
+
+func TestExecuteAdapterBuildPathsWritesFrontendResultWithoutAnalysis(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	adapterPath := filepath.Join(dir, "tinygo-frontend-real-adapter.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-result.json")
+	missingAnalysisPath := filepath.Join(dir, "missing-frontend-analysis.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+	if err := ExecuteAdapterPaths(inputPath, adapterPath); err != nil {
+		t.Fatalf("ExecuteAdapterPaths returned error: %v", err)
+	}
+	adapterData, err := os.ReadFile(adapterPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(adapter): %v", err)
+	}
+	var adapterResult AdapterResult
+	if err := json.Unmarshal(adapterData, &adapterResult); err != nil {
+		t.Fatalf("json.Unmarshal(adapter): %v", err)
+	}
+	if adapterResult.Adapter == nil {
+		t.Fatalf("expected adapter result: %#v", adapterResult)
+	}
+	adapterResult.Adapter.CompileUnits[0].ImportPath = "example.com/app"
+	adapterResult.Adapter.PackageGraph[0].ImportPath = "example.com/app"
+	adapterData, err = json.Marshal(adapterResult)
+	if err != nil {
+		t.Fatalf("json.Marshal(adapter): %v", err)
+	}
+	if err := os.WriteFile(adapterPath, adapterData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(adapter): %v", err)
+	}
+
+	if err := ExecuteAdapterBuildPaths(missingAnalysisPath, adapterPath, resultPath); err != nil {
+		t.Fatalf("ExecuteAdapterBuildPaths returned error: %v", err)
+	}
+
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(result): %v", err)
+	}
+	var result Result
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result): %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	compileUnitFileFound := false
+	for _, generatedFile := range result.GeneratedFiles {
+		if generatedFile.Path != "/working/tinygo-compile-unit.json" {
+			continue
+		}
+		compileUnitFileFound = true
+		var compileUnitManifest struct {
+			OptimizeFlag string                    `json:"optimizeFlag"`
+			Toolchain    Toolchain                 `json:"toolchain"`
+			CompileUnits []IntermediateCompileUnit `json:"compileUnits"`
+		}
+		if err := json.Unmarshal([]byte(generatedFile.Contents), &compileUnitManifest); err != nil {
+			t.Fatalf("json.Unmarshal(compileUnitManifest): %v", err)
+		}
+		if compileUnitManifest.OptimizeFlag != "-Oz" {
+			t.Fatalf("unexpected optimize flag: %#v", compileUnitManifest)
+		}
+		if compileUnitManifest.Toolchain.ArtifactOutputPath != "/working/out.wasm" {
+			t.Fatalf("unexpected artifact output path: %#v", compileUnitManifest.Toolchain)
 		}
 		if len(compileUnitManifest.CompileUnits) == 0 {
 			t.Fatalf("expected compile units: %#v", compileUnitManifest)
