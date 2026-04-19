@@ -645,7 +645,7 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	if !strings.Contains(result.GeneratedFiles[2].Contents, "\"sourceSelection\":{\"targetAssets\":[\"/working/.tinygo-root/targets/wasm-undefined.txt\",\"/working/.tinygo-root/targets/wasm.json\"],\"runtimeSupport\":[\"/working/.tinygo-root/src/device/arm/arm.go\",\"/working/.tinygo-root/src/runtime/asm_tinygowasm.S\",\"/working/.tinygo-root/src/runtime/gc_boehm.c\",\"/working/.tinygo-root/src/runtime/internal/sys/zversion.go\"],\"program\":[\"/workspace/main.go\"],\"imported\":[\"/workspace/lib/helper.go\"],\"stdlib\":[\"/working/.tinygo-root/src/fmt/print.go\"],\"allCompile\":[\"/working/.tinygo-root/src/fmt/print.go\",\"/workspace/lib/helper.go\",\"/workspace/main.go\"]}") {
 		t.Fatalf("unexpected intermediate manifest contents: %q", result.GeneratedFiles[2].Contents)
 	}
-	if !strings.Contains(result.GeneratedFiles[2].Contents, "\"toolchain\":{\"target\":\"wasm\",\"llvmTarget\":\"wasm32-unknown-wasi\",\"linker\":\"wasm-ld\",\"cflags\":[\"-mbulk-memory\",\"-mnontrapping-fptoint\",\"-mno-multivalue\",\"-mno-reference-types\",\"-msign-ext\"],\"ldflags\":[\"--stack-first\",\"--no-demangle\",\"--no-entry\",\"--export-all\"],\"translationUnitPath\":\"/working/tinygo-bootstrap.c\",\"objectOutputPath\":\"/working/tinygo-bootstrap.o\",\"artifactOutputPath\":\"/working/out.wasm\"}") {
+	if !strings.Contains(result.GeneratedFiles[2].Contents, "\"toolchain\":{\"target\":\"wasm\",\"llvmTarget\":\"wasm32-unknown-wasi\",\"linker\":\"wasm-ld\",\"cflags\":[\"-mbulk-memory\",\"-mnontrapping-fptoint\",\"-mno-multivalue\",\"-mno-reference-types\",\"-msign-ext\"],\"ldflags\":[\"--stack-first\",\"--no-demangle\"],\"translationUnitPath\":\"/working/tinygo-bootstrap.c\",\"objectOutputPath\":\"/working/tinygo-bootstrap.o\",\"artifactOutputPath\":\"/working/out.wasm\"}") {
 		t.Fatalf("unexpected intermediate toolchain contents: %q", result.GeneratedFiles[2].Contents)
 	}
 	if !reflect.DeepEqual(intermediateManifest.CompileUnits, []IntermediateCompileUnit{
@@ -667,6 +667,18 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	}
 	if !reflect.DeepEqual(loweringManifest.BuildTags, []string{"scheduler.tasks", "tinygo.wasm"}) {
 		t.Fatalf("unexpected lowering build tags: %#v", loweringManifest)
+	}
+	if !reflect.DeepEqual(loweringManifest.Toolchain, Toolchain{
+		Target:              "wasm",
+		LLVMTarget:          "wasm32-unknown-wasi",
+		Linker:              "wasm-ld",
+		CFlags:              []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"},
+		LDFlags:             []string{"--stack-first", "--no-demangle"},
+		TranslationUnitPath: "/working/tinygo-bootstrap.c",
+		ObjectOutputPath:    "/working/tinygo-bootstrap.o",
+		ArtifactOutputPath:  "/working/out.wasm",
+	}) {
+		t.Fatalf("unexpected lowering toolchain: %#v", loweringManifest.Toolchain)
 	}
 	if !reflect.DeepEqual(loweringManifest.Support, LoweringSupport{
 		TargetAssets:   []string{"/working/.tinygo-root/targets/wasm-undefined.txt", "/working/.tinygo-root/targets/wasm.json"},

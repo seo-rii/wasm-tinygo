@@ -3139,11 +3139,7 @@ export const verifyIntermediateManifestAgainstCompileUnitManifest = (
   if ((compileUnitManifest.optimizeFlag ?? '') !== (intermediateManifest.optimizeFlag ?? '')) {
     throw new Error('frontend intermediate optimize flag did not match compile unit manifest')
   }
-  const intermediateExpectedToolchain = {
-    ...compileUnitVerification.toolchain,
-    ldflags: normalizeProbeLdflags(compileUnitVerification.toolchain.ldflags),
-  }
-  if (JSON.stringify(intermediateExpectedToolchain) !== JSON.stringify(intermediateManifest.toolchain ?? {})) {
+  if (JSON.stringify(compileUnitVerification.toolchain) !== JSON.stringify(intermediateManifest.toolchain ?? {})) {
     throw new Error('frontend intermediate toolchain did not match compile unit manifest')
   }
   if (JSON.stringify(compileUnitVerification.sourceSelection) !== JSON.stringify(intermediateManifest.sourceSelection ?? {})) {
