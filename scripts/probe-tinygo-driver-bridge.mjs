@@ -45,7 +45,9 @@ const frontendAnalysisPath =
 const frontendRealAdapterPath =
   process.env.WASM_TINYGO_DRIVER_BRIDGE_FRONTEND_REAL_ADAPTER_PATH ??
   path.join(path.dirname(requestPath), 'tinygo-frontend-real-adapter.json')
-const skipFrontendAnalysis = process.env.WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS === '1'
+const includeFrontendAnalysis =
+  process.env.WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS === '1' &&
+  process.env.WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS !== '1'
 const goBin = process.env.WASM_TINYGO_GO_BIN ?? 'go'
 const tinygoBin = process.env.WASM_TINYGO_TINYGO_BIN ?? tinygoToolchainPaths.binPath
 const tinygoRoot = process.env.WASM_TINYGO_TINYGOROOT ?? tinygoToolchainPaths.rootPath
@@ -338,7 +340,7 @@ await writeFile(frontendAnalysisInputPath, `${JSON.stringify(frontendAnalysisInp
 `)
 
 let frontendAnalysisResult = null
-if (!skipFrontendAnalysis) {
+if (includeFrontendAnalysis) {
   const frontendAnalysis = spawnSync(goBin, ['run', './cmd/go-probe'], {
     cwd: repoRoot,
     env: {

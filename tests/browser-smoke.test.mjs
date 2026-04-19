@@ -157,7 +157,6 @@ func main() {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
       WASM_TINYGO_DRIVER_BRIDGE_REQUEST_PATH: bridgeRequestPath,
-      WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_DRIVER_BRIDGE_WORK_DIR: bridgeWorkDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

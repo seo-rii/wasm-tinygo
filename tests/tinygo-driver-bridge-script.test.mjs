@@ -457,75 +457,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     standardPackageCount: 1,
     target: 'wasip1',
   })
-  assert.deepEqual(manifest.frontendAnalysis, {
-    allCompileFiles: [entryPath, '/working/.tinygo-root/src/fmt/print.go'],
-    buildContext: {
-      target: 'wasip1',
-      llvmTarget: 'wasm32-unknown-wasi',
-      goos: 'wasip1',
-      goarch: 'wasm',
-      gc: 'precise',
-      scheduler: 'tasks',
-      buildTags: ['gc.precise', 'scheduler.tasks', 'tinygo.wasm'],
-      modulePath: 'example.com/fake',
-    },
-    compileGroups: [
-      { files: [entryPath], name: 'program' },
-      { files: [entryPath, '/working/.tinygo-root/src/fmt/print.go'], name: 'all-compile' },
-    ],
-    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
-    compileUnits: [
-      {
-        depOnly: false,
-        files: [entryPath],
-        kind: 'program',
-        importPath: 'example.com/fake',
-        imports: ['fmt'],
-        modulePath: 'example.com/fake',
-        packageDir: workspaceDir,
-        packageName: 'main',
-        standard: false,
-      },
-      {
-        depOnly: true,
-        files: ['/working/.tinygo-root/src/fmt/print.go'],
-        kind: 'stdlib',
-        importPath: 'fmt',
-        imports: ['errors'],
-        modulePath: '',
-        packageDir: '/working/.tinygo-root/src/fmt',
-        packageName: 'fmt',
-        standard: true,
-      },
-    ],
-    entryFile: entryPath,
-    packageGraph: [
-      {
-        depOnly: false,
-        dir: workspaceDir,
-        files: { goFiles: ['main.go'] },
-        importPath: 'example.com/fake',
-        imports: ['fmt'],
-        modulePath: 'example.com/fake',
-        name: 'main',
-        standard: false,
-      },
-      {
-        depOnly: true,
-        dir: '/working/.tinygo-root/src/fmt',
-        files: { goFiles: ['print.go'] },
-        importPath: 'fmt',
-        imports: ['errors'],
-        modulePath: '',
-        name: 'fmt',
-        standard: true,
-      },
-    ],
-    toolchain: {
-      llvmTarget: 'wasm32-unknown-wasi',
-      target: 'wasip1',
-    },
-  })
+  assert.equal(manifest.frontendAnalysis, undefined)
   assert.deepEqual(manifest.frontendAnalysisInput, {
     buildContext: {
       target: 'wasip1',
@@ -924,6 +856,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -1214,6 +1147,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -1898,6 +1832,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -2090,6 +2025,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -2362,6 +2298,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -2632,6 +2569,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -2981,6 +2919,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -3312,6 +3251,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -3585,6 +3525,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -3877,6 +3818,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     cwd,
     env: {
       ...process.env,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -4129,6 +4071,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -4475,6 +4418,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS: '1',
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',

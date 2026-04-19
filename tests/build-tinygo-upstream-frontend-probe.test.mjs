@@ -361,17 +361,7 @@ func main() {
       mainPackageName: browserManifest.entryPackage?.name ?? 'main',
     },
   )
-  assert.deepEqual(
-    verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest(
-      payload,
-      browserManifest.frontendAnalysis,
-    ),
-    {
-      entryImportPath: browserManifest.entryPackage?.importPath ?? 'command-line-arguments',
-      graphPackageCount: browserManifest.frontendAnalysis?.packageGraph?.length ?? 0,
-      mainPackageName: browserManifest.entryPackage?.name ?? 'main',
-    },
-  )
+  assert.equal(browserManifest.frontendAnalysis, undefined)
   assert.deepEqual(
     verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest(
       payload,
