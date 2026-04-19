@@ -43,6 +43,7 @@ import {
   verifyIntermediateManifestAgainstCompileUnitManifest,
   verifyCompileUnitManifestAgainstCompileRequest,
   verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest,
+  verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest,
   verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest,
   verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
   verifyWorkItemsManifestAgainstLoweringManifest,
@@ -457,6 +458,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
 
   const runUpstreamFrontendProbe = async (
     frontendAnalysisManifest?: TinyGoFrontendAnalysisManifest | null,
+    frontendRealAdapterManifest?: TinyGoFrontendAnalysisManifest | null,
   ): Promise<TinyGoUpstreamFrontendProbeResult> => {
     const browserTinyGoRoot = '/working/.tinygo-root'
     const driverBridgeManifest =
@@ -675,6 +677,16 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       )
       appendLog(
         `patched upstream TinyGo WASI frontend probe matched frontend analysis packages=${frontendAnalysisVerification.graphPackageCount} main=${frontendAnalysisVerification.entryImportPath}`,
+        'success',
+      )
+    }
+    if (frontendRealAdapterManifest?.packageGraph?.length) {
+      const frontendRealAdapterVerification = verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest(
+        result,
+        frontendRealAdapterManifest,
+      )
+      appendLog(
+        `patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=${frontendRealAdapterVerification.graphPackageCount} main=${frontendRealAdapterVerification.entryImportPath}`,
         'success',
       )
     }
@@ -1204,7 +1216,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         const frontendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'running'))
         const frontendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'error'))
         if (driverBridgeManifest?.packageGraph?.length && frontendAnalysisManifest?.packageGraph?.length) {
-          await runUpstreamFrontendProbe(frontendAnalysisManifest)
+          await runUpstreamFrontendProbe(frontendAnalysisManifest, frontendRealAdapterManifest)
         }
         appendLog('frontend build mode=frontend', 'success')
         appendLog('frontend build source=real-adapter', 'success')

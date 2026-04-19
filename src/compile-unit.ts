@@ -1269,14 +1269,15 @@ export const verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest = (
   )
 }
 
-export const verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest = (
+const verifyUpstreamFrontendProbeAgainstFrontendPackageGraphManifest = (
   manifest: TinyGoUpstreamFrontendProbeResult,
-  frontendAnalysisManifest?: TinyGoFrontendAnalysisManifest,
+  frontendManifest: TinyGoFrontendAnalysisManifest | undefined,
+  mismatchMessage: string,
 ) => {
-  const packageGraph = frontendAnalysisManifest?.packageGraph ?? []
+  const packageGraph = frontendManifest?.packageGraph ?? []
   const programPackages = packageGraph.filter((packageInfo) => !packageInfo.standard && !packageInfo.depOnly)
   if (programPackages.length !== 1) {
-    throw new Error('upstream frontend probe package summaries did not match frontend analysis')
+    throw new Error(mismatchMessage)
   }
   return verifyUpstreamFrontendProbeAgainstPackageGraph(
     manifest,
@@ -1286,13 +1287,33 @@ export const verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest = (
       imports: programPackages[0].imports,
       name: programPackages[0].name,
     },
-    'upstream frontend probe package summaries did not match frontend analysis',
+    mismatchMessage,
     {
       allowPartialFileSelection: true,
       allowPartialPackageGraph: true,
     },
   )
 }
+
+export const verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest = (
+  manifest: TinyGoUpstreamFrontendProbeResult,
+  frontendAnalysisManifest?: TinyGoFrontendAnalysisManifest,
+) =>
+  verifyUpstreamFrontendProbeAgainstFrontendPackageGraphManifest(
+    manifest,
+    frontendAnalysisManifest,
+    'upstream frontend probe package summaries did not match frontend analysis',
+  )
+
+export const verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest = (
+  manifest: TinyGoUpstreamFrontendProbeResult,
+  frontendRealAdapterManifest?: TinyGoFrontendAnalysisManifest,
+) =>
+  verifyUpstreamFrontendProbeAgainstFrontendPackageGraphManifest(
+    manifest,
+    frontendRealAdapterManifest,
+    'upstream frontend probe package summaries did not match frontend real adapter',
+  )
 
 const defaultTargetProfiles: Record<string, { llvmTarget: string; linker: string; cflags: string[]; ldflags: string[] }> = {
   wasm: {

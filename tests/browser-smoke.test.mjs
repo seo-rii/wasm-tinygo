@@ -452,6 +452,7 @@ func main() {
   assert.match(activity ?? '', /patched upstream TinyGo WASI probe verified target=wasip1 triple=wasm32-unknown-wasi scheduler=asyncify/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched analysis input packages=[1-9]\d* main=example\.com\/browserprobe/)
   assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend analysis packages=[1-9]\d* main=example\.com\/browserprobe/)
+  assert.match(activity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=[1-9]\d* main=example\.com\/browserprobe/)
   assert.match(activity ?? '', /tinygo compiler module loaded from tools\/tinygo-compiler\.wasm \(mode=direct\)/)
   assert.match(activity ?? '', /backend lowered ir units=\d+ imports=\d+ functions=\d+ types=\d+ consts=\d+ vars=\d+ decls=\d+/)
   assert.match(activity ?? '', /backend materialize \/working\/tinygo-lowered-command-batch\.json/)
@@ -929,6 +930,7 @@ func main() {
 
   const aliasOnlyActivity = await page.locator('#terminal-output').textContent()
   assert.match(aliasOnlyActivity ?? '', /frontend real adapter bridge verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct source=compat-alias/)
+  assert.match(aliasOnlyActivity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=[1-9]\d* main=example\.com\/browserprobe/)
 
   await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
   await page.waitForFunction(
