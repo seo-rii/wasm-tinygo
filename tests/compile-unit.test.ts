@@ -4536,7 +4536,7 @@ test('verifyWorkItemsManifestAgainstLoweringManifest accepts a normalized work-i
       llvmTarget: 'wasm32-unknown-wasi',
       linker: 'wasm-ld',
       cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
-      ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      ldflags: ['--stack-first', '--no-demangle'],
       translationUnitPath: '/working/tinygo-bootstrap.c',
       objectOutputPath: '/working/tinygo-bootstrap.o',
       artifactOutputPath: '/working/out.wasm',
@@ -4553,6 +4553,16 @@ test('verifyWorkItemsManifestAgainstLoweringManifest accepts a normalized work-i
   }, {
     entryFile: '/workspace/main.go',
     optimizeFlag: '-Oz',
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      linker: 'wasm-ld',
+      cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
+      ldflags: ['--stack-first', '--no-demangle'],
+      translationUnitPath: '/working/tinygo-bootstrap.c',
+      objectOutputPath: '/working/tinygo-bootstrap.o',
+      artifactOutputPath: '/working/out.wasm',
+    },
     workItems: [
       { id: 'program-000', kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], modulePath: 'example.com/app', depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-000.bc', standard: false },
       { id: 'imported-000', kind: 'imported', importPath: 'example.com/app/lib', imports: ['fmt'], modulePath: 'example.com/app', depOnly: true, packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc', standard: false },
@@ -4563,6 +4573,7 @@ test('verifyWorkItemsManifestAgainstLoweringManifest accepts a normalized work-i
   assert.equal(verification.workItems.length, 3)
   assert.equal(verification.workItems[0]?.bitcodeOutputPath, '/working/tinygo-work/program-000.bc')
   assert.equal(verification.workItems[0]?.modulePath, 'example.com/app')
+  assert.deepEqual(verification.toolchain.ldflags, ['--stack-first', '--no-demangle'])
 })
 
 test('verifyWorkItemsManifestAgainstLoweringManifest rejects mismatched work-item graphs', () => {
@@ -4574,7 +4585,7 @@ test('verifyWorkItemsManifestAgainstLoweringManifest rejects mismatched work-ite
       llvmTarget: 'wasm32-unknown-wasi',
       linker: 'wasm-ld',
       cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
-      ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      ldflags: ['--stack-first', '--no-demangle'],
       translationUnitPath: '/working/tinygo-bootstrap.c',
       objectOutputPath: '/working/tinygo-bootstrap.o',
       artifactOutputPath: '/working/out.wasm',
@@ -4590,6 +4601,16 @@ test('verifyWorkItemsManifestAgainstLoweringManifest rejects mismatched work-ite
   }, {
     entryFile: '/workspace/main.go',
     optimizeFlag: '-Oz',
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      linker: 'wasm-ld',
+      cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
+      ldflags: ['--stack-first', '--no-demangle'],
+      translationUnitPath: '/working/tinygo-bootstrap.c',
+      objectOutputPath: '/working/tinygo-bootstrap.o',
+      artifactOutputPath: '/working/out.wasm',
+    },
     workItems: [
       { id: 'program-000', kind: 'program', importPath: 'command-line-arguments', imports: ['example.com/app/lib'], depOnly: false, packageName: 'main', packageDir: '/workspace', files: ['/workspace/main.go'], bitcodeOutputPath: '/working/tinygo-work/program-001.bc', standard: false },
       { id: 'imported-000', kind: 'imported', importPath: 'example.com/app/lib', imports: ['fmt'], depOnly: true, packageName: 'helper', packageDir: '/workspace/lib', files: ['/workspace/lib/helper.go'], bitcodeOutputPath: '/working/tinygo-work/imported-000.bc', standard: false },
@@ -4606,7 +4627,7 @@ test('verifyLoweringPlanAgainstWorkItemsManifest accepts a normalized lowering p
       llvmTarget: 'wasm32-unknown-wasi',
       linker: 'wasm-ld',
       cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
-      ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      ldflags: ['--stack-first', '--no-demangle'],
       translationUnitPath: '/working/tinygo-bootstrap.c',
       objectOutputPath: '/working/tinygo-bootstrap.o',
       artifactOutputPath: '/working/out.wasm',
@@ -4695,7 +4716,7 @@ test('verifyLoweringPlanAgainstWorkItemsManifest rejects mismatched compile jobs
       llvmTarget: 'wasm32-unknown-wasi',
       linker: 'wasm-ld',
       cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
-      ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      ldflags: ['--stack-first', '--no-demangle'],
       translationUnitPath: '/working/tinygo-bootstrap.c',
       objectOutputPath: '/working/tinygo-bootstrap.o',
       artifactOutputPath: '/working/out.wasm',

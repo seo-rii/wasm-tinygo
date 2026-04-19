@@ -154,6 +154,7 @@ type WorkItem struct {
 type WorkItemsManifest struct {
 	EntryFile    string     `json:"entryFile"`
 	OptimizeFlag string     `json:"optimizeFlag,omitempty"`
+	Toolchain    Toolchain  `json:"toolchain"`
 	WorkItems    []WorkItem `json:"workItems"`
 }
 
@@ -993,6 +994,16 @@ func Analyze(input Input) (Analysis, error) {
 	workItemsManifest := WorkItemsManifest{
 		EntryFile:    input.EntryFile,
 		OptimizeFlag: input.OptimizeFlag,
+		Toolchain: Toolchain{
+			Target:              input.Toolchain.Target,
+			LLVMTarget:          llvmTarget,
+			Linker:              linker,
+			CFlags:              append([]string{}, cflags...),
+			LDFlags:             append([]string{}, ldflags...),
+			TranslationUnitPath: translationUnitPath,
+			ObjectOutputPath:    objectOutputPath,
+			ArtifactOutputPath:  input.Toolchain.ArtifactOutputPath,
+		},
 		WorkItems:    workItems,
 	}
 	compileJobs := make([]LoweringCompileJob, 0, len(workItems))

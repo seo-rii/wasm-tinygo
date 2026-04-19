@@ -700,6 +700,18 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	}) {
 		t.Fatalf("unexpected work items: %#v", workItemsManifest.WorkItems)
 	}
+	if !reflect.DeepEqual(workItemsManifest.Toolchain, Toolchain{
+		Target:              "wasm",
+		LLVMTarget:          "wasm32-unknown-wasi",
+		Linker:              "wasm-ld",
+		CFlags:              []string{"-mbulk-memory", "-mnontrapping-fptoint", "-mno-multivalue", "-mno-reference-types", "-msign-ext"},
+		LDFlags:             []string{"--stack-first", "--no-demangle"},
+		TranslationUnitPath: "/working/tinygo-bootstrap.c",
+		ObjectOutputPath:    "/working/tinygo-bootstrap.o",
+		ArtifactOutputPath:  "/working/out.wasm",
+	}) {
+		t.Fatalf("unexpected work-item toolchain: %#v", workItemsManifest.Toolchain)
+	}
 	var loweringPlanManifest LoweringPlanManifest
 	if err := json.Unmarshal([]byte(result.GeneratedFiles[5].Contents), &loweringPlanManifest); err != nil {
 		t.Fatalf("json.Unmarshal(lowering-plan): %v", err)

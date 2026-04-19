@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -417,7 +418,7 @@ func main() {
 		},
 		LinkJob: LinkJob{
 			Linker:             "wasm-ld",
-			LDFlags:            []string{"--stack-first", "--no-demangle", "--no-entry", "--export-all"},
+			LDFlags:            []string{"--stack-first", "--no-demangle"},
 			ArtifactOutputPath: "/working/out.wasm",
 		},
 	})
@@ -456,6 +457,28 @@ func main() {
 	}
 	if commandArtifactManifest.Reason != "" || !commandArtifactManifest.Runnable {
 		t.Fatalf("expected command artifact manifest to be runnable, got %#v", commandArtifactManifest)
+	}
+
+	var loweredCommandBatch CommandBatchManifest
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-lowered-command-batch.json"]), &loweredCommandBatch); err != nil {
+		t.Fatalf("json.Unmarshal(lowered-command-batch): %v", err)
+	}
+	if slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--no-entry") || slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--export-all") {
+		t.Fatalf("expected lowered execution link command to omit probe-only flags, got %#v", loweredCommandBatch.LinkCommand.Argv)
+	}
+	if !slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--stack-first") || !slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--no-demangle") {
+		t.Fatalf("expected lowered execution link command to preserve execution ldflags, got %#v", loweredCommandBatch.LinkCommand.Argv)
+	}
+
+	var commandBatch CommandBatchManifest
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-command-batch.json"]), &commandBatch); err != nil {
+		t.Fatalf("json.Unmarshal(command-batch): %v", err)
+	}
+	if slices.Contains(commandBatch.LinkCommand.Argv, "--no-entry") || slices.Contains(commandBatch.LinkCommand.Argv, "--export-all") {
+		t.Fatalf("expected final execution link command to omit probe-only flags, got %#v", commandBatch.LinkCommand.Argv)
+	}
+	if !slices.Contains(commandBatch.LinkCommand.Argv, "--stack-first") || !slices.Contains(commandBatch.LinkCommand.Argv, "--no-demangle") {
+		t.Fatalf("expected final execution link command to preserve execution ldflags, got %#v", commandBatch.LinkCommand.Argv)
 	}
 
 	loweredSourceContents := generatedFilesByPath["/working/tinygo-lowered/program-000.c"]

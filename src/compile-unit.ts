@@ -237,6 +237,16 @@ export type TinyGoLoweringManifest = {
 export type TinyGoWorkItemsManifest = {
   entryFile?: string
   optimizeFlag?: string
+  toolchain?: {
+    target?: string
+    llvmTarget?: string
+    linker?: string
+    cflags?: string[]
+    ldflags?: string[]
+    translationUnitPath?: string
+    objectOutputPath?: string
+    artifactOutputPath?: string
+  }
   workItems?: Array<{
     id?: string
     kind?: string
@@ -3194,6 +3204,9 @@ export const verifyWorkItemsManifestAgainstLoweringManifest = (
   if ((loweringManifest.optimizeFlag ?? '') !== (workItemsManifest.optimizeFlag ?? '')) {
     throw new Error('frontend work items optimize flag did not match lowering manifest')
   }
+  if (JSON.stringify(loweringManifest.toolchain ?? {}) !== JSON.stringify(workItemsManifest.toolchain ?? {})) {
+    throw new Error('frontend work items toolchain did not match lowering manifest')
+  }
 
   const kindIndexes = new Map<string, number>()
   const workItems = (loweringManifest.compileUnits ?? []).map((compileUnit) => {
@@ -3237,6 +3250,7 @@ export const verifyWorkItemsManifestAgainstLoweringManifest = (
   }
 
   return {
+    toolchain: loweringManifest.toolchain ?? {},
     workItems,
   }
 }
@@ -3472,10 +3486,11 @@ export const verifyLoweringPlanAgainstWorkItemsManifest = (
     throw new Error('frontend lowering plan compile jobs did not match work items manifest')
   }
 
+  const workItemsToolchain = workItemsManifest.toolchain ?? {}
   const linkJob = {
-    linker: 'wasm-ld',
-    ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
-    artifactOutputPath: '/working/out.wasm',
+    linker: workItemsToolchain.linker ?? 'wasm-ld',
+    ldflags: normalizeProbeLdflags(workItemsToolchain.ldflags ?? []),
+    artifactOutputPath: workItemsToolchain.artifactOutputPath ?? '/working/out.wasm',
     bitcodeInputs: compileJobs.map((job) => job.bitcodeOutputPath),
   }
   if (JSON.stringify(linkJob) !== JSON.stringify(loweringPlanManifest.linkJob ?? {})) {
