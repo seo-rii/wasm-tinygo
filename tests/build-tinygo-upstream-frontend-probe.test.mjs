@@ -238,6 +238,7 @@ func main() {
     cwd: repoRoot,
     env: {
       ...process.env,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_UPSTREAM_FRONTEND_PROBE: '1',
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: manifestPath,
       WASM_TINYGO_DRIVER_BRIDGE_REQUEST_PATH: requestPath,
       WASM_TINYGO_DRIVER_BRIDGE_WORK_DIR: bridgeWorkDir,
@@ -342,6 +343,7 @@ func main() {
     payload.packages.some((pkg) => pkg.importPath === 'fmt'),
     true,
   )
+  assert.deepEqual(browserManifest.upstreamFrontendProbe, payload)
   assert.deepEqual(
     verifyUpstreamFrontendProbeAgainstDriverBridgeManifest(payload, browserManifest),
     {

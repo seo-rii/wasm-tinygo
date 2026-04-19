@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ConsoleStdout, Directory, File, OpenFile, PreopenDirectory, WASI, WASIProcExit } from '@bjorn3/browser_wasi_shim'
 
 import {
   verifyCompileUnitManifestAgainstDriverBridgeManifest,
@@ -10,7 +11,12 @@ import {
   verifyFrontendAnalysisAgainstRealDriverBridgeManifest,
   verifyFrontendRealAdapterAgainstFrontendAnalysis,
   verifyTinyGoHostProbeManifestAgainstDriverMetadata,
+  verifyUpstreamFrontendProbeAgainstDriverBridgeManifest,
+  verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest,
+  verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest,
+  verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest,
 } from '../src/compile-unit.ts'
+import { buildTinyGoUpstreamFrontendProbeWasm } from './build-tinygo-upstream-frontend-probe.mjs'
 import { resolveTinyGoToolchainPaths } from './tinygo-toolchain-paths.mjs'
 
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -48,6 +54,9 @@ const frontendRealAdapterPath =
 const includeFrontendAnalysis =
   process.env.WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_FRONTEND_ANALYSIS === '1' &&
   process.env.WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS !== '1'
+const includeUpstreamFrontendProbe =
+  process.env.WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_UPSTREAM_FRONTEND_PROBE === '1' &&
+  process.env.WASM_TINYGO_DRIVER_BRIDGE_SKIP_UPSTREAM_FRONTEND_PROBE !== '1'
 const goBin = process.env.WASM_TINYGO_GO_BIN ?? 'go'
 const tinygoBin = process.env.WASM_TINYGO_TINYGO_BIN ?? tinygoToolchainPaths.binPath
 const tinygoRoot = process.env.WASM_TINYGO_TINYGOROOT ?? tinygoToolchainPaths.rootPath
@@ -626,6 +635,236 @@ verifyFrontendAnalysisAgainstRealDriverBridgeManifest(frontendRealAdapterResult.
   target: verification.target,
 })
 
+let upstreamFrontendProbe
+if (includeUpstreamFrontendProbe) {
+  const textEncoder = new TextEncoder()
+  const browserTinyGoRoot = '/working/.tinygo-root'
+  const upstreamFrontendProbeBuild = await buildTinyGoUpstreamFrontendProbeWasm()
+  let workspaceRoot = path.dirname(request.entry)
+  let workspaceRootSearchDir = entryPackage?.dir ?? path.dirname(request.entry)
+  while (workspaceRootSearchDir !== '') {
+    try {
+      await readFile(path.join(workspaceRootSearchDir, 'go.mod'), 'utf8')
+      workspaceRoot = workspaceRootSearchDir
+      break
+    } catch {
+      const parentDir = path.dirname(workspaceRootSearchDir)
+      if (parentDir === workspaceRootSearchDir) {
+        break
+      }
+      workspaceRootSearchDir = parentDir
+    }
+  }
+  let goModSource = ''
+  try {
+    goModSource = await readFile(path.join(workspaceRoot, 'go.mod'), 'utf8')
+  } catch {
+    goModSource = ''
+  }
+  let goVersion = '1.22'
+  if (goModSource !== '') {
+    for (const line of goModSource.split('\n')) {
+      const trimmedLine = line.trim()
+      if (trimmedLine.startsWith('go ')) {
+        goVersion = trimmedLine.slice('go '.length).trim() || '1.22'
+        break
+      }
+    }
+  }
+  const workspaceEntries = {}
+  if (goModSource !== '') {
+    workspaceEntries['go.mod'] = goModSource
+  }
+  for (const packageInfo of packageGraph ?? []) {
+    const packageDir = packageInfo.dir ?? ''
+    if (
+      packageDir === '' ||
+      !(packageDir === workspaceRoot || packageDir.startsWith(`${workspaceRoot}${path.sep}`))
+    ) {
+      continue
+    }
+    for (const goFile of packageInfo.goFiles ?? []) {
+      const hostFilePath = path.join(packageDir, goFile)
+      const relativeWorkspacePath = path.relative(workspaceRoot, hostFilePath).split(path.sep).join('/')
+      if (relativeWorkspacePath === '') {
+        continue
+      }
+      workspaceEntries[relativeWorkspacePath] = await readFile(hostFilePath, 'utf8')
+    }
+  }
+  const entryRelativePath = path.relative(workspaceRoot, request.entry).split(path.sep).join('/')
+  if (entryRelativePath !== '' && workspaceEntries[entryRelativePath] === undefined) {
+    workspaceEntries[entryRelativePath] = await readFile(request.entry, 'utf8')
+  }
+  const normalizedProbePackageGraph = (packageGraph ?? []).map((packageInfo) => {
+    const packageDir = packageInfo.dir ?? ''
+    let normalizedDir = packageDir
+    if (packageDir !== '' && (packageDir === workspaceRoot || packageDir.startsWith(`${workspaceRoot}${path.sep}`))) {
+      normalizedDir = `/workspace${packageDir.slice(workspaceRoot.length).split(path.sep).join('/')}`
+    } else if (packageInfo.standard && (packageInfo.importPath ?? '') !== '') {
+      normalizedDir = `${browserTinyGoRoot}/src/${packageInfo.importPath ?? ''}`
+    }
+    return {
+      depOnly: Boolean(packageInfo.depOnly),
+      dir: normalizedDir,
+      goFiles: [...(packageInfo.goFiles ?? [])],
+      importPath: packageInfo.importPath ?? '',
+      imports: [...(packageInfo.imports ?? [])].filter((importPath) => importPath !== ''),
+      modulePath:
+        packageInfo.modulePath ??
+        canonicalBuildContext.modulePath ??
+        driverResult.metadata?.modulePath ??
+        '',
+      name: packageInfo.name ?? '',
+      standard: Boolean(packageInfo.standard),
+    }
+  })
+  const packageList = normalizedProbePackageGraph.map((packageInfo) => {
+    const isWorkspacePackage = (packageInfo.dir ?? '') === '/workspace' || (packageInfo.dir ?? '').startsWith('/workspace/')
+    return {
+      DepOnly: Boolean(packageInfo.depOnly),
+      Dir: packageInfo.dir ?? '',
+      ImportPath: packageInfo.importPath ?? '',
+      Name: packageInfo.name ?? '',
+      Root: isWorkspacePackage ? '/workspace' : browserTinyGoRoot,
+      Module:
+        isWorkspacePackage && (packageInfo.modulePath ?? '') !== ''
+          ? {
+              Path: packageInfo.modulePath,
+              Main: true,
+              Dir: '/workspace',
+              GoMod: '/workspace/go.mod',
+              GoVersion: goVersion,
+            }
+          : undefined,
+      GoFiles: [...(packageInfo.goFiles ?? [])],
+      CgoFiles: [],
+      CFiles: [],
+      EmbedFiles: [],
+      Imports: [...(packageInfo.imports ?? [])],
+      ImportMap: {},
+      Standard: Boolean(packageInfo.standard),
+    }
+  })
+  workspaceEntries['package-list.json'] = `${JSON.stringify(packageList, null, 2)}\n`
+  const [probeBytes, targetSource, runtimeSysSource, deviceArmSource] = await Promise.all([
+    readFile(upstreamFrontendProbeBuild.outputPath),
+    readFile(upstreamFrontendProbeBuild.targetPath, 'utf8'),
+    readFile(upstreamFrontendProbeBuild.runtimeSysPath, 'utf8'),
+    readFile(upstreamFrontendProbeBuild.deviceArmPath, 'utf8'),
+  ])
+  const tinygoRootEntries = {
+    'targets/wasip1.json': targetSource,
+    'src/runtime/internal/sys/zversion.go': runtimeSysSource,
+    'src/device/arm/arm.go': deviceArmSource,
+  }
+  const requiredTinyGoRootFiles = new Set()
+  for (const packageInfo of normalizedProbePackageGraph) {
+    const packageDir = packageInfo.dir ?? ''
+    if (!packageDir.startsWith(`${browserTinyGoRoot}/`)) {
+      continue
+    }
+    const assetDir = packageDir.slice(`${browserTinyGoRoot}/`.length)
+    for (const goFile of packageInfo.goFiles ?? []) {
+      requiredTinyGoRootFiles.add(`${assetDir}/${goFile}`.replace(/\\/g, '/'))
+    }
+  }
+  for (const relativeAssetPath of [...requiredTinyGoRootFiles].sort()) {
+    if (tinygoRootEntries[relativeAssetPath] !== undefined) {
+      continue
+    }
+    tinygoRootEntries[relativeAssetPath] = await readFile(
+      path.join(upstreamFrontendProbeBuild.gorootPath, relativeAssetPath),
+      'utf8',
+    )
+  }
+  const buildDirectoryContentsFromTextEntries = (entries) => {
+    const root = new Map()
+    for (const [entryPath, contents] of Object.entries(entries)) {
+      const parts = entryPath.split('/')
+      let currentDirectory = root
+      for (const [index, part] of parts.entries()) {
+        if (index === parts.length - 1) {
+          currentDirectory.set(part, new File(textEncoder.encode(contents)))
+          continue
+        }
+        const existing = currentDirectory.get(part)
+        if (existing instanceof Directory) {
+          currentDirectory = existing.contents
+          continue
+        }
+        const directory = new Directory(new Map())
+        currentDirectory.set(part, directory)
+        currentDirectory = directory.contents
+      }
+    }
+    return root
+  }
+  const stdoutLines = []
+  const stderrLines = []
+  const tinygoRootDirectory = new PreopenDirectory(
+    browserTinyGoRoot,
+    buildDirectoryContentsFromTextEntries(tinygoRootEntries),
+  )
+  const workspaceDirectory = new PreopenDirectory(
+    '/workspace',
+    buildDirectoryContentsFromTextEntries(workspaceEntries),
+  )
+  const stdout = ConsoleStdout.lineBuffered((line) => stdoutLines.push(line))
+  const stderr = ConsoleStdout.lineBuffered((line) => stderrLines.push(line))
+  const wasi = new WASI(
+    ['tinygo-upstream-frontend-probe'],
+    [
+      `TINYGOROOT=${browserTinyGoRoot}`,
+      'TINYGO_WASI_TARGET=wasip1',
+      'TINYGO_WASI_WORKING_DIR=/workspace',
+      'TINYGO_WASI_PACKAGE_JSON_PATH=/workspace/package-list.json',
+      'GOROOT=/go-root',
+      'GOVERSION=go1.24.0',
+    ],
+    [new OpenFile(new File([])), stdout, stderr, tinygoRootDirectory, workspaceDirectory],
+  )
+  const { instance } = await WebAssembly.instantiate(probeBytes, {
+    wasi_snapshot_preview1: wasi.wasiImport,
+  })
+  let exitCode = 0
+  try {
+    exitCode = wasi.start(instance)
+  } catch (error) {
+    if (error instanceof WASIProcExit) {
+      exitCode = error.code
+    } else {
+      throw error
+    }
+  }
+  if (exitCode !== 0) {
+    throw new Error(
+      stderrLines.join('\n').trim() ||
+      stdoutLines.join('\n').trim() ||
+      `tinygo upstream frontend probe exited with code ${exitCode}`,
+    )
+  }
+  if (stderrLines.length !== 0) {
+    throw new Error(stderrLines.join('\n'))
+  }
+  upstreamFrontendProbe = JSON.parse(stdoutLines.join('\n'))
+  verifyUpstreamFrontendProbeAgainstDriverBridgeManifest(upstreamFrontendProbe, {
+    entryPackage,
+    packageGraph,
+  })
+  verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest(upstreamFrontendProbe, frontendAnalysisInput)
+  if (frontendAnalysisResult?.analysis) {
+    verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest(
+      upstreamFrontendProbe,
+      frontendAnalysisResult.analysis,
+    )
+  }
+  verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest(
+    upstreamFrontendProbe,
+    frontendRealAdapterResult.adapter,
+  )
+}
+
 await writeFile(bridgeManifestPath, `${JSON.stringify({
   artifactOutputPath: verification.artifactOutputPath,
   commandArgv: verification.commandArgv,
@@ -645,6 +884,7 @@ await writeFile(bridgeManifestPath, `${JSON.stringify({
   hostProbeManifestPath,
   llvmTriple: verification.llvmTriple,
   packageGraph,
+  ...(upstreamFrontendProbe ? { upstreamFrontendProbe } : {}),
   runtime: hostProbeManifest.runtime ?? {},
   scheduler: verification.scheduler,
   target: verification.target,

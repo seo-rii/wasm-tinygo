@@ -509,6 +509,7 @@ export type TinyGoDriverBridgeManifest = {
     name?: string
     standard?: boolean
   }>
+  upstreamFrontendProbe?: TinyGoUpstreamFrontendProbeResult
   frontendAnalysisInput?: TinyGoFrontendInputManifest
   frontendAnalysis?: TinyGoFrontendAnalysisManifest
   frontendRealAdapter?: TinyGoFrontendAnalysisManifest

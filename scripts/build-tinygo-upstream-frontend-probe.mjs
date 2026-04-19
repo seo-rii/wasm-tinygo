@@ -124,9 +124,11 @@ export const buildTinyGoUpstreamFrontendProbeWasm = async () => {
     cwd: rootDir,
     env: {
       ...process.env,
+      WASM_TINYGO_DRIVER_BRIDGE_INCLUDE_UPSTREAM_FRONTEND_PROBE: '0',
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
       WASM_TINYGO_DRIVER_BRIDGE_REQUEST_PATH: bridgeRequestPath,
       WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS: '1',
+      WASM_TINYGO_DRIVER_BRIDGE_SKIP_UPSTREAM_FRONTEND_PROBE: '1',
       WASM_TINYGO_DRIVER_BRIDGE_WORK_DIR: bridgeWorkDir,
     },
     encoding: 'utf8',
