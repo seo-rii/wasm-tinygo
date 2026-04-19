@@ -2618,6 +2618,178 @@ test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest rejects mismatched b
   }), /frontend analysis buildContext did not match real TinyGo analysis adapter/)
 })
 
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest rejects mismatched optimizeFlag facts', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    optimizeFlag: '-Oz',
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'imported', files: [] },
+      { name: 'stdlib', files: [] },
+      { name: 'all-compile', files: ['/workspace/main.go'] },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: [],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: [],
+        name: 'main',
+        standard: false,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      artifactOutputPath: '/working/out.wasm',
+    },
+  }, {
+    frontendRealAdapter: {
+      optimizeFlag: '-O0',
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        { name: 'program', files: ['/workspace/main.go'] },
+        { name: 'imported', files: [] },
+        { name: 'stdlib', files: [] },
+        { name: 'all-compile', files: ['/workspace/main.go'] },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: [],
+          depOnly: false,
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        artifactOutputPath: '/working/out.wasm',
+      },
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  }), /frontend analysis optimizeFlag did not match real TinyGo analysis adapter/)
+})
+
+test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest rejects mismatched toolchain output paths', () => {
+  assert.throws(() => verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
+    optimizeFlag: '-Oz',
+    entryFile: '/workspace/main.go',
+    compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+    allCompileFiles: ['/workspace/main.go'],
+    compileGroups: [
+      { name: 'program', files: ['/workspace/main.go'] },
+      { name: 'imported', files: [] },
+      { name: 'stdlib', files: [] },
+      { name: 'all-compile', files: ['/workspace/main.go'] },
+    ],
+    compileUnits: [
+      {
+        kind: 'program',
+        importPath: 'example.com/app',
+        imports: [],
+        packageName: 'main',
+        packageDir: '/workspace',
+        files: ['/workspace/main.go'],
+      },
+    ],
+    packageGraph: [
+      {
+        depOnly: false,
+        dir: '/workspace',
+        files: { goFiles: ['main.go'] },
+        importPath: 'example.com/app',
+        imports: [],
+        name: 'main',
+        standard: false,
+      },
+    ],
+    toolchain: {
+      target: 'wasm',
+      llvmTarget: 'wasm32-unknown-wasi',
+      translationUnitPath: '/working/tinygo-bootstrap.c',
+      objectOutputPath: '/working/tinygo-bootstrap.o',
+      artifactOutputPath: '/working/out.wasm',
+    },
+  }, {
+    frontendRealAdapter: {
+      optimizeFlag: '-Oz',
+      entryFile: '/workspace/main.go',
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      allCompileFiles: ['/workspace/main.go'],
+      compileGroups: [
+        { name: 'program', files: ['/workspace/main.go'] },
+        { name: 'imported', files: [] },
+        { name: 'stdlib', files: [] },
+        { name: 'all-compile', files: ['/workspace/main.go'] },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          imports: [],
+          depOnly: false,
+          packageName: 'main',
+          packageDir: '/workspace',
+          files: ['/workspace/main.go'],
+          standard: false,
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/workspace',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        translationUnitPath: '/working/tinygo-bootstrap.c',
+        objectOutputPath: '/working/tinygo-bootstrap.o',
+        artifactOutputPath: '/working/other.wasm',
+      },
+    },
+    target: 'wasm',
+    llvmTriple: 'wasm32-unknown-wasi',
+  }), /frontend analysis toolchain did not match real TinyGo analysis adapter/)
+})
+
 test('verifyFrontendAnalysisAgainstRealDriverBridgeManifest rejects mismatched packageGraph facts', () => {
   assert.throws(() => verifyFrontendAnalysisAgainstRealDriverBridgeManifest({
     buildContext: {
@@ -3938,6 +4110,86 @@ test('normalizeTinyGoDriverBridgeManifestForBrowser rewrites frontendAnalysis to
   })
 
   assert.deepEqual(verification.frontendAnalysis?.toolchain, {
+    target: 'wasm',
+    llvmTarget: 'wasm32-unknown-wasi',
+    linker: 'wasm-ld',
+    cflags: ['-mbulk-memory'],
+    ldflags: ['--stack-first', '--no-entry'],
+    translationUnitPath: '/working/tinygo-bootstrap.c',
+    objectOutputPath: '/working/tinygo-bootstrap.o',
+    artifactOutputPath: '/working/out.wasm',
+  })
+})
+
+test('normalizeTinyGoDriverBridgeManifestForBrowser rewrites frontendRealAdapter toolchain output paths for browser workdirs', () => {
+  const verification = normalizeTinyGoDriverBridgeManifestForBrowser({
+    artifactOutputPath: '/tmp/bridge/out.wasm',
+    entryFile: '/tmp/bridge/main.go',
+    frontendRealAdapter: {
+      optimizeFlag: '-Oz',
+      buildContext: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        goos: 'js',
+        goarch: 'wasm',
+        gc: 'precise',
+        scheduler: 'asyncify',
+        buildTags: ['gc.precise', 'scheduler.asyncify', 'tinygo.wasm'],
+        modulePath: 'example.com/app',
+      },
+      entryFile: '/tmp/bridge/main.go',
+      compileUnitManifestPath: '/tmp/bridge/tinygo-compile-unit.json',
+      allCompileFiles: ['/tmp/bridge/main.go'],
+      compileGroups: [
+        {
+          name: 'program',
+          files: ['/tmp/bridge/main.go'],
+        },
+        {
+          name: 'all-compile',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      compileUnits: [
+        {
+          kind: 'program',
+          importPath: 'example.com/app',
+          packageName: 'main',
+          packageDir: '/tmp/bridge',
+          files: ['/tmp/bridge/main.go'],
+        },
+      ],
+      packageGraph: [
+        {
+          depOnly: false,
+          dir: '/tmp/bridge',
+          files: { goFiles: ['main.go'] },
+          importPath: 'example.com/app',
+          imports: [],
+          name: 'main',
+          standard: false,
+        },
+      ],
+      toolchain: {
+        target: 'wasm',
+        llvmTarget: 'wasm32-unknown-wasi',
+        linker: 'wasm-ld',
+        cflags: ['-mbulk-memory'],
+        ldflags: ['--stack-first', '--no-entry'],
+        translationUnitPath: '/tmp/bridge/tinygo-bootstrap.c',
+        objectOutputPath: '/tmp/bridge/tinygo-bootstrap.o',
+        artifactOutputPath: '/tmp/bridge/out.wasm',
+      },
+    },
+    target: 'wasm',
+    toolchain: {
+      rootPath: '/tmp/tinygo-root',
+      version: 'tinygo version 0.40.1',
+    },
+  })
+
+  assert.equal(verification.frontendRealAdapter?.optimizeFlag, '-Oz')
+  assert.deepEqual(verification.frontendRealAdapter?.toolchain, {
     target: 'wasm',
     llvmTarget: 'wasm32-unknown-wasi',
     linker: 'wasm-ld',

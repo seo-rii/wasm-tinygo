@@ -127,6 +127,7 @@ export type TinyGoFrontendAnalysisManifest = {
     buildTags?: string[]
     modulePath?: string
   }
+  optimizeFlag?: string
   entryFile?: string
   compileUnitManifestPath?: string
   allCompileFiles?: string[]
@@ -1097,6 +1098,30 @@ export const normalizeTinyGoDriverBridgeManifestForBrowser = (
         dir: packageDir,
       }
     })
+    let realAdapterToolchain = normalizedFrontendRealAdapter.toolchain
+    if (realAdapterToolchain) {
+      let artifactOutputPath = realAdapterToolchain.artifactOutputPath ?? ''
+      if (realAdapterToolchain.artifactOutputPath !== undefined && artifactOutputPath !== '') {
+        const artifactOutputPathSlashIndex = artifactOutputPath.lastIndexOf('/')
+        artifactOutputPath = `/working/${artifactOutputPathSlashIndex >= 0 ? artifactOutputPath.slice(artifactOutputPathSlashIndex + 1) : artifactOutputPath}`
+      }
+      let translationUnitPath = realAdapterToolchain.translationUnitPath ?? ''
+      if (realAdapterToolchain.translationUnitPath !== undefined && translationUnitPath !== '') {
+        const translationUnitPathSlashIndex = translationUnitPath.lastIndexOf('/')
+        translationUnitPath = `/working/${translationUnitPathSlashIndex >= 0 ? translationUnitPath.slice(translationUnitPathSlashIndex + 1) : translationUnitPath}`
+      }
+      let objectOutputPath = realAdapterToolchain.objectOutputPath ?? ''
+      if (realAdapterToolchain.objectOutputPath !== undefined && objectOutputPath !== '') {
+        const objectOutputPathSlashIndex = objectOutputPath.lastIndexOf('/')
+        objectOutputPath = `/working/${objectOutputPathSlashIndex >= 0 ? objectOutputPath.slice(objectOutputPathSlashIndex + 1) : objectOutputPath}`
+      }
+      realAdapterToolchain = {
+        ...realAdapterToolchain,
+        ...(realAdapterToolchain.artifactOutputPath !== undefined ? { artifactOutputPath } : {}),
+        ...(realAdapterToolchain.objectOutputPath !== undefined ? { objectOutputPath } : {}),
+        ...(realAdapterToolchain.translationUnitPath !== undefined ? { translationUnitPath } : {}),
+      }
+    }
     normalizedFrontendRealAdapter = {
       ...normalizedFrontendRealAdapter,
       entryFile: analysisEntryFile,
@@ -1104,6 +1129,7 @@ export const normalizeTinyGoDriverBridgeManifestForBrowser = (
       allCompileFiles,
       compileGroups,
       compileUnits,
+      ...(realAdapterToolchain !== undefined ? { toolchain: realAdapterToolchain } : {}),
       ...(normalizedFrontendRealAdapter.packageGraph !== undefined ? { packageGraph } : {}),
     }
   }
@@ -2248,6 +2274,39 @@ export const verifyFrontendAnalysisAgainstRealDriverBridgeManifest = (
   }
   if ((manifest.compileUnitManifestPath ?? '') !== (realAnalysis.compileUnitManifestPath ?? '')) {
     throw new Error('frontend analysis compileUnitManifestPath did not match real TinyGo analysis adapter')
+  }
+  if (
+    ((manifest.optimizeFlag ?? '') !== '' || (realAnalysis.optimizeFlag ?? '') !== '') &&
+    (manifest.optimizeFlag ?? '') !== (realAnalysis.optimizeFlag ?? '')
+  ) {
+    throw new Error('frontend analysis optimizeFlag did not match real TinyGo analysis adapter')
+  }
+  const manifestToolchain = manifest.toolchain ?? {}
+  const realToolchain = realAnalysis.toolchain ?? {}
+  if (
+    (manifestToolchain.linker ?? '') !== '' ||
+    (manifestToolchain.cflags?.length ?? 0) !== 0 ||
+    (manifestToolchain.ldflags?.length ?? 0) !== 0 ||
+    (manifestToolchain.translationUnitPath ?? '') !== '' ||
+    (manifestToolchain.objectOutputPath ?? '') !== '' ||
+    (manifestToolchain.artifactOutputPath ?? '') !== '' ||
+    (realToolchain.linker ?? '') !== '' ||
+    (realToolchain.cflags?.length ?? 0) !== 0 ||
+    (realToolchain.ldflags?.length ?? 0) !== 0 ||
+    (realToolchain.translationUnitPath ?? '') !== '' ||
+    (realToolchain.objectOutputPath ?? '') !== '' ||
+    (realToolchain.artifactOutputPath ?? '') !== ''
+  ) {
+    if (
+      (manifestToolchain.linker ?? '') !== (realToolchain.linker ?? '') ||
+      JSON.stringify(manifestToolchain.cflags ?? []) !== JSON.stringify(realToolchain.cflags ?? []) ||
+      JSON.stringify(manifestToolchain.ldflags ?? []) !== JSON.stringify(realToolchain.ldflags ?? []) ||
+      (manifestToolchain.translationUnitPath ?? '') !== (realToolchain.translationUnitPath ?? '') ||
+      (manifestToolchain.objectOutputPath ?? '') !== (realToolchain.objectOutputPath ?? '') ||
+      (manifestToolchain.artifactOutputPath ?? '') !== (realToolchain.artifactOutputPath ?? '')
+    ) {
+      throw new Error('frontend analysis toolchain did not match real TinyGo analysis adapter')
+    }
   }
 
   const allCompileFiles = [...(manifest.allCompileFiles ?? [])].sort()
