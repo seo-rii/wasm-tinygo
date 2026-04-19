@@ -1610,55 +1610,10 @@ func ExecuteResultPaths(inputPath, analysisPath, adapterPath, resultPath string)
 	}
 
 	if _, err := os.Stat(analysisPath); err == nil {
-		analysisData, err := os.ReadFile(analysisPath)
-		if err != nil {
+		if err := ExecuteAdapterAnalysisPaths(analysisPath, adapterPath); err != nil {
 			return err
 		}
-
-		var analysisResult AnalysisResult
-		if err := json.Unmarshal(analysisData, &analysisResult); err != nil {
-			return err
-		}
-		if !analysisResult.OK || analysisResult.Analysis == nil {
-			result := Result{
-				OK:          false,
-				Diagnostics: append([]string{}, analysisResult.Diagnostics...),
-			}
-			if len(result.Diagnostics) == 0 {
-				result.Diagnostics = []string{"frontend analysis result is required"}
-			}
-			resultData, marshalErr := json.Marshal(result)
-			if marshalErr != nil {
-				return marshalErr
-			}
-			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-				return writeErr
-			}
-			return fmt.Errorf("%s", result.Diagnostics[0])
-		}
-
-		result, err := BuildFromAnalysis(*analysisResult.Analysis)
-		if err != nil {
-			failedResult := Result{
-				OK:          false,
-				Diagnostics: []string{err.Error()},
-			}
-			resultData, marshalErr := json.Marshal(failedResult)
-			if marshalErr != nil {
-				return marshalErr
-			}
-			if writeErr := os.WriteFile(resultPath, resultData, 0o644); writeErr != nil {
-				return writeErr
-			}
-			return err
-		}
-
-		resultData, err := json.Marshal(result)
-		if err != nil {
-			return err
-		}
-
-		return os.WriteFile(resultPath, resultData, 0o644)
+		return ExecuteAdapterBuildPaths(analysisPath, adapterPath, resultPath)
 	} else if !os.IsNotExist(err) {
 		return err
 	}

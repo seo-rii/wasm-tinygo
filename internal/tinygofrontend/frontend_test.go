@@ -1386,6 +1386,46 @@ func TestExecuteResultPathsPrefersFrontendRealAdapterWhenPresent(t *testing.T) {
 	}
 }
 
+func TestExecuteResultPathsMaterializesFrontendRealAdapterFromAnalysis(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "tinygo-frontend-input.json")
+	analysisPath := filepath.Join(dir, "tinygo-frontend-analysis.json")
+	adapterPath := filepath.Join(dir, "tinygo-frontend-real-adapter.json")
+	resultPath := filepath.Join(dir, "tinygo-frontend-result.json")
+	inputData, err := json.Marshal(analysisSplitTestInput())
+	if err != nil {
+		t.Fatalf("json.Marshal(input): %v", err)
+	}
+	if err := os.WriteFile(inputPath, inputData, 0o644); err != nil {
+		t.Fatalf("os.WriteFile(input): %v", err)
+	}
+	if err := ExecuteAnalysisPaths(inputPath, analysisPath); err != nil {
+		t.Fatalf("ExecuteAnalysisPaths returned error: %v", err)
+	}
+	if err := os.Remove(inputPath); err != nil {
+		t.Fatalf("os.Remove(input): %v", err)
+	}
+
+	if err := ExecuteResultPaths(inputPath, analysisPath, adapterPath, resultPath); err != nil {
+		t.Fatalf("ExecuteResultPaths returned error: %v", err)
+	}
+
+	adapterData, err := os.ReadFile(adapterPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(adapter): %v", err)
+	}
+	var adapterResult AdapterResult
+	if err := json.Unmarshal(adapterData, &adapterResult); err != nil {
+		t.Fatalf("json.Unmarshal(adapter): %v", err)
+	}
+	if !adapterResult.OK || adapterResult.Adapter == nil {
+		t.Fatalf("expected adapter result: %#v", adapterResult)
+	}
+	if len(adapterResult.Adapter.CompileGroups) != 4 {
+		t.Fatalf("unexpected adapter compile groups: %#v", adapterResult.Adapter.CompileGroups)
+	}
+}
+
 func TestBuildRejectsLegacyTopLevelSourceGroupsWithoutNestedSourceSelection(t *testing.T) {
 	_, err := Build(Input{
 		Target:              "wasm",
