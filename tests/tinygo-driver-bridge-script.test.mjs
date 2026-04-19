@@ -24,15 +24,22 @@ if (process.env.WASM_TINYGO_MODE === 'frontend') {
   if (!process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH) {
     throw new Error('frontend expected WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH')
   }
-  if (!process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH) {
-    throw new Error('frontend expected WASM_TINYGO_FRONTEND_ANALYSIS_PATH')
+  if (process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH) {
+    throw new Error('frontend should not receive WASM_TINYGO_FRONTEND_ANALYSIS_PATH once adapter-only bridge execution is supported')
+  }
+  if (process.env.WASM_TINYGO_FRONTEND_ENV_RECORD_PATH) {
+    fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_ENV_RECORD_PATH, JSON.stringify({
+      analysisPath: process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH ?? null,
+      inputPath: process.env.WASM_TINYGO_FRONTEND_INPUT_PATH ?? null,
+      realAdapterPath: process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH ?? null,
+    }, null, 2))
   }
   const input = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_INPUT_PATH, 'utf8'))
-  const analysisResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH, 'utf8'))
-  const analysis = analysisResult.analysis ?? {}
-  const programPackage = (analysis.packageGraph ?? []).find((packageInfo) => !packageInfo.depOnly && packageInfo.importPath)
-  const compileUnits = (analysis.compileUnits ?? []).map((compileUnit) => {
-    const packageInfo = (analysis.packageGraph ?? []).find((candidate) => candidate.importPath === compileUnit.importPath)
+  const adapterResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, 'utf8'))
+  const adapter = adapterResult.adapter ?? {}
+  const programPackage = (adapter.packageGraph ?? []).find((packageInfo) => !packageInfo.depOnly && packageInfo.importPath)
+  const compileUnits = (adapter.compileUnits ?? []).map((compileUnit) => {
+    const packageInfo = (adapter.packageGraph ?? []).find((candidate) => candidate.importPath === compileUnit.importPath)
       ?? (compileUnit.kind === 'program' && compileUnit.importPath === 'command-line-arguments' ? programPackage : undefined)
     return {
       ...compileUnit,
@@ -49,12 +56,12 @@ if (process.env.WASM_TINYGO_MODE === 'frontend') {
       {
         path: '/working/tinygo-compile-unit.json',
         contents: JSON.stringify({
-          entryFile: analysis.entryFile,
+          entryFile: adapter.entryFile,
           toolchain: {
             ...(input.toolchain ?? {}),
-            ...(analysis.toolchain ?? {}),
+            ...(adapter.toolchain ?? {}),
           },
-          sourceSelection: analysis.intermediateManifest?.sourceSelection ?? { allCompile: analysis.allCompileFiles ?? [] },
+          sourceSelection: { allCompile: adapter.allCompileFiles ?? [] },
           compileUnits,
         }),
       },
@@ -297,6 +304,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
   const outputPath = path.join(workspaceDir, 'out.wasm')
   const requestPath = path.join(workspaceDir, 'tinygo-request.json')
   const bridgeManifestPath = path.join(workspaceDir, 'tinygo-driver-bridge.json')
+  const frontendEnvRecordPath = path.join(workspaceDir, 'tinygo-frontend-env.json')
 
   await writeFile(entryPath, 'package main\n\nfunc main() {}\n')
   await writeFile(requestPath, JSON.stringify({
@@ -317,6 +325,7 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     env: {
       ...process.env,
       WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_FRONTEND_ENV_RECORD_PATH: frontendEnvRecordPath,
       WASM_TINYGO_GO_BIN: fakeGoPath,
       WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
       WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
@@ -638,6 +647,11 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
   assert.deepEqual(manifest.hostBuildTags, ['gc.precise', 'purego', 'scheduler.tasks', 'tinygo', 'tinygo.unicore', 'tinygo.wasm'])
   assert.equal(manifest.driverResultPath, path.join(workspaceDir, 'tinygo-result.json'))
   assert.equal(manifest.hostProbeManifestPath, path.join(workspaceDir, 'tinygo-host-probe.json'))
+  assert.deepEqual(JSON.parse(await readFile(frontendEnvRecordPath, 'utf8')), {
+    analysisPath: null,
+    inputPath: path.join(workspaceDir, 'tinygo-frontend-input.json'),
+    realAdapterPath: path.join(workspaceDir, 'tinygo-frontend-real-adapter.json'),
+  })
 })
 
 test('probe-tinygo-driver-bridge passes a packageGraph-only input to frontend-analysis', async (t) => {
@@ -1339,6 +1353,312 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     },
   })
   assert.deepEqual(manifest.realFrontendAnalysis, manifest.frontendRealAdapter)
+})
+
+test('probe-tinygo-driver-bridge can skip frontend-analysis and write an adapter-only bridge manifest', async (t) => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-driver-bridge-adapter-only-'))
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  const fakeBinDir = path.join(tempDir, 'bin')
+  await mkdir(fakeBinDir, { recursive: true })
+
+  const fakeGoPath = path.join(fakeBinDir, 'go')
+  await writeFile(fakeGoPath, `#!/bin/sh
+set -eu
+node - <<'NODE'
+const fs = require('node:fs')
+const path = require('node:path')
+if (process.env.WASM_TINYGO_MODE === 'frontend-analysis') {
+  throw new Error('skip mode should not invoke frontend-analysis')
+}
+if (process.env.WASM_TINYGO_MODE === 'frontend') {
+  if (process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH) {
+    throw new Error('frontend should not receive WASM_TINYGO_FRONTEND_ANALYSIS_PATH when bridge skip mode is enabled')
+  }
+  const input = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_INPUT_PATH, 'utf8'))
+  const adapterResult = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, 'utf8'))
+  const adapter = adapterResult.adapter ?? {}
+  if (process.env.WASM_TINYGO_FRONTEND_ENV_RECORD_PATH) {
+    fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_ENV_RECORD_PATH, JSON.stringify({
+      analysisPath: process.env.WASM_TINYGO_FRONTEND_ANALYSIS_PATH ?? null,
+      inputPath: process.env.WASM_TINYGO_FRONTEND_INPUT_PATH ?? null,
+      realAdapterPath: process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH ?? null,
+    }, null, 2))
+  }
+  fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_RESULT_PATH, JSON.stringify({
+    ok: true,
+    generatedFiles: [
+      {
+        path: '/working/tinygo-compile-unit.json',
+        contents: JSON.stringify({
+          entryFile: adapter.entryFile,
+          toolchain: {
+            ...(input.toolchain ?? {}),
+            ...(adapter.toolchain ?? {}),
+          },
+          sourceSelection: {
+            allCompile: adapter.allCompileFiles ?? [],
+          },
+          compileUnits: adapter.compileUnits ?? [],
+        }),
+      },
+    ],
+  }, null, 2))
+  process.exit(0)
+}
+if (process.env.WASM_TINYGO_MODE === 'frontend-real-adapter') {
+  const input = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_FRONTEND_INPUT_PATH, 'utf8'))
+  const entryPackage = (input.packageGraph ?? []).find((packageInfo) => !packageInfo.depOnly && packageInfo.importPath)
+  const compileUnits = (input.compileUnits ?? []).map((compileUnit) => {
+    const packageInfo = (input.packageGraph ?? []).find((candidate) => candidate.importPath === compileUnit.importPath)
+      ?? (compileUnit.kind === 'program' && compileUnit.importPath === 'command-line-arguments' ? entryPackage : undefined)
+    return {
+      ...compileUnit,
+      importPath: compileUnit.kind === 'program' && compileUnit.importPath === 'command-line-arguments' && entryPackage?.importPath ? entryPackage.importPath : compileUnit.importPath,
+      imports: (compileUnit.imports ?? []).length === 0 && (packageInfo?.imports ?? []).length > 0 ? packageInfo.imports : (compileUnit.imports ?? []),
+      modulePath: compileUnit.modulePath ?? packageInfo?.modulePath ?? '',
+      depOnly: compileUnit.kind === 'program' ? false : (compileUnit.depOnly ?? true),
+      packageDir: compileUnit.packageDir ?? packageInfo?.dir,
+      packageName: compileUnit.packageName ?? packageInfo?.name,
+      files: (compileUnit.files ?? []).length === 0 && packageInfo?.dir ? (packageInfo.files?.goFiles ?? []).map((goFile) => path.join(packageInfo.dir, goFile)) : (compileUnit.files ?? []),
+      standard: compileUnit.kind === 'stdlib' ? true : (compileUnit.standard ?? false),
+    }
+  })
+  fs.writeFileSync(process.env.WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH, JSON.stringify({
+    ok: true,
+    adapter: {
+      allCompileFiles: input.sourceSelection?.allCompile ?? [],
+      buildContext: input.buildContext,
+      compileGroups: [
+        { name: 'program', files: compileUnits.filter((compileUnit) => compileUnit.kind === 'program').flatMap((compileUnit) => compileUnit.files ?? []) },
+        { name: 'stdlib', files: compileUnits.filter((compileUnit) => compileUnit.kind === 'stdlib').flatMap((compileUnit) => compileUnit.files ?? []) },
+        { name: 'all-compile', files: input.sourceSelection?.allCompile ?? [] },
+      ],
+      compileUnitManifestPath: '/working/tinygo-compile-unit.json',
+      compileUnits,
+      entryFile: input.entryFile,
+      packageGraph: input.packageGraph ?? [],
+      toolchain: {
+        target: input.toolchain?.target,
+        llvmTarget: input.buildContext?.llvmTarget ?? 'wasm32-unknown-wasi',
+      },
+    },
+  }, null, 2))
+  process.exit(0)
+}
+const request = JSON.parse(fs.readFileSync(process.env.WASM_TINYGO_REQUEST_PATH, 'utf8'))
+fs.writeFileSync(process.env.WASM_TINYGO_RESULT_PATH, JSON.stringify({
+  ok: true,
+  files: [
+    {
+      path: '/working/tinygo-frontend-input.json',
+      contents: JSON.stringify({
+        buildContext: {
+          target: request.target,
+          llvmTarget: 'wasm32-unknown-wasi',
+          goos: 'wasip1',
+          goarch: 'wasm',
+          gc: 'precise',
+          scheduler: request.scheduler ?? 'tasks',
+          buildTags: ['gc.precise', 'scheduler.tasks', 'tinygo.wasm'],
+          modulePath: 'example.com/fake',
+        },
+        entryFile: request.entry,
+        modulePath: 'example.com/fake',
+        toolchain: {
+          target: request.target,
+          artifactOutputPath: request.output,
+        },
+        sourceSelection: {
+          program: [request.entry],
+          allCompile: [request.entry, '/working/.tinygo-root/src/fmt/print.go'],
+        },
+        compileUnits: [
+          {
+            kind: 'program',
+            importPath: 'command-line-arguments',
+            packageName: 'main',
+            packageDir: path.dirname(request.entry),
+            files: [request.entry],
+          },
+          {
+            kind: 'stdlib',
+            importPath: 'fmt',
+            packageName: 'fmt',
+            packageDir: '/working/.tinygo-root/src/fmt',
+            files: ['/working/.tinygo-root/src/fmt/print.go'],
+          },
+        ],
+        packageGraph: [
+          {
+            depOnly: false,
+            dir: path.dirname(request.entry),
+            files: { goFiles: [path.basename(request.entry)] },
+            importPath: 'example.com/fake',
+            imports: ['fmt'],
+            modulePath: 'example.com/fake',
+            name: 'main',
+            standard: false,
+          },
+          {
+            depOnly: true,
+            dir: '/working/.tinygo-root/src/fmt',
+            files: { goFiles: ['print.go'] },
+            importPath: 'fmt',
+            imports: ['errors'],
+            modulePath: '',
+            name: 'fmt',
+            standard: true,
+          },
+        ],
+      }),
+    },
+  ],
+  metadata: {
+    buildTags: ['gc.precise', 'scheduler.tasks', 'tinygo.wasm'],
+    gc: 'precise',
+    goarch: 'wasm',
+    goos: 'wasip1',
+    llvmTarget: 'wasm32-unknown-wasi',
+    optimize: '-Oz',
+    panicStrategy: request.panic ?? 'print',
+    scheduler: request.scheduler ?? 'tasks',
+  },
+}, null, 2))
+NODE
+`)
+  await chmod(fakeGoPath, 0o755)
+
+  const fakeTinyGoPath = path.join(fakeBinDir, 'tinygo')
+  await writeFile(fakeTinyGoPath, `#!/bin/sh
+set -eu
+if [ "$1" = "info" ]; then
+  cat <<'EOF'
+LLVM triple:       wasm32-unknown-wasi
+GOOS:              wasip1
+GOARCH:            wasm
+build tags:        gc.precise scheduler.tasks tinygo purego tinygo.unicore tinygo.wasm
+garbage collector: precise
+scheduler:         tasks
+EOF
+  exit 0
+fi
+if [ "$1" = "list" ]; then
+  cat <<EOF
+{
+  "Dir": "$(pwd)",
+  "ImportPath": "example.com/fake",
+  "Module": {
+    "Path": "example.com/fake"
+  },
+  "Name": "main",
+  "GoFiles": [
+    "main.go"
+  ],
+  "Imports": [
+    "fmt"
+  ]
+}
+{
+  "Dir": "/working/.tinygo-root/src/fmt",
+  "ImportPath": "fmt",
+  "Name": "fmt",
+  "GoFiles": [
+    "print.go"
+  ],
+  "Imports": [
+    "errors"
+  ],
+  "DepOnly": true,
+  "Standard": true
+}
+EOF
+  exit 0
+fi
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+mkdir -p "$(dirname "$out")"
+printf '\\000asm\\001\\000\\000\\000' > "$out"
+`)
+  await chmod(fakeTinyGoPath, 0o755)
+
+  const fakeTinyGoRoot = path.join(tempDir, 'tinygo-root')
+  await mkdir(path.join(fakeTinyGoRoot, 'src', 'runtime', 'internal', 'sys'), { recursive: true })
+  await mkdir(path.join(fakeTinyGoRoot, 'src', 'device', 'arm'), { recursive: true })
+  await writeFile(path.join(fakeTinyGoRoot, 'src', 'runtime', 'internal', 'sys', 'zversion.go'), 'package sys\n')
+  await writeFile(path.join(fakeTinyGoRoot, 'src', 'device', 'arm', 'arm.go'), 'package arm\n')
+
+  const workspaceDir = path.join(tempDir, 'workspace')
+  await mkdir(workspaceDir, { recursive: true })
+  const entryPath = path.join(workspaceDir, 'main.go')
+  const outputPath = path.join(workspaceDir, 'out.wasm')
+  const requestPath = path.join(workspaceDir, 'tinygo-request.json')
+  const bridgeManifestPath = path.join(workspaceDir, 'tinygo-driver-bridge.json')
+  const frontendEnvRecordPath = path.join(workspaceDir, 'tinygo-frontend-env.json')
+
+  await writeFile(entryPath, 'package main\n\nfunc main() {}\n')
+  await writeFile(requestPath, JSON.stringify({
+    command: 'build',
+    planner: 'tinygo',
+    entry: entryPath,
+    optimize: 'z',
+    output: outputPath,
+    panic: 'trap',
+    scheduler: 'tasks',
+    target: 'wasip1',
+  }))
+
+  const cwd = new URL('..', import.meta.url).pathname
+  const scriptPath = new URL('../scripts/probe-tinygo-driver-bridge.mjs', import.meta.url).pathname
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd,
+    env: {
+      ...process.env,
+      WASM_TINYGO_DRIVER_BRIDGE_MANIFEST_PATH: bridgeManifestPath,
+      WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS: '1',
+      WASM_TINYGO_FRONTEND_ENV_RECORD_PATH: frontendEnvRecordPath,
+      WASM_TINYGO_GO_BIN: fakeGoPath,
+      WASM_TINYGO_HOST_PROBE_REQUEST_PATH: requestPath,
+      WASM_TINYGO_HOST_PROBE_SKIP_RUNTIME: '1',
+      WASM_TINYGO_TINYGOROOT: fakeTinyGoRoot,
+      WASM_TINYGO_TINYGO_BIN: fakeTinyGoPath,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let output = ''
+  child.stdout.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+  child.stderr.on('data', (chunk) => {
+    output += chunk.toString()
+  })
+
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+
+  assert.equal(exitCode, 0, output)
+  const manifest = JSON.parse(await readFile(bridgeManifestPath, 'utf8'))
+  assert.equal(manifest.frontendAnalysis, undefined)
+  assert.deepEqual(manifest.realFrontendAnalysis, manifest.frontendRealAdapter)
+  assert.equal(manifest.frontendRealAdapter.toolchain.target, 'wasip1')
+  assert.equal(manifest.frontendRealAdapter.toolchain.llvmTarget, 'wasm32-unknown-wasi')
+  assert.equal(manifest.frontendHandoff.compileUnitCount, 2)
+  assert.deepEqual(JSON.parse(await readFile(frontendEnvRecordPath, 'utf8')), {
+    analysisPath: null,
+    inputPath: path.join(workspaceDir, 'tinygo-frontend-input.json'),
+    realAdapterPath: path.join(workspaceDir, 'tinygo-frontend-real-adapter.json'),
+  })
 })
 
 test('probe-tinygo-driver-bridge prefers frontend analysis packageGraph when tinygo list returns no package graph', async (t) => {

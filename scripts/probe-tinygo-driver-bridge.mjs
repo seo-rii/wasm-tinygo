@@ -45,6 +45,7 @@ const frontendAnalysisPath =
 const frontendRealAdapterPath =
   process.env.WASM_TINYGO_DRIVER_BRIDGE_FRONTEND_REAL_ADAPTER_PATH ??
   path.join(path.dirname(requestPath), 'tinygo-frontend-real-adapter.json')
+const skipFrontendAnalysis = process.env.WASM_TINYGO_DRIVER_BRIDGE_SKIP_FRONTEND_ANALYSIS === '1'
 const goBin = process.env.WASM_TINYGO_GO_BIN ?? 'go'
 const tinygoBin = process.env.WASM_TINYGO_TINYGO_BIN ?? tinygoToolchainPaths.binPath
 const tinygoRoot = process.env.WASM_TINYGO_TINYGOROOT ?? tinygoToolchainPaths.rootPath
@@ -336,25 +337,28 @@ delete frontendAnalysisInput.compileUnits
 await writeFile(frontendAnalysisInputPath, `${JSON.stringify(frontendAnalysisInput, null, 2)}
 `)
 
-const frontendAnalysis = spawnSync(goBin, ['run', './cmd/go-probe'], {
-  cwd: repoRoot,
-  env: {
-    ...process.env,
-    WASM_TINYGO_MODE: 'frontend-analysis',
-    WASM_TINYGO_FRONTEND_INPUT_PATH: frontendAnalysisInputPath,
-    WASM_TINYGO_FRONTEND_ANALYSIS_PATH: frontendAnalysisPath,
-  },
-  encoding: 'utf8',
-  stdio: ['ignore', 'pipe', 'pipe'],
-})
-if (frontendAnalysis.status !== 0) {
-  process.stderr.write(frontendAnalysis.stdout)
-  process.stderr.write(frontendAnalysis.stderr)
-  process.exit(frontendAnalysis.status ?? 1)
-}
-const frontendAnalysisResult = JSON.parse(await readFile(frontendAnalysisPath, 'utf8'))
-if (!frontendAnalysisResult.ok || !frontendAnalysisResult.analysis) {
-  throw new Error('frontend analysis bridge verification did not produce a normalized analysis payload')
+let frontendAnalysisResult = null
+if (!skipFrontendAnalysis) {
+  const frontendAnalysis = spawnSync(goBin, ['run', './cmd/go-probe'], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      WASM_TINYGO_MODE: 'frontend-analysis',
+      WASM_TINYGO_FRONTEND_INPUT_PATH: frontendAnalysisInputPath,
+      WASM_TINYGO_FRONTEND_ANALYSIS_PATH: frontendAnalysisPath,
+    },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (frontendAnalysis.status !== 0) {
+    process.stderr.write(frontendAnalysis.stdout)
+    process.stderr.write(frontendAnalysis.stderr)
+    process.exit(frontendAnalysis.status ?? 1)
+  }
+  frontendAnalysisResult = JSON.parse(await readFile(frontendAnalysisPath, 'utf8'))
+  if (!frontendAnalysisResult.ok || !frontendAnalysisResult.analysis) {
+    throw new Error('frontend analysis bridge verification did not produce a normalized analysis payload')
+  }
 }
 
 const frontendRealAdapter = spawnSync(goBin, ['run', './cmd/go-probe'], {
@@ -378,11 +382,17 @@ const frontendRealAdapterResult = JSON.parse(await readFile(frontendRealAdapterP
 if (!frontendRealAdapterResult.ok || !frontendRealAdapterResult.adapter) {
   throw new Error('frontend real adapter bridge verification did not produce a normalized adapter payload')
 }
-verifyFrontendRealAdapterAgainstFrontendAnalysis(
-  frontendRealAdapterResult.adapter,
-  frontendAnalysisResult.analysis,
-)
-const analysisPackageGraph = (frontendAnalysisResult.analysis?.packageGraph ?? []).map((packageInfo) => ({
+if (frontendAnalysisResult?.analysis) {
+  verifyFrontendRealAdapterAgainstFrontendAnalysis(
+    frontendRealAdapterResult.adapter,
+    frontendAnalysisResult.analysis,
+  )
+}
+const analysisPackageGraph = (
+  frontendAnalysisResult?.analysis?.packageGraph ??
+  frontendRealAdapterResult.adapter?.packageGraph ??
+  []
+).map((packageInfo) => ({
   depOnly: Boolean(packageInfo.depOnly),
   dir: packageInfo.dir ?? '',
   goFiles: packageInfo.files?.goFiles ?? [],
@@ -398,7 +408,6 @@ const frontend = spawnSync(goBin, ['run', './cmd/go-probe'], {
   env: {
     ...process.env,
     WASM_TINYGO_MODE: 'frontend',
-    WASM_TINYGO_FRONTEND_ANALYSIS_PATH: frontendAnalysisPath,
     WASM_TINYGO_FRONTEND_REAL_ADAPTER_PATH: frontendRealAdapterPath,
     WASM_TINYGO_FRONTEND_INPUT_PATH: frontendInputPath,
     WASM_TINYGO_FRONTEND_RESULT_PATH: frontendResultPath,
@@ -421,12 +430,14 @@ compileUnitManifest.toolchain = {
   ...(compileUnitManifest.toolchain ?? {}),
   target:
     compileUnitManifest.toolchain?.target ??
-    frontendAnalysisResult.analysis?.toolchain?.target ??
+    frontendAnalysisResult?.analysis?.toolchain?.target ??
+    frontendRealAdapterResult.adapter?.toolchain?.target ??
     frontendInput.toolchain?.target ??
     verification.target,
   llvmTarget:
     compileUnitManifest.toolchain?.llvmTarget ??
-    frontendAnalysisResult.analysis?.toolchain?.llvmTarget ??
+    frontendAnalysisResult?.analysis?.toolchain?.llvmTarget ??
+    frontendRealAdapterResult.adapter?.toolchain?.llvmTarget ??
     frontendInput.buildContext?.llvmTarget ??
     verification.llvmTriple,
   artifactOutputPath:
@@ -501,7 +512,7 @@ if (!packageGraph || packageGraph.length === 0) {
   } else {
     packageGraph = (compileUnitManifest.compileUnits ?? []).map((compileUnit) => {
       const packageDir = compileUnit.packageDir ?? ''
-      return {
+    return {
         depOnly: (compileUnit.kind ?? '') !== 'program',
         dir: packageDir,
         goFiles: (compileUnit.files ?? []).map((file) => {
@@ -512,7 +523,15 @@ if (!packageGraph || packageGraph.length === 0) {
         }),
         importPath: compileUnit.importPath ?? '',
         imports: [...(compileUnit.imports ?? [])].filter((importPath) => importPath !== ''),
-        modulePath: (compileUnit.kind ?? '') === 'stdlib' ? '' : (driverResult.metadata?.modulePath ?? frontendAnalysisResult.analysis?.buildContext?.modulePath ?? ''),
+        modulePath:
+          (compileUnit.kind ?? '') === 'stdlib'
+            ? ''
+            : (
+                driverResult.metadata?.modulePath ??
+                frontendAnalysisResult?.analysis?.buildContext?.modulePath ??
+                frontendRealAdapterResult.adapter?.buildContext?.modulePath ??
+                ''
+              ),
         name: compileUnit.packageName ?? '',
         standard: (compileUnit.kind ?? '') === 'stdlib',
       }
@@ -527,63 +546,65 @@ const frontendHandoff = verifyCompileUnitManifestAgainstDriverBridgeManifest(com
   packageGraph,
   target: verification.target,
 })
-const expectedFrontendAnalysisCompileUnits =
-  canonicalPackageGraph.length === 0
-    ? (frontendAnalysisResult.analysis?.compileUnits ?? [])
-    : (frontendAnalysisResult.analysis?.compileUnits ?? []).map((compileUnit) => {
-      const compileUnitImportPath = compileUnit.importPath ?? ''
-      const packageInfo =
-        canonicalPackageGraph.find((candidate) => (candidate.importPath ?? '') === compileUnitImportPath) ??
-        (
-          (compileUnit.kind ?? '') === 'program' && compileUnitImportPath === 'command-line-arguments'
-            ? canonicalPackageGraph.find((candidate) => !candidate.depOnly && (candidate.importPath ?? '') !== '')
-            : undefined
-        )
-      return {
-        ...compileUnit,
-        imports: packageInfo ? [...(packageInfo.imports ?? [])].filter((importPath) => importPath !== '') : [...(compileUnit.imports ?? [])],
-      }
-    })
-const expectedFrontendAnalysisPackageGraph =
-  canonicalPackageGraph.length === 0
-    ? (frontendAnalysisResult.analysis?.packageGraph ?? [])
-    : (frontendAnalysisResult.analysis?.packageGraph ?? []).map((packageInfo) => {
-      const packageImportPath = packageInfo.importPath ?? ''
-      const canonicalPackageInfo =
-        canonicalPackageGraph.find((candidate) => (candidate.importPath ?? '') === packageImportPath) ??
-        (
-          !(packageInfo.depOnly ?? false) && packageImportPath === 'command-line-arguments'
-            ? canonicalPackageGraph.find((candidate) => !candidate.depOnly && (candidate.importPath ?? '') !== '')
-            : undefined
-        )
-      return {
-        ...packageInfo,
-        imports: canonicalPackageInfo
-          ? [...(canonicalPackageInfo.imports ?? [])].filter((importPath) => importPath !== '')
-          : [...(packageInfo.imports ?? [])],
-      }
-    })
-const expectedFrontendAnalysis = {
-  ...frontendAnalysisResult.analysis,
-  buildContext: canonicalBuildContext,
-  compileUnits: expectedFrontendAnalysisCompileUnits,
-  packageGraph: expectedFrontendAnalysisPackageGraph,
+if (frontendAnalysisResult?.analysis) {
+  const expectedFrontendAnalysisCompileUnits =
+    canonicalPackageGraph.length === 0
+      ? (frontendAnalysisResult.analysis?.compileUnits ?? [])
+      : (frontendAnalysisResult.analysis?.compileUnits ?? []).map((compileUnit) => {
+        const compileUnitImportPath = compileUnit.importPath ?? ''
+        const packageInfo =
+          canonicalPackageGraph.find((candidate) => (candidate.importPath ?? '') === compileUnitImportPath) ??
+          (
+            (compileUnit.kind ?? '') === 'program' && compileUnitImportPath === 'command-line-arguments'
+              ? canonicalPackageGraph.find((candidate) => !candidate.depOnly && (candidate.importPath ?? '') !== '')
+              : undefined
+          )
+        return {
+          ...compileUnit,
+          imports: packageInfo ? [...(packageInfo.imports ?? [])].filter((importPath) => importPath !== '') : [...(compileUnit.imports ?? [])],
+        }
+      })
+  const expectedFrontendAnalysisPackageGraph =
+    canonicalPackageGraph.length === 0
+      ? (frontendAnalysisResult.analysis?.packageGraph ?? [])
+      : (frontendAnalysisResult.analysis?.packageGraph ?? []).map((packageInfo) => {
+        const packageImportPath = packageInfo.importPath ?? ''
+        const canonicalPackageInfo =
+          canonicalPackageGraph.find((candidate) => (candidate.importPath ?? '') === packageImportPath) ??
+          (
+            !(packageInfo.depOnly ?? false) && packageImportPath === 'command-line-arguments'
+              ? canonicalPackageGraph.find((candidate) => !candidate.depOnly && (candidate.importPath ?? '') !== '')
+              : undefined
+          )
+        return {
+          ...packageInfo,
+          imports: canonicalPackageInfo
+            ? [...(canonicalPackageInfo.imports ?? [])].filter((importPath) => importPath !== '')
+            : [...(packageInfo.imports ?? [])],
+        }
+      })
+  const expectedFrontendAnalysis = {
+    ...frontendAnalysisResult.analysis,
+    buildContext: canonicalBuildContext,
+    compileUnits: expectedFrontendAnalysisCompileUnits,
+    packageGraph: expectedFrontendAnalysisPackageGraph,
+  }
+  verifyFrontendAnalysisAgainstDriverBridgeManifest(frontendAnalysisResult.analysis, {
+    artifactOutputPath: verification.artifactOutputPath,
+    driverBuildTags: verification.driverBuildTags,
+    entryFile: verification.entryFile,
+    entryPackage,
+    frontendAnalysis: expectedFrontendAnalysis,
+    frontendHandoff,
+    gc: verification.gc,
+    goarch: verification.goarch,
+    goos: verification.goos,
+    llvmTriple: verification.llvmTriple,
+    packageGraph,
+    scheduler: verification.scheduler,
+    target: verification.target,
+  })
 }
-verifyFrontendAnalysisAgainstDriverBridgeManifest(frontendAnalysisResult.analysis, {
-  artifactOutputPath: verification.artifactOutputPath,
-  driverBuildTags: verification.driverBuildTags,
-  entryFile: verification.entryFile,
-  entryPackage,
-  frontendAnalysis: expectedFrontendAnalysis,
-  frontendHandoff,
-  gc: verification.gc,
-  goarch: verification.goarch,
-  goos: verification.goos,
-  llvmTriple: verification.llvmTriple,
-  packageGraph,
-  scheduler: verification.scheduler,
-  target: verification.target,
-})
 const expectedFrontendRealAdapter = {
   ...frontendRealAdapterResult.adapter,
   buildContext: canonicalBuildContext,
@@ -610,7 +631,7 @@ await writeFile(bridgeManifestPath, `${JSON.stringify({
   driverResultPath: resultPath,
   entryFile: verification.entryFile,
   entryPackage,
-  frontendAnalysis: frontendAnalysisResult.analysis,
+  ...(frontendAnalysisResult?.analysis ? { frontendAnalysis: frontendAnalysisResult.analysis } : {}),
   frontendAnalysisInput,
   frontendRealAdapter: frontendRealAdapterResult.adapter,
   frontendHandoff,
