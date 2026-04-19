@@ -178,6 +178,8 @@ func main() {
   )
   const { frontendRealAdapter, ...aliasOnlyDriverBridgeManifest } = driverBridgeManifest
   aliasOnlyDriverBridgeManifest.realFrontendAnalysis = driverBridgeManifest.frontendRealAdapter
+  const adapterOnlyDriverBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
+  delete adapterOnlyDriverBridgeManifest.frontendAnalysis
   const driftedAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
   driftedAnalysisInputBridgeManifest.frontendAnalysisInput.buildContext.target = 'mismatch-target'
   const driftedFrontendProbeAnalysisInputBridgeManifest = JSON.parse(JSON.stringify(driverBridgeManifest))
@@ -931,6 +933,43 @@ func main() {
   const aliasOnlyActivity = await page.locator('#terminal-output').textContent()
   assert.match(aliasOnlyActivity ?? '', /frontend real adapter bridge verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct source=compat-alias/)
   assert.match(aliasOnlyActivity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=[1-9]\d* main=example\.com\/browserprobe/)
+
+  await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
+  await page.waitForFunction(
+    () =>
+      typeof window.__wasmTinygoTestHooks?.boot === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.readBuildArtifact === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setBuildRequestOverrides === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setDriverBridgeManifest === 'function' &&
+      typeof window.__wasmTinygoTestHooks?.setWorkspaceFiles === 'function',
+    null,
+    { timeout: 120000 },
+  )
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), browserWorkspaceFiles)
+  await page.evaluate((manifest) => window.__wasmTinygoTestHooks.setDriverBridgeManifest(manifest), adapterOnlyDriverBridgeManifest)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+
+  const adapterOnlyActivity = await page.locator('#terminal-output').textContent()
+  const adapterOnlyArtifact = await page.evaluate(() => {
+    const artifact = window.__wasmTinygoTestHooks.readBuildArtifact()
+    if (!artifact) {
+      return null
+    }
+    return {
+      artifactKind: artifact.artifactKind,
+      runnable: artifact.runnable,
+    }
+  })
+  assert.equal(adapterOnlyArtifact?.artifactKind, 'execution')
+  assert.equal(adapterOnlyArtifact?.runnable, true)
+  assert.match(adapterOnlyActivity ?? '', /frontend real adapter bridge verified target=wasm llvm=wasm32-unknown-wasi groups=4 compileUnits=[1-9]\d* allCompile=[1-9]\d* alias=direct source=canonical/)
+  assert.match(adapterOnlyActivity ?? '', /frontend real adapter source=bridge/)
+  assert.match(adapterOnlyActivity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend real adapter packages=[1-9]\d* main=example\.com\/browserprobe/)
+  assert.doesNotMatch(adapterOnlyActivity ?? '', /frontend analysis bridge verified/)
+  assert.doesNotMatch(adapterOnlyActivity ?? '', /patched upstream TinyGo WASI frontend probe matched frontend analysis packages=/)
 
   await page.goto(previewUrl, { waitUntil: 'load', timeout: 120000 })
   await page.waitForFunction(

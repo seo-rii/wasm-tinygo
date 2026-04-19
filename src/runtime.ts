@@ -1017,28 +1017,30 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         const frontendModuleBytes = await loadCompilerModuleBytes()
         let frontendAnalysisManifest: TinyGoFrontendAnalysisManifest | null = null
         let frontendRealAdapterManifest: TinyGoFrontendAnalysisManifest | null = null
-        if (
-          driverBridgeManifest?.frontendAnalysis &&
-          (driverBridgeManifest.frontendRealAdapter || driverBridgeManifest.realFrontendAnalysis)
-        ) {
+        const bridgeFrontendAnalysisManifest = driverBridgeManifest?.frontendAnalysis
+        const bridgeFrontendRealAdapterManifest =
+          driverBridgeManifest?.frontendRealAdapter ?? driverBridgeManifest?.realFrontendAnalysis
+        if (bridgeFrontendRealAdapterManifest && driverBridgeManifest) {
           const realFrontendAnalysisSource = driverBridgeManifest.frontendRealAdapter ? 'canonical' : 'compat-alias'
-          const frontendAnalysisVerification = verifyFrontendAnalysisAgainstDriverBridgeManifest(
-            driverBridgeManifest.frontendAnalysis,
-            driverBridgeManifest,
-          )
-          appendLog(
-            `frontend analysis bridge verified target=${frontendAnalysisVerification.target} llvm=${frontendAnalysisVerification.llvmTarget} groups=${frontendAnalysisVerification.compileGroupCount} compileUnits=${frontendAnalysisVerification.compileUnitCount} allCompile=${frontendAnalysisVerification.allCompileCount} alias=${frontendAnalysisVerification.programImportAlias} program=${frontendAnalysisVerification.programImportPath}`,
-            'success',
-          )
-          frontendAnalysisManifest = JSON.parse(
-            JSON.stringify(driverBridgeManifest.frontendAnalysis),
-          ) as TinyGoFrontendAnalysisManifest
-          appendLog(
-            `frontend analysis verified target=${frontendAnalysisManifest.toolchain?.target ?? 'unknown'} llvm=${frontendAnalysisManifest.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendAnalysisManifest.compileGroups?.length ?? 0} compileUnits=${frontendAnalysisManifest.compileUnits?.length ?? 0} allCompile=${frontendAnalysisManifest.allCompileFiles?.length ?? 0}`,
-            'success',
-          )
+          if (bridgeFrontendAnalysisManifest) {
+            const frontendAnalysisVerification = verifyFrontendAnalysisAgainstDriverBridgeManifest(
+              bridgeFrontendAnalysisManifest,
+              driverBridgeManifest,
+            )
+            appendLog(
+              `frontend analysis bridge verified target=${frontendAnalysisVerification.target} llvm=${frontendAnalysisVerification.llvmTarget} groups=${frontendAnalysisVerification.compileGroupCount} compileUnits=${frontendAnalysisVerification.compileUnitCount} allCompile=${frontendAnalysisVerification.allCompileCount} alias=${frontendAnalysisVerification.programImportAlias} program=${frontendAnalysisVerification.programImportPath}`,
+              'success',
+            )
+            frontendAnalysisManifest = JSON.parse(
+              JSON.stringify(bridgeFrontendAnalysisManifest),
+            ) as TinyGoFrontendAnalysisManifest
+            appendLog(
+              `frontend analysis verified target=${frontendAnalysisManifest.toolchain?.target ?? 'unknown'} llvm=${frontendAnalysisManifest.toolchain?.llvmTarget ?? 'unknown'} groups=${frontendAnalysisManifest.compileGroups?.length ?? 0} compileUnits=${frontendAnalysisManifest.compileUnits?.length ?? 0} allCompile=${frontendAnalysisManifest.allCompileFiles?.length ?? 0}`,
+              'success',
+            )
+          }
           frontendRealAdapterManifest = JSON.parse(
-            JSON.stringify(driverBridgeManifest.frontendRealAdapter ?? driverBridgeManifest.realFrontendAnalysis),
+            JSON.stringify(bridgeFrontendRealAdapterManifest),
           ) as TinyGoFrontendAnalysisManifest
           const realFrontendAnalysisVerification = verifyFrontendAnalysisAgainstRealDriverBridgeManifest(
             frontendRealAdapterManifest,
@@ -1061,15 +1063,15 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
               `frontend real adapter seam verified target=${frontendRealAdapterSeamVerification.target} llvm=${frontendRealAdapterSeamVerification.llvmTarget} groups=${frontendRealAdapterSeamVerification.compileGroupCount} compileUnits=${frontendRealAdapterSeamVerification.compileUnitCount} allCompile=${frontendRealAdapterSeamVerification.allCompileCount} alias=${frontendRealAdapterSeamVerification.programImportAlias}`,
               'success',
             )
+            working.dir.contents.set(
+              'tinygo-frontend-analysis.json',
+              new File(textEncoder.encode(JSON.stringify({
+                ok: true,
+                analysis: frontendAnalysisManifest,
+                diagnostics: [],
+              } satisfies TinyGoFrontEndAnalysisResult, null, 2))),
+            )
           }
-          working.dir.contents.set(
-            'tinygo-frontend-analysis.json',
-            new File(textEncoder.encode(JSON.stringify({
-              ok: true,
-              analysis: frontendAnalysisManifest,
-              diagnostics: [],
-            } satisfies TinyGoFrontEndAnalysisResult, null, 2))),
-          )
           working.dir.contents.set(
             'tinygo-frontend-real-adapter.json',
             new File(textEncoder.encode(JSON.stringify({
@@ -1215,7 +1217,13 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         }
         const frontendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'running'))
         const frontendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`frontend ${line}`, 'error'))
-        if (driverBridgeManifest?.packageGraph?.length && frontendAnalysisManifest?.packageGraph?.length) {
+        if (
+          driverBridgeManifest?.packageGraph?.length &&
+          (
+            frontendAnalysisManifest?.packageGraph?.length ||
+            frontendRealAdapterManifest?.packageGraph?.length
+          )
+        ) {
           await runUpstreamFrontendProbe(frontendAnalysisManifest, frontendRealAdapterManifest)
         }
         appendLog('frontend build mode=frontend', 'success')
