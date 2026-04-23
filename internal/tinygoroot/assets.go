@@ -72,6 +72,76 @@ const wasip1TargetSource = `{
 }
 `
 
+const wasip2TargetSource = `{
+	"llvm-target":   "wasm32-unknown-wasi",
+	"cpu":           "generic",
+	"features":      "+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types",
+	"build-tags":    ["tinygo.wasm", "wasip2"],
+	"buildmode":     "c-shared",
+	"goos":          "linux",
+	"goarch":        "arm",
+	"linker":        "wasm-ld",
+	"libc":          "wasmbuiltins",
+	"rtlib":         "compiler-rt",
+	"gc":            "precise",
+	"scheduler":     "asyncify",
+	"default-stack-size": 65536,
+	"cflags": [
+		"-mbulk-memory",
+		"-mnontrapping-fptoint",
+		"-mno-multivalue",
+		"-mno-reference-types",
+		"-msign-ext"
+	],
+	"ldflags": [
+		"--stack-first",
+		"--no-demangle",
+		"--no-entry"
+	],
+	"extra-files": [
+		"src/runtime/asm_tinygowasm.S"
+	],
+	"emulator": "wasmtime run --wasm component-model -Sinherit-network -Sallow-ip-name-lookup --dir={tmpDir}::/tmp {}",
+	"wit-package": "{root}/lib/wasi-cli/wit/",
+	"wit-world": "wasi:cli/command"
+}
+`
+
+const wasip3TargetSource = `{
+	"llvm-target":   "wasm32-unknown-wasi",
+	"cpu":           "generic",
+	"features":      "+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types",
+	"build-tags":    ["tinygo.wasm", "wasip3"],
+	"buildmode":     "c-shared",
+	"goos":          "linux",
+	"goarch":        "arm",
+	"linker":        "wasm-ld",
+	"libc":          "wasmbuiltins",
+	"rtlib":         "compiler-rt",
+	"gc":            "precise",
+	"scheduler":     "asyncify",
+	"default-stack-size": 65536,
+	"cflags": [
+		"-mbulk-memory",
+		"-mnontrapping-fptoint",
+		"-mno-multivalue",
+		"-mno-reference-types",
+		"-msign-ext"
+	],
+	"ldflags": [
+		"--stack-first",
+		"--no-demangle",
+		"--no-entry"
+	],
+	"extra-files": [
+		"src/runtime/asm_tinygowasm.S"
+	],
+	"emulator": "wasmtime run --wasm component-model -Sinherit-network -Sallow-ip-name-lookup --dir={tmpDir}::/tmp {}",
+	"wit-package": "{root}/lib/wasi-cli/wit/",
+	"wit-world": "wasi:cli/command"
+}
+`
+
 const wasmUndefinedSource = `syscall/js.copyBytesToGo
 syscall/js.copyBytesToJS
 syscall/js.finalizeRef
@@ -118,6 +188,14 @@ var files = []File{
 		Contents: wasip1TargetSource,
 	},
 	{
+		Path:     RootDir + "/targets/wasip2.json",
+		Contents: wasip2TargetSource,
+	},
+	{
+		Path:     RootDir + "/targets/wasip3.json",
+		Contents: wasip3TargetSource,
+	},
+	{
 		Path:     RootDir + "/targets/wasm-undefined.txt",
 		Contents: wasmUndefinedSource,
 	},
@@ -162,6 +240,8 @@ var files = []File{
 var targetSources = map[string]string{
 	"wasm":   wasmTargetSource,
 	"wasip1": wasip1TargetSource,
+	"wasip2": wasip2TargetSource,
+	"wasip3": wasip3TargetSource,
 }
 
 func Files() []File {

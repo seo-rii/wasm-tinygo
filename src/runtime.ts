@@ -68,12 +68,14 @@ export type EmceptionRunResult = {
   stderr: string
 }
 
+export type TinyGoBuildTarget = 'wasm' | 'wasip1' | 'wasip2' | 'wasip3'
+
 export type TinyGoBuildRequest = {
   command: 'build'
   planner?: 'bootstrap' | 'tinygo'
   entry: string
   output: string
-  target: 'wasm'
+  target: TinyGoBuildTarget
   optimize?: string
   scheduler?: 'none' | 'tasks' | 'asyncify'
   panic?: 'print' | 'trap'
@@ -1799,7 +1801,15 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         executionArtifactBytes = new Uint8Array(artifactBytes)
         executionArtifactEntrypoint = lastBuildArtifactEntrypoint
       }
-      if (artifactProbeVerified && options.hostCompileUrl && executionArtifactBytes === null) {
+      const requestedBuildTarget = buildRequestOverrides?.target ?? 'wasm'
+      const canUseWasip1ExecutionFallback =
+        requestedBuildTarget === 'wasm' || requestedBuildTarget === 'wasip1'
+      if (
+        artifactProbeVerified &&
+        options.hostCompileUrl &&
+        executionArtifactBytes === null &&
+        canUseWasip1ExecutionFallback
+      ) {
         const hostCompileResponse = await fetch(options.hostCompileUrl, {
           method: 'POST',
           headers: {
@@ -1876,13 +1886,24 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             'error',
           )
         }
+      } else if (
+        artifactProbeVerified &&
+        options.hostCompileUrl &&
+        executionArtifactBytes === null &&
+        !canUseWasip1ExecutionFallback
+      ) {
+        appendLog(
+          `host compile seam skipped: ${requestedBuildTarget} cannot be replaced with a wasip1 execution artifact`,
+          'error',
+        )
       }
       if (
         artifactProbeVerified &&
         frontendCompileUnitVerification &&
         frontendCommandArtifactVerification &&
         executionArtifactBytes === null &&
-        !lastBuildArtifactRunnable
+        !lastBuildArtifactRunnable &&
+        canUseWasip1ExecutionFallback
       ) {
         const relinkedExecutionArtifactPath = artifactPath.endsWith('.wasm')
           ? `${artifactPath.slice(0, -'.wasm'.length)}.exec.wasm`

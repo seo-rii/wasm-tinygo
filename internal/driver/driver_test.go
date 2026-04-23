@@ -2331,3 +2331,42 @@ func TestBuildSupportsWasip1Target(t *testing.T) {
 		t.Fatalf("unexpected compile target for wasip1: %q", got)
 	}
 }
+
+func TestBuildSupportsWasipPreviewTargets(t *testing.T) {
+	for _, target := range []string{"wasip2", "wasip3"} {
+		t.Run(target, func(t *testing.T) {
+			result, err := Build(Request{
+				Command: "build",
+				Planner: "tinygo",
+				Entry:   "/workspace/main.go",
+				Output:  "/working/out.wasm",
+				Target:  target,
+			}, []byte("package main\n\nfunc main() {}\n"))
+			if err != nil {
+				t.Fatalf("Build returned error: %v", err)
+			}
+			if result.Metadata == nil {
+				t.Fatalf("expected metadata for %s target", target)
+			}
+			if result.Metadata.GOOS != "linux" {
+				t.Fatalf("unexpected %s GOOS: %q", target, result.Metadata.GOOS)
+			}
+			if result.Metadata.GOARCH != "arm" {
+				t.Fatalf("unexpected %s GOARCH: %q", target, result.Metadata.GOARCH)
+			}
+			foundTargetTag := false
+			for _, tag := range result.Metadata.BuildTags {
+				if tag == target {
+					foundTargetTag = true
+					break
+				}
+			}
+			if !foundTargetTag {
+				t.Fatalf("expected build tag %q in %#v", target, result.Metadata.BuildTags)
+			}
+			if got := result.Plan[0].Argv[1]; got != "--target=wasm32-unknown-wasi" {
+				t.Fatalf("unexpected compile target for %s: %q", target, got)
+			}
+		})
+	}
+}

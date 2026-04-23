@@ -20,6 +20,7 @@ func TestResolveSupportsWasmFamilyTargets(t *testing.T) {
 		name               string
 		target             string
 		wantGOOS           string
+		wantGOARCH         string
 		wantTriple         string
 		wantLibC           string
 		wantRTLib          string
@@ -32,6 +33,7 @@ func TestResolveSupportsWasmFamilyTargets(t *testing.T) {
 			name:               "wasm",
 			target:             "wasm",
 			wantGOOS:           "js",
+			wantGOARCH:         "wasm",
 			wantTriple:         "wasm32-unknown-wasi",
 			wantLibC:           "wasi-libc",
 			wantRTLib:          "compiler-rt",
@@ -44,8 +46,35 @@ func TestResolveSupportsWasmFamilyTargets(t *testing.T) {
 			name:               "wasip1",
 			target:             "wasip1",
 			wantGOOS:           "wasip1",
+			wantGOARCH:         "wasm",
 			wantTriple:         "wasm32-unknown-wasi",
 			wantLibC:           "wasi-libc",
+			wantRTLib:          "compiler-rt",
+			wantCPU:            "generic",
+			wantFeatures:       "+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types",
+			wantDefaultStack:   65536,
+			wantFirstExtraFile: "src/runtime/asm_tinygowasm.S",
+		},
+		{
+			name:               "wasip2",
+			target:             "wasip2",
+			wantGOOS:           "linux",
+			wantGOARCH:         "arm",
+			wantTriple:         "wasm32-unknown-wasi",
+			wantLibC:           "wasmbuiltins",
+			wantRTLib:          "compiler-rt",
+			wantCPU:            "generic",
+			wantFeatures:       "+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types",
+			wantDefaultStack:   65536,
+			wantFirstExtraFile: "src/runtime/asm_tinygowasm.S",
+		},
+		{
+			name:               "wasip3",
+			target:             "wasip3",
+			wantGOOS:           "linux",
+			wantGOARCH:         "arm",
+			wantTriple:         "wasm32-unknown-wasi",
+			wantLibC:           "wasmbuiltins",
 			wantRTLib:          "compiler-rt",
 			wantCPU:            "generic",
 			wantFeatures:       "+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types",
@@ -66,8 +95,8 @@ func TestResolveSupportsWasmFamilyTargets(t *testing.T) {
 			if profile.LLVMTarget != tc.wantTriple {
 				t.Fatalf("unexpected LLVM target: got %q want %q", profile.LLVMTarget, tc.wantTriple)
 			}
-			if profile.GOARCH != "wasm" {
-				t.Fatalf("unexpected GOARCH: %q", profile.GOARCH)
+			if profile.GOARCH != tc.wantGOARCH {
+				t.Fatalf("unexpected GOARCH: got %q want %q", profile.GOARCH, tc.wantGOARCH)
 			}
 			if profile.GC != "precise" {
 				t.Fatalf("unexpected GC: %q", profile.GC)
@@ -98,6 +127,28 @@ func TestResolveSupportsWasmFamilyTargets(t *testing.T) {
 			}
 			if profile.ExtraFiles[0] != tc.wantFirstExtraFile {
 				t.Fatalf("unexpected first extra file: got %q want %q", profile.ExtraFiles[0], tc.wantFirstExtraFile)
+			}
+		})
+	}
+}
+
+func TestResolveAddsWasipPreviewBuildTags(t *testing.T) {
+	for _, target := range []string{"wasip2", "wasip3"} {
+		t.Run(target, func(t *testing.T) {
+			profile, err := Resolve(target)
+			if err != nil {
+				t.Fatalf("Resolve returned error: %v", err)
+			}
+			tags := profile.BuildTagsFor("")
+			found := false
+			for _, tag := range tags {
+				if tag == target {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected build tag %q in %#v", target, tags)
 			}
 		})
 	}

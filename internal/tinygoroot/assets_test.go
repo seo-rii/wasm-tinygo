@@ -16,6 +16,8 @@ func TestFilesIncludeBootstrapTinyGoRootAssets(t *testing.T) {
 	required := []string{
 		RootDir + "/targets/wasm.json",
 		RootDir + "/targets/wasip1.json",
+		RootDir + "/targets/wasip2.json",
+		RootDir + "/targets/wasip3.json",
 		RootDir + "/targets/wasm-undefined.txt",
 		RootDir + "/src/runtime/internal/sys/zversion.go",
 		RootDir + "/src/device/arm/arm.go",
@@ -41,12 +43,14 @@ func TestTargetSourceReturnsJSONForSupportedTargets(t *testing.T) {
 		t.Fatalf("expected non-empty wasm target source")
 	}
 
-	wasip1Source, ok := TargetSource("wasip1")
-	if !ok {
-		t.Fatalf("expected wasip1 target source")
-	}
-	if wasip1Source == "" {
-		t.Fatalf("expected non-empty wasip1 target source")
+	for _, target := range []string{"wasip1", "wasip2", "wasip3"} {
+		source, ok := TargetSource(target)
+		if !ok {
+			t.Fatalf("expected %s target source", target)
+		}
+		if source == "" {
+			t.Fatalf("expected non-empty %s target source", target)
+		}
 	}
 
 	if _, ok := TargetSource("avr"); ok {

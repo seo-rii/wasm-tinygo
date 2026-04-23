@@ -46,7 +46,7 @@ The browser-side driver currently accepts only this narrow request shape:
 | `planner` | `tinygo`, `bootstrap`, `""` | Empty planner is normalized to `tinygo` |
 | `entry` | absolute `.go` file path | Current implementation assumes a single entry file |
 | `output` | path ending in `.wasm` | Current planner only emits WebAssembly output |
-| `target` | `wasm`, `wasip1`, `""` | Empty target is normalized to `wasm` |
+| `target` | `wasm`, `wasip1`, `wasip2`, `wasip3`, `""` | Empty target is normalized to `wasm`; `wasip3` is a transitional local profile that mirrors the current `wasip2` shape with a `wasip3` build tag |
 | `optimize` | `""`, `z`, `s`, `0`, `1`, `2`, `3` | Mapped to `-Oz`, `-Os`, `-O0`, `-O1`, `-O2`, `-O3` |
 | `scheduler` | `""`, `none`, `tasks`, `asyncify` | TinyGo-style option surface only |
 | `panic` | `""`, `print`, `trap` | TinyGo-style option surface only |
@@ -59,6 +59,7 @@ The entry package is only validated at a **bootstrap** level:
 - `.go` files in the same directory are treated as one package
 - `//go:build` constraints are evaluated against the current target/profile tags before package validation
 - `*_js.go`, `*_wasip1.go`, `*_wasm.go`, and `*_GOOS_GOARCH.go` filename suffixes are filtered against the current target before package validation
+- `wasip2` and `wasip3` are exposed as build tags; their profile GOOS/GOARCH values are `linux`/`arm`, so filename suffix filtering follows those values rather than `_wasip2.go` or `_wasip3.go`
 - `_test.go`, hidden `.go`, and `_`-prefixed `.go` files are ignored
 - if the entry file or an imported local package exists but all matching `.go` files are filtered out by target/build constraints, the driver returns a specific exclusion diagnostic
 - relative imports are rejected
@@ -93,7 +94,7 @@ That means a file can pass validation even though a future real TinyGo-backed pl
 The driver currently translates a valid build request into a target-aware bootstrap plan:
 
 1. emit `/working/tinygo-bootstrap.json` and `/working/tinygo-frontend-input.json`
-2. resolve the TinyGo-style target profile (`wasm` or `wasip1`)
+2. resolve the TinyGo-style target profile (`wasm`, `wasip1`, `wasip2`, or `wasip3`)
 3. run `clang` with the target triple and selected target `cflags`
 4. run `wasm-ld` with filtered target `ldflags`
 5. seed the first recognized stdlib source files into `.tinygo-root`
@@ -107,7 +108,7 @@ This proves the browser stack can already do these pieces together:
 
 - Go/WASI control logic
 - TinyGo-style target/profile metadata generation
-- TinyGo-style target-profile resolution for `wasm` and `wasip1`
+- TinyGo-style target-profile resolution for `wasm`, `wasip1`, `wasip2`, and `wasip3`
 - planner-side manifest generation for validated entry/module/package graph data
 - planner-side lowering of normalized compile inputs into a generated bootstrap C translation unit
 - planner-side target-specific minimal TinyGo root generation for future target/data-driven planning
@@ -184,7 +185,7 @@ The app may work outside Chromium-family browsers, but this has not been verifie
 - `tinygo flash`
 - serial monitor / USB / board-specific flows
 - multi-package workspaces
-- board targets beyond the placeholder `wasm` / `wasip1` bootstrap targets
+- board targets beyond the placeholder `wasm` / `wasip1` / `wasip2` / `wasip3` bootstrap targets
 
 ## Test coverage backing this document
 
@@ -196,7 +197,7 @@ The app may work outside Chromium-family browsers, but this has not been verifie
 - supported optimize flag aliases
 - planner default/selection
 - supported TinyGo-style scheduler / panic options
-- target-profile resolution for `wasm` and `wasip1`
+- target-profile resolution for `wasm`, `wasip1`, `wasip2`, and `wasip3`
 - same-directory package loading
 - `//go:build` filtering for target-matching package files
 - filename target suffix filtering for target-matching package files
@@ -225,7 +226,7 @@ The app may work outside Chromium-family browsers, but this has not been verifie
 `npm run test:wasi` currently covers:
 
 - valid WASI driver execution with `tinygo-bootstrap` metadata
-- `wasip1` target metadata from the built WASI driver
+- `wasip1`, `wasip2`, and `wasip3` target metadata from the built WASI driver
 - multi-file package loading with `//go:build` filtering in the built WASI driver
 - multi-file package loading with filename target suffix filtering in the built WASI driver
 - explicit diagnostics when a local imported package is excluded by target/build constraints in the built WASI driver

@@ -504,6 +504,32 @@ test('wasi driver supports wasip1 metadata', async () => {
   assert.ok(!generatedPaths.includes('/working/.tinygo-root/targets/wasm.json'))
 })
 
+test('wasi driver supports wasip2 and wasip3 metadata', async () => {
+  for (const target of ['wasip2', 'wasip3']) {
+    const execution = await runDriver({
+      source: 'package main\n\nfunc main() {}\n',
+      request: {
+        command: 'build',
+        planner: 'tinygo',
+        entry: '/workspace/main.go',
+        output: '/working/out.wasm',
+        target,
+      },
+    })
+
+    assert.equal(execution.exitCode, 0)
+    assert.equal(execution.result.ok, true)
+    assert.equal(execution.result.metadata.goos, 'linux')
+    assert.equal(execution.result.metadata.goarch, 'arm')
+    assert.equal(execution.result.metadata.llvmTarget, 'wasm32-unknown-wasi')
+    assert.ok(execution.result.metadata.buildTags.includes(target))
+    const generatedPaths = execution.result.files.map((file) => file.path)
+    assert.ok(generatedPaths.includes(`/working/.tinygo-root/targets/${target}.json`))
+    assert.ok(!generatedPaths.includes('/working/.tinygo-root/targets/wasm.json'))
+    assert.ok(!generatedPaths.includes('/working/.tinygo-root/targets/wasip1.json'))
+  }
+})
+
 test('wasi driver honors go:build constraints when loading package files', async () => {
   const execution = await runDriver({
     files: {
@@ -901,7 +927,7 @@ test('wasi frontend emits synthetic artifacts from frontend-analysis handoff', a
     llvmTarget: 'wasm32-unknown-wasi',
     linker: 'wasm-ld',
     cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
-    ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+    ldflags: ['--stack-first', '--no-demangle'],
     translationUnitPath: '/working/tinygo-bootstrap.c',
     objectOutputPath: '/working/tinygo-bootstrap.o',
     artifactOutputPath: '/working/out.wasm',
