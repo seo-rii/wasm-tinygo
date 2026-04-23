@@ -385,6 +385,12 @@ export type TinyGoLoweringPlanManifest = {
     artifactOutputPath?: string
     bitcodeInputs?: string[]
   }
+  executionLinkJob?: {
+    linker?: string
+    ldflags?: string[]
+    artifactOutputPath?: string
+    bitcodeInputs?: string[]
+  }
 }
 
 export type TinyGoBackendInputManifest = {
@@ -407,6 +413,12 @@ export type TinyGoBackendInputManifest = {
     standard?: boolean
   }>
   linkJob?: {
+    linker?: string
+    ldflags?: string[]
+    artifactOutputPath?: string
+    bitcodeInputs?: string[]
+  }
+  executionLinkJob?: {
     linker?: string
     ldflags?: string[]
     artifactOutputPath?: string
@@ -3496,10 +3508,20 @@ export const verifyLoweringPlanAgainstWorkItemsManifest = (
   if (JSON.stringify(linkJob) !== JSON.stringify(loweringPlanManifest.linkJob ?? {})) {
     throw new Error('frontend lowering plan link job did not match work items manifest')
   }
+  const executionLinkJob = {
+    linker: workItemsToolchain.linker ?? 'wasm-ld',
+    ldflags: workItemsToolchain.ldflags ?? [],
+    artifactOutputPath: workItemsToolchain.artifactOutputPath ?? '/working/out.wasm',
+    bitcodeInputs: compileJobs.map((job) => job.bitcodeOutputPath),
+  }
+  if (JSON.stringify(executionLinkJob) !== JSON.stringify(loweringPlanManifest.executionLinkJob ?? {})) {
+    throw new Error('frontend lowering plan execution link job did not match work items manifest')
+  }
 
   return {
     compileJobs,
     linkJob,
+    executionLinkJob,
   }
 }
 
@@ -3571,6 +3593,29 @@ const deriveLinkBitcodeInputsFromBackendInputManifest = (
   if (
     backendInputManifest.linkJob?.bitcodeInputs !== undefined &&
     JSON.stringify(bitcodeInputs) !== JSON.stringify(backendInputManifest.linkJob?.bitcodeInputs ?? [])
+  ) {
+    throw new Error(errorMessage)
+  }
+  return bitcodeInputs
+}
+
+const deriveExecutionLinkBitcodeInputsFromBackendInputManifest = (
+  backendInputManifest: TinyGoBackendInputManifest,
+  errorMessage: string,
+) => {
+  if (backendInputManifest.executionLinkJob === undefined) {
+    return deriveLinkBitcodeInputsFromBackendInputManifest(backendInputManifest, errorMessage)
+  }
+  const bitcodeInputs = (backendInputManifest.compileJobs ?? []).map((compileJob) => {
+    const bitcodeOutputPath = compileJob.bitcodeOutputPath ?? ''
+    if (bitcodeOutputPath === '') {
+      throw new Error(errorMessage)
+    }
+    return bitcodeOutputPath
+  })
+  if (
+    backendInputManifest.executionLinkJob?.bitcodeInputs !== undefined &&
+    JSON.stringify(bitcodeInputs) !== JSON.stringify(backendInputManifest.executionLinkJob?.bitcodeInputs ?? [])
   ) {
     throw new Error(errorMessage)
   }
@@ -3667,6 +3712,18 @@ export const verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManif
   if (JSON.stringify(loweringPlanManifest.linkJob ?? {}) !== JSON.stringify(linkJob)) {
     throw new Error('frontend backend input did not match lowering plan and lowered sources manifests')
   }
+  const executionLinkJob = {
+    linker: backendInputManifest.executionLinkJob?.linker ?? '',
+    ldflags: backendInputManifest.executionLinkJob?.ldflags ?? [],
+    artifactOutputPath: backendInputManifest.executionLinkJob?.artifactOutputPath ?? '',
+    bitcodeInputs: deriveExecutionLinkBitcodeInputsFromBackendInputManifest(
+      backendInputManifest,
+      'frontend backend input did not match lowering plan and lowered sources manifests',
+    ),
+  }
+  if (JSON.stringify(loweringPlanManifest.executionLinkJob ?? {}) !== JSON.stringify(executionLinkJob)) {
+    throw new Error('frontend backend input did not match lowering plan and lowered sources manifests')
+  }
   const loweredUnits = deriveLoweredUnitsFromBackendInputManifest(
     backendInputManifest,
     'frontend backend input did not match lowering plan and lowered sources manifests',
@@ -3694,6 +3751,7 @@ export const verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManif
   return {
     compileJobs: backendInputManifest.compileJobs ?? [],
     linkJob,
+    executionLinkJob,
     loweredUnits,
   }
 }
@@ -3711,7 +3769,7 @@ export const verifyCommandBatchAgainstLoweringPlanAndLoweredSourcesManifest = (
     throw new Error('frontend command batch compile commands did not match lowering plan and lowered sources manifests')
   }
 
-  const linkJob = loweringPlanManifest.linkJob ?? {}
+  const linkJob = loweringPlanManifest.executionLinkJob ?? loweringPlanManifest.linkJob ?? {}
   const linkCommand = {
     argv: [
       `/usr/bin/${linkJob.linker ?? ''}`,
@@ -3777,12 +3835,12 @@ export const verifyCommandBatchAgainstBackendInputManifest = (
     throw new Error('frontend command batch did not match backend input manifest')
   }
 
-  const linkJob = backendInputManifest.linkJob ?? {}
+  const linkJob = backendInputManifest.executionLinkJob ?? backendInputManifest.linkJob ?? {}
   const linkCommand = {
     argv: [
       `/usr/bin/${linkJob.linker ?? ''}`,
       ...(linkJob.ldflags ?? []),
-      ...deriveLinkBitcodeInputsFromBackendInputManifest(
+      ...deriveExecutionLinkBitcodeInputsFromBackendInputManifest(
         backendInputManifest,
         'frontend command batch did not match backend input manifest',
       ),
@@ -4337,11 +4395,18 @@ export const verifyCommandArtifactManifestAgainstBackendInputAndLoweredBitcodeMa
   loweredBitcodeManifest: TinyGoLoweredBitcodeManifest,
   commandArtifactManifest: TinyGoCommandArtifactManifest,
 ) => {
-  const artifactOutputPath = backendInputManifest.linkJob?.artifactOutputPath ?? ''
+  const artifactOutputPath =
+    backendInputManifest.executionLinkJob?.artifactOutputPath ?? backendInputManifest.linkJob?.artifactOutputPath ?? ''
   if (artifactOutputPath !== (commandArtifactManifest.artifactOutputPath ?? '')) {
     throw new Error('frontend command artifact manifest did not match backend input and lowered bitcode manifest')
   }
-  if (JSON.stringify(loweredBitcodeManifest.bitcodeFiles ?? []) !== JSON.stringify(commandArtifactManifest.bitcodeFiles ?? [])) {
+  if (
+    JSON.stringify(
+      backendInputManifest.executionLinkJob !== undefined
+        ? (backendInputManifest.executionLinkJob.bitcodeInputs ?? loweredBitcodeManifest.bitcodeFiles ?? [])
+        : (backendInputManifest.linkJob?.bitcodeInputs ?? loweredBitcodeManifest.bitcodeFiles ?? []),
+    ) !== JSON.stringify(commandArtifactManifest.bitcodeFiles ?? [])
+  ) {
     throw new Error('frontend command artifact manifest did not match backend input and lowered bitcode manifest')
   }
   const artifactFacts = (() => {

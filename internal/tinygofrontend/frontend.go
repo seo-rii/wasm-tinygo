@@ -187,10 +187,11 @@ type LoweringLinkJob struct {
 }
 
 type LoweringPlanManifest struct {
-	EntryFile    string               `json:"entryFile"`
-	OptimizeFlag string               `json:"optimizeFlag,omitempty"`
-	CompileJobs  []LoweringCompileJob `json:"compileJobs"`
-	LinkJob      LoweringLinkJob      `json:"linkJob"`
+	EntryFile        string               `json:"entryFile"`
+	OptimizeFlag     string               `json:"optimizeFlag,omitempty"`
+	CompileJobs      []LoweringCompileJob `json:"compileJobs"`
+	LinkJob          LoweringLinkJob      `json:"linkJob"`
+	ExecutionLinkJob *LoweringLinkJob     `json:"executionLinkJob,omitempty"`
 }
 
 type Result struct {
@@ -1004,7 +1005,7 @@ func Analyze(input Input) (Analysis, error) {
 			ObjectOutputPath:    objectOutputPath,
 			ArtifactOutputPath:  input.Toolchain.ArtifactOutputPath,
 		},
-		WorkItems:    workItems,
+		WorkItems: workItems,
 	}
 	compileJobs := make([]LoweringCompileJob, 0, len(workItems))
 	for _, workItem := range workItems {
@@ -1039,6 +1040,12 @@ func Analyze(input Input) (Analysis, error) {
 			ArtifactOutputPath: input.Toolchain.ArtifactOutputPath,
 			BitcodeInputs:      linkBitcodeInputs,
 		},
+		ExecutionLinkJob: &LoweringLinkJob{
+			Linker:             linker,
+			LDFlags:            append([]string{}, ldflags...),
+			ArtifactOutputPath: input.Toolchain.ArtifactOutputPath,
+			BitcodeInputs:      append([]string{}, linkBitcodeInputs...),
+		},
 	}
 	backendCompileJobs := make([]tinygobackend.CompileJob, 0, len(compileJobs))
 	for _, compileJob := range compileJobs {
@@ -1065,6 +1072,11 @@ func Analyze(input Input) (Analysis, error) {
 		LinkJob: tinygobackend.LinkJob{
 			Linker:             linker,
 			LDFlags:            append([]string{}, intermediateLDFlags...),
+			ArtifactOutputPath: input.Toolchain.ArtifactOutputPath,
+		},
+		ExecutionLinkJob: &tinygobackend.LinkJob{
+			Linker:             linker,
+			LDFlags:            append([]string{}, ldflags...),
 			ArtifactOutputPath: input.Toolchain.ArtifactOutputPath,
 		},
 	}

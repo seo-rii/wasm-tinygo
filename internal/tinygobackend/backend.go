@@ -13,11 +13,12 @@ import (
 )
 
 type Input struct {
-	EntryFile    string        `json:"entryFile"`
-	OptimizeFlag string        `json:"optimizeFlag,omitempty"`
-	CompileJobs  []CompileJob  `json:"compileJobs"`
-	LinkJob      LinkJob       `json:"linkJob"`
-	LoweredUnits []LoweredUnit `json:"loweredUnits,omitempty"`
+	EntryFile        string        `json:"entryFile"`
+	OptimizeFlag     string        `json:"optimizeFlag,omitempty"`
+	CompileJobs      []CompileJob  `json:"compileJobs"`
+	LinkJob          LinkJob       `json:"linkJob"`
+	ExecutionLinkJob *LinkJob      `json:"executionLinkJob,omitempty"`
+	LoweredUnits     []LoweredUnit `json:"loweredUnits,omitempty"`
 }
 
 type CompileJob struct {
@@ -2792,102 +2793,102 @@ func Build(input Input) (Result, error) {
 							supportsRunnableProgram = false
 							continue
 						}
-					for _, spec := range typedDecl.Specs {
-						valueSpec, ok := spec.(*ast.ValueSpec)
-						if !ok || len(valueSpec.Names) == 0 || len(valueSpec.Values) != len(valueSpec.Names) {
-							supportsRunnableProgram = false
-							continue
-						}
-						if valueSpec.Type != nil {
-							typeIdent, ok := valueSpec.Type.(*ast.Ident)
-							if !ok || typeIdent.Name != "int" {
+						for _, spec := range typedDecl.Specs {
+							valueSpec, ok := spec.(*ast.ValueSpec)
+							if !ok || len(valueSpec.Names) == 0 || len(valueSpec.Values) != len(valueSpec.Names) {
 								supportsRunnableProgram = false
 								continue
 							}
-						}
-						for index, name := range valueSpec.Names {
-							if name == nil || name.Name == "" {
-								supportsRunnableProgram = false
-								continue
-							}
-							valueExpression := valueSpec.Values[index]
-							switch typedValue := valueExpression.(type) {
-							case *ast.BasicLit:
-								if typedValue.Kind != token.INT {
+							if valueSpec.Type != nil {
+								typeIdent, ok := valueSpec.Type.(*ast.Ident)
+								if !ok || typeIdent.Name != "int" {
 									supportsRunnableProgram = false
 									continue
 								}
-								topLevelConstants[name.Name] = struct{}{}
-								constantOrder = append(constantOrder, name.Name)
-								topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", name.Name, typedValue.Value)
-							case *ast.UnaryExpr:
-								if typedValue.Op != token.SUB {
-									supportsRunnableProgram = false
-									continue
-								}
-								basicValue, ok := typedValue.X.(*ast.BasicLit)
-								if !ok || basicValue.Kind != token.INT {
-									supportsRunnableProgram = false
-									continue
-								}
-								topLevelConstants[name.Name] = struct{}{}
-								constantOrder = append(constantOrder, name.Name)
-								topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = -%s;\n", name.Name, basicValue.Value)
-							default:
-								supportsRunnableProgram = false
 							}
-						}
-					}
-				case *ast.FuncDecl:
-					if typedDecl.Recv != nil || typedDecl.Type == nil || typedDecl.Name == nil || typedDecl.Name.Name == "" || typedDecl.Body == nil || typedDecl.Type.TypeParams != nil {
-						supportsRunnableProgram = false
-						continue
-					}
-					functionName := typedDecl.Name.Name
-					functionParameters := make([]string, 0)
-					functionParameterDecls := make([]string, 0)
-					if typedDecl.Type.Params != nil {
-						for _, field := range typedDecl.Type.Params.List {
-							typeIdent, ok := field.Type.(*ast.Ident)
-							if !ok || typeIdent.Name != "int" || len(field.Names) == 0 {
-								supportsRunnableProgram = false
-								continue
-							}
-							for _, name := range field.Names {
+							for index, name := range valueSpec.Names {
 								if name == nil || name.Name == "" {
 									supportsRunnableProgram = false
 									continue
 								}
-								functionParameters = append(functionParameters, name.Name)
-								functionParameterDecls = append(functionParameterDecls, fmt.Sprintf("int %s", name.Name))
+								valueExpression := valueSpec.Values[index]
+								switch typedValue := valueExpression.(type) {
+								case *ast.BasicLit:
+									if typedValue.Kind != token.INT {
+										supportsRunnableProgram = false
+										continue
+									}
+									topLevelConstants[name.Name] = struct{}{}
+									constantOrder = append(constantOrder, name.Name)
+									topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", name.Name, typedValue.Value)
+								case *ast.UnaryExpr:
+									if typedValue.Op != token.SUB {
+										supportsRunnableProgram = false
+										continue
+									}
+									basicValue, ok := typedValue.X.(*ast.BasicLit)
+									if !ok || basicValue.Kind != token.INT {
+										supportsRunnableProgram = false
+										continue
+									}
+									topLevelConstants[name.Name] = struct{}{}
+									constantOrder = append(constantOrder, name.Name)
+									topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = -%s;\n", name.Name, basicValue.Value)
+								default:
+									supportsRunnableProgram = false
+								}
 							}
 						}
-					}
-					functionReturnsInt := false
-					if typedDecl.Type.Results != nil {
-						if len(typedDecl.Type.Results.List) != 1 {
+					case *ast.FuncDecl:
+						if typedDecl.Recv != nil || typedDecl.Type == nil || typedDecl.Name == nil || typedDecl.Name.Name == "" || typedDecl.Body == nil || typedDecl.Type.TypeParams != nil {
 							supportsRunnableProgram = false
 							continue
 						}
-						resultField := typedDecl.Type.Results.List[0]
-						typeIdent, ok := resultField.Type.(*ast.Ident)
-						if !ok || typeIdent.Name != "int" || len(resultField.Names) > 1 {
-							supportsRunnableProgram = false
-							continue
+						functionName := typedDecl.Name.Name
+						functionParameters := make([]string, 0)
+						functionParameterDecls := make([]string, 0)
+						if typedDecl.Type.Params != nil {
+							for _, field := range typedDecl.Type.Params.List {
+								typeIdent, ok := field.Type.(*ast.Ident)
+								if !ok || typeIdent.Name != "int" || len(field.Names) == 0 {
+									supportsRunnableProgram = false
+									continue
+								}
+								for _, name := range field.Names {
+									if name == nil || name.Name == "" {
+										supportsRunnableProgram = false
+										continue
+									}
+									functionParameters = append(functionParameters, name.Name)
+									functionParameterDecls = append(functionParameterDecls, fmt.Sprintf("int %s", name.Name))
+								}
+							}
 						}
-						functionReturnsInt = true
-					}
-					if functionName == "main" {
-						if functionReturnsInt || len(functionParameters) != 0 {
-							supportsRunnableProgram = false
-							continue
+						functionReturnsInt := false
+						if typedDecl.Type.Results != nil {
+							if len(typedDecl.Type.Results.List) != 1 {
+								supportsRunnableProgram = false
+								continue
+							}
+							resultField := typedDecl.Type.Results.List[0]
+							typeIdent, ok := resultField.Type.(*ast.Ident)
+							if !ok || typeIdent.Name != "int" || len(resultField.Names) > 1 {
+								supportsRunnableProgram = false
+								continue
+							}
+							functionReturnsInt = true
 						}
-						topLevelFunctionDefinitions[functionName] = "int main(void);\n"
-					} else if functionReturnsInt {
-						topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static int %s(%s);\n", functionName, strings.Join(functionParameterDecls, ", "))
-					} else {
-						topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static void %s(%s);\n", functionName, strings.Join(functionParameterDecls, ", "))
-					}
+						if functionName == "main" {
+							if functionReturnsInt || len(functionParameters) != 0 {
+								supportsRunnableProgram = false
+								continue
+							}
+							topLevelFunctionDefinitions[functionName] = "int main(void);\n"
+						} else if functionReturnsInt {
+							topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static int %s(%s);\n", functionName, strings.Join(functionParameterDecls, ", "))
+						} else {
+							topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static void %s(%s);\n", functionName, strings.Join(functionParameterDecls, ", "))
+						}
 						topLevelFunctionReturnsInt[functionName] = functionReturnsInt
 						topLevelFunctionParameters[functionName] = append([]string{}, functionParameters...)
 						functionOrder = append(functionOrder, functionName)
@@ -2901,27 +2902,27 @@ func Build(input Input) (Result, error) {
 				supportsRunnableProgram = false
 			}
 			if supportsRunnableProgram {
-					resolveImportedSelector := func(expression ast.Expr) (string, string, bool) {
-						selectorExpression, ok := expression.(*ast.SelectorExpr)
-						if !ok {
-							return "", "", false
-						}
-						packageIdent, ok := selectorExpression.X.(*ast.Ident)
-						if !ok || selectorExpression.Sel == nil {
-							return "", "", false
-						}
-						importPath, ok := aliasToImportPath[packageIdent.Name]
-						if !ok {
-							return "", "", false
-						}
-						return importPath, selectorExpression.Sel.Name, true
+				resolveImportedSelector := func(expression ast.Expr) (string, string, bool) {
+					selectorExpression, ok := expression.(*ast.SelectorExpr)
+					if !ok {
+						return "", "", false
 					}
-					var translateExpression func(ast.Expr, map[string]string) (string, string, int, bool)
-					translateExpression = func(expression ast.Expr, locals map[string]string) (string, string, int, bool) {
-						switch typedExpression := expression.(type) {
-						case *ast.BasicLit:
-							if typedExpression.Kind == token.INT {
-								return typedExpression.Value, "int", 0, true
+					packageIdent, ok := selectorExpression.X.(*ast.Ident)
+					if !ok || selectorExpression.Sel == nil {
+						return "", "", false
+					}
+					importPath, ok := aliasToImportPath[packageIdent.Name]
+					if !ok {
+						return "", "", false
+					}
+					return importPath, selectorExpression.Sel.Name, true
+				}
+				var translateExpression func(ast.Expr, map[string]string) (string, string, int, bool)
+				translateExpression = func(expression ast.Expr, locals map[string]string) (string, string, int, bool) {
+					switch typedExpression := expression.(type) {
+					case *ast.BasicLit:
+						if typedExpression.Kind == token.INT {
+							return typedExpression.Value, "int", 0, true
 						}
 						if typedExpression.Kind == token.STRING {
 							unquotedValue, err := strconv.Unquote(typedExpression.Value)
@@ -2929,55 +2930,55 @@ func Build(input Input) (Result, error) {
 								return "", "", 0, false
 							}
 							return strconv.Quote(unquotedValue), "string", len([]byte(unquotedValue)), true
-							}
+						}
+						return "", "", 0, false
+					case *ast.Ident:
+						if localKind, ok := locals[typedExpression.Name]; ok {
+							return typedExpression.Name, localKind, 0, true
+						}
+						if _, ok := topLevelConstants[typedExpression.Name]; ok {
+							return typedExpression.Name, "int", 0, true
+						}
+						if typedExpression.Name == "nil" {
+							return "0", "nil", 0, true
+						}
+						return "", "", 0, false
+					case *ast.BinaryExpr:
+						leftValue, leftKind, _, leftOK := translateExpression(typedExpression.X, locals)
+						rightValue, rightKind, _, rightOK := translateExpression(typedExpression.Y, locals)
+						if !leftOK || !rightOK {
 							return "", "", 0, false
-						case *ast.Ident:
-							if localKind, ok := locals[typedExpression.Name]; ok {
-								return typedExpression.Name, localKind, 0, true
-							}
-							if _, ok := topLevelConstants[typedExpression.Name]; ok {
-								return typedExpression.Name, "int", 0, true
-							}
-							if typedExpression.Name == "nil" {
-								return "0", "nil", 0, true
-							}
-							return "", "", 0, false
-						case *ast.BinaryExpr:
-							leftValue, leftKind, _, leftOK := translateExpression(typedExpression.X, locals)
-							rightValue, rightKind, _, rightOK := translateExpression(typedExpression.Y, locals)
-							if !leftOK || !rightOK {
+						}
+						switch typedExpression.Op {
+						case token.ADD, token.SUB, token.MUL, token.QUO, token.REM:
+							if leftKind != "int" || rightKind != "int" {
 								return "", "", 0, false
 							}
-							switch typedExpression.Op {
-							case token.ADD, token.SUB, token.MUL, token.QUO, token.REM:
-								if leftKind != "int" || rightKind != "int" {
+							return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+						case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ:
+							leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
+							rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
+							if !leftComparable || !rightComparable {
+								return "", "", 0, false
+							}
+							return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+						default:
+							return "", "", 0, false
+						}
+					case *ast.CallExpr:
+						if importPath, selectorName, ok := resolveImportedSelector(typedExpression.Fun); ok {
+							if importPath == "strings" && selectorName == "TrimSpace" && len(typedExpression.Args) == 1 {
+								translatedArgument, argumentKind, _, argumentOK := translateExpression(typedExpression.Args[0], locals)
+								if !argumentOK || argumentKind != "string" {
 									return "", "", 0, false
 								}
-								return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
-							case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ:
-								leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
-								rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
-								if !leftComparable || !rightComparable {
-									return "", "", 0, false
-								}
-								return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
-							default:
-								return "", "", 0, false
+								return fmt.Sprintf("tinygo_runtime_trim_space(%s)", translatedArgument), "string", 0, true
 							}
-						case *ast.CallExpr:
-							if importPath, selectorName, ok := resolveImportedSelector(typedExpression.Fun); ok {
-								if importPath == "strings" && selectorName == "TrimSpace" && len(typedExpression.Args) == 1 {
-									translatedArgument, argumentKind, _, argumentOK := translateExpression(typedExpression.Args[0], locals)
-									if !argumentOK || argumentKind != "string" {
-										return "", "", 0, false
-									}
-									return fmt.Sprintf("tinygo_runtime_trim_space(%s)", translatedArgument), "string", 0, true
-								}
-								return "", "", 0, false
-							}
-							functionIdent, ok := typedExpression.Fun.(*ast.Ident)
-							if !ok {
-								return "", "", 0, false
+							return "", "", 0, false
+						}
+						functionIdent, ok := typedExpression.Fun.(*ast.Ident)
+						if !ok {
+							return "", "", 0, false
 						}
 						functionName := functionIdent.Name
 						returnsInt, ok := topLevelFunctionReturnsInt[functionName]
@@ -2995,10 +2996,10 @@ func Build(input Input) (Result, error) {
 								return "", "", 0, false
 							}
 							translatedArgs = append(translatedArgs, translatedArgument)
-							}
-							return fmt.Sprintf("%s(%s)", functionName, strings.Join(translatedArgs, ", ")), "int", 0, true
-						case *ast.ParenExpr:
-							return translateExpression(typedExpression.X, locals)
+						}
+						return fmt.Sprintf("%s(%s)", functionName, strings.Join(translatedArgs, ", ")), "int", 0, true
+					case *ast.ParenExpr:
+						return translateExpression(typedExpression.X, locals)
 					case *ast.UnaryExpr:
 						translatedValue, translatedKind, _, translatedOK := translateExpression(typedExpression.X, locals)
 						if !translatedOK || translatedKind != "int" {
@@ -3010,25 +3011,25 @@ func Build(input Input) (Result, error) {
 						default:
 							return "", "", 0, false
 						}
-						default:
-							return "", "", 0, false
-						}
+					default:
+						return "", "", 0, false
 					}
-					var translateStatementList func([]ast.Stmt, map[string]string, bool) (string, bool)
-					translateStatementList = func(statements []ast.Stmt, locals map[string]string, functionReturnsInt bool) (string, bool) {
-						var translatedStatements strings.Builder
-						for _, statement := range statements {
-							switch typedStatement := statement.(type) {
-							case *ast.ExprStmt:
-								callExpression, ok := typedStatement.X.(*ast.CallExpr)
+				}
+				var translateStatementList func([]ast.Stmt, map[string]string, bool) (string, bool)
+				translateStatementList = func(statements []ast.Stmt, locals map[string]string, functionReturnsInt bool) (string, bool) {
+					var translatedStatements strings.Builder
+					for _, statement := range statements {
+						switch typedStatement := statement.(type) {
+						case *ast.ExprStmt:
+							callExpression, ok := typedStatement.X.(*ast.CallExpr)
 							if !ok {
 								return "", false
 							}
-								callIdent, callIdentOK := callExpression.Fun.(*ast.Ident)
-								if callIdentOK && (callIdent.Name == "print" || callIdent.Name == "println") {
-									for argumentIndex, argument := range callExpression.Args {
-										translatedArgument, argumentKind, byteLength, argumentOK := translateExpression(argument, locals)
-										if !argumentOK {
+							callIdent, callIdentOK := callExpression.Fun.(*ast.Ident)
+							if callIdentOK && (callIdent.Name == "print" || callIdent.Name == "println") {
+								for argumentIndex, argument := range callExpression.Args {
+									translatedArgument, argumentKind, byteLength, argumentOK := translateExpression(argument, locals)
+									if !argumentOK {
 										return "", false
 									}
 									newline := 0
@@ -3044,179 +3045,179 @@ func Build(input Input) (Result, error) {
 										return "", false
 									}
 								}
-									if callIdent.Name == "println" && len(callExpression.Args) == 0 {
-										translatedStatements.WriteString("\ttinygo_runtime_print_newline();\n")
+								if callIdent.Name == "println" && len(callExpression.Args) == 0 {
+									translatedStatements.WriteString("\ttinygo_runtime_print_newline();\n")
+								}
+								continue
+							}
+							if importPath, selectorName, ok := resolveImportedSelector(callExpression.Fun); ok {
+								if importPath == "fmt" && selectorName == "Printf" && len(callExpression.Args) == 2 {
+									formatArgument, ok := callExpression.Args[0].(*ast.BasicLit)
+									if !ok || formatArgument.Kind != token.STRING {
+										return "", false
+									}
+									formatValue, err := strconv.Unquote(formatArgument.Value)
+									if err != nil {
+										return "", false
+									}
+									placeholderIndex := strings.Index(formatValue, "%d")
+									if placeholderIndex < 0 || strings.Count(formatValue, "%d") != 1 {
+										return "", false
+									}
+									translatedArgument, argumentKind, _, argumentOK := translateExpression(callExpression.Args[1], locals)
+									if !argumentOK || argumentKind != "int" {
+										return "", false
+									}
+									prefix := formatValue[:placeholderIndex]
+									suffix := formatValue[placeholderIndex+2:]
+									if prefix != "" {
+										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(prefix), len([]byte(prefix))))
+									}
+									translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, 0);\n", translatedArgument))
+									if suffix != "" {
+										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(suffix), len([]byte(suffix))))
 									}
 									continue
 								}
-								if importPath, selectorName, ok := resolveImportedSelector(callExpression.Fun); ok {
-									if importPath == "fmt" && selectorName == "Printf" && len(callExpression.Args) == 2 {
-										formatArgument, ok := callExpression.Args[0].(*ast.BasicLit)
-										if !ok || formatArgument.Kind != token.STRING {
-											return "", false
-										}
-										formatValue, err := strconv.Unquote(formatArgument.Value)
-										if err != nil {
-											return "", false
-										}
-										placeholderIndex := strings.Index(formatValue, "%d")
-										if placeholderIndex < 0 || strings.Count(formatValue, "%d") != 1 {
-											return "", false
-										}
-										translatedArgument, argumentKind, _, argumentOK := translateExpression(callExpression.Args[1], locals)
-										if !argumentOK || argumentKind != "int" {
-											return "", false
-										}
-										prefix := formatValue[:placeholderIndex]
-										suffix := formatValue[placeholderIndex+2:]
-										if prefix != "" {
-											translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(prefix), len([]byte(prefix))))
-										}
-										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, 0);\n", translatedArgument))
-										if suffix != "" {
-											translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(suffix), len([]byte(suffix))))
-										}
-										continue
-									}
-									if importedSymbolMap, ok := importedRunnableSymbolsByPath[importPath]; ok {
-										if len(callExpression.Args) != 0 {
-											return "", false
-										}
-										symbolName, ok := importedSymbolMap[selectorName]
-										if !ok || symbolName == "" {
-											return "", false
-										}
-										translatedStatements.WriteString(fmt.Sprintf("\t%s();\n", symbolName))
-										continue
-									}
-									return "", false
-								}
-								if !callIdentOK {
-									return "", false
-								}
-								returnsInt := topLevelFunctionReturnsInt[callIdent.Name]
-								translatedCall, argumentKind, _, callOK := translateExpression(callExpression, locals)
-								if !callOK || argumentKind != "int" && returnsInt {
-									return "", false
-								}
-								translatedStatements.WriteString(fmt.Sprintf("\t%s;\n", translatedCall))
-							case *ast.AssignStmt:
-								if len(typedStatement.Rhs) != 1 {
-									return "", false
-								}
-								rightCall, rightCallOK := typedStatement.Rhs[0].(*ast.CallExpr)
-								if typedStatement.Tok == token.DEFINE && len(typedStatement.Lhs) == 2 && rightCallOK {
-									if importPath, selectorName, ok := resolveImportedSelector(rightCall.Fun); ok && importPath == "strconv" && selectorName == "Atoi" {
-										firstName, firstOK := typedStatement.Lhs[0].(*ast.Ident)
-										secondName, secondOK := typedStatement.Lhs[1].(*ast.Ident)
-										if !firstOK || !secondOK || firstName.Name == "" || secondName.Name == "" || firstName.Name == "_" || secondName.Name == "_" {
-											return "", false
-										}
-										if len(rightCall.Args) != 1 {
-											return "", false
-										}
-										translatedArgument, argumentKind, _, argumentOK := translateExpression(rightCall.Args[0], locals)
-										if !argumentOK || argumentKind != "string" {
-											return "", false
-										}
-										locals[firstName.Name] = "int"
-										locals[secondName.Name] = "error"
-										translatedStatements.WriteString(fmt.Sprintf("\tint %s = 0;\n", firstName.Name))
-										translatedStatements.WriteString(fmt.Sprintf("\tint %s = tinygo_runtime_parse_i32(%s, &%s);\n", secondName.Name, translatedArgument, firstName.Name))
-										continue
-									}
-									readStringSelector, readStringSelectorOK := rightCall.Fun.(*ast.SelectorExpr)
-									if readStringSelectorOK && readStringSelector.Sel != nil && readStringSelector.Sel.Name == "ReadString" && len(rightCall.Args) == 1 {
-										readerCall, readerCallOK := readStringSelector.X.(*ast.CallExpr)
-										if !readerCallOK {
-											return "", false
-										}
-										importPath, selectorName, ok := resolveImportedSelector(readerCall.Fun)
-										if !ok || importPath != "bufio" || selectorName != "NewReader" || len(readerCall.Args) != 1 {
-											return "", false
-										}
-										stdinImportPath, stdinSelectorName, ok := resolveImportedSelector(readerCall.Args[0])
-										if !ok || stdinImportPath != "os" || stdinSelectorName != "Stdin" {
-											return "", false
-										}
-										delimiterLiteral, ok := rightCall.Args[0].(*ast.BasicLit)
-										if !ok || delimiterLiteral.Kind != token.CHAR || delimiterLiteral.Value != "'\\n'" {
-											return "", false
-										}
-										firstName, firstOK := typedStatement.Lhs[0].(*ast.Ident)
-										secondName, secondOK := typedStatement.Lhs[1].(*ast.Ident)
-										if !firstOK || !secondOK || firstName.Name == "" || firstName.Name == "_" || secondName.Name != "_" {
-											return "", false
-										}
-										locals[firstName.Name] = "string"
-										translatedStatements.WriteString(fmt.Sprintf("\tchar %s[256];\n", firstName.Name))
-										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_read_line(%s, 256u);\n", firstName.Name))
-										continue
-									}
-								}
-								if len(typedStatement.Lhs) != 1 {
-									return "", false
-								}
-								leftName, ok := typedStatement.Lhs[0].(*ast.Ident)
-								if !ok || leftName.Name == "" {
-									return "", false
-								}
-								translatedValue, translatedKind, _, translatedOK := translateExpression(typedStatement.Rhs[0], locals)
-								if !translatedOK {
-									return "", false
-								}
-								if typedStatement.Tok == token.DEFINE {
-									if leftName.Name == "_" {
+								if importedSymbolMap, ok := importedRunnableSymbolsByPath[importPath]; ok {
+									if len(callExpression.Args) != 0 {
 										return "", false
 									}
-									if translatedKind != "int" && translatedKind != "string" && translatedKind != "error" {
+									symbolName, ok := importedSymbolMap[selectorName]
+									if !ok || symbolName == "" {
 										return "", false
 									}
-									locals[leftName.Name] = translatedKind
-									switch translatedKind {
-									case "int", "error":
-										translatedStatements.WriteString(fmt.Sprintf("\tint %s = %s;\n", leftName.Name, translatedValue))
-									case "string":
-										translatedStatements.WriteString(fmt.Sprintf("\tchar *%s = %s;\n", leftName.Name, translatedValue))
-									default:
-										return "", false
-									}
+									translatedStatements.WriteString(fmt.Sprintf("\t%s();\n", symbolName))
 									continue
 								}
-								if typedStatement.Tok != token.ASSIGN {
-									return "", false
+								return "", false
+							}
+							if !callIdentOK {
+								return "", false
+							}
+							returnsInt := topLevelFunctionReturnsInt[callIdent.Name]
+							translatedCall, argumentKind, _, callOK := translateExpression(callExpression, locals)
+							if !callOK || argumentKind != "int" && returnsInt {
+								return "", false
+							}
+							translatedStatements.WriteString(fmt.Sprintf("\t%s;\n", translatedCall))
+						case *ast.AssignStmt:
+							if len(typedStatement.Rhs) != 1 {
+								return "", false
+							}
+							rightCall, rightCallOK := typedStatement.Rhs[0].(*ast.CallExpr)
+							if typedStatement.Tok == token.DEFINE && len(typedStatement.Lhs) == 2 && rightCallOK {
+								if importPath, selectorName, ok := resolveImportedSelector(rightCall.Fun); ok && importPath == "strconv" && selectorName == "Atoi" {
+									firstName, firstOK := typedStatement.Lhs[0].(*ast.Ident)
+									secondName, secondOK := typedStatement.Lhs[1].(*ast.Ident)
+									if !firstOK || !secondOK || firstName.Name == "" || secondName.Name == "" || firstName.Name == "_" || secondName.Name == "_" {
+										return "", false
+									}
+									if len(rightCall.Args) != 1 {
+										return "", false
+									}
+									translatedArgument, argumentKind, _, argumentOK := translateExpression(rightCall.Args[0], locals)
+									if !argumentOK || argumentKind != "string" {
+										return "", false
+									}
+									locals[firstName.Name] = "int"
+									locals[secondName.Name] = "error"
+									translatedStatements.WriteString(fmt.Sprintf("\tint %s = 0;\n", firstName.Name))
+									translatedStatements.WriteString(fmt.Sprintf("\tint %s = tinygo_runtime_parse_i32(%s, &%s);\n", secondName.Name, translatedArgument, firstName.Name))
+									continue
 								}
+								readStringSelector, readStringSelectorOK := rightCall.Fun.(*ast.SelectorExpr)
+								if readStringSelectorOK && readStringSelector.Sel != nil && readStringSelector.Sel.Name == "ReadString" && len(rightCall.Args) == 1 {
+									readerCall, readerCallOK := readStringSelector.X.(*ast.CallExpr)
+									if !readerCallOK {
+										return "", false
+									}
+									importPath, selectorName, ok := resolveImportedSelector(readerCall.Fun)
+									if !ok || importPath != "bufio" || selectorName != "NewReader" || len(readerCall.Args) != 1 {
+										return "", false
+									}
+									stdinImportPath, stdinSelectorName, ok := resolveImportedSelector(readerCall.Args[0])
+									if !ok || stdinImportPath != "os" || stdinSelectorName != "Stdin" {
+										return "", false
+									}
+									delimiterLiteral, ok := rightCall.Args[0].(*ast.BasicLit)
+									if !ok || delimiterLiteral.Kind != token.CHAR || delimiterLiteral.Value != "'\\n'" {
+										return "", false
+									}
+									firstName, firstOK := typedStatement.Lhs[0].(*ast.Ident)
+									secondName, secondOK := typedStatement.Lhs[1].(*ast.Ident)
+									if !firstOK || !secondOK || firstName.Name == "" || firstName.Name == "_" || secondName.Name != "_" {
+										return "", false
+									}
+									locals[firstName.Name] = "string"
+									translatedStatements.WriteString(fmt.Sprintf("\tchar %s[256];\n", firstName.Name))
+									translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_read_line(%s, 256u);\n", firstName.Name))
+									continue
+								}
+							}
+							if len(typedStatement.Lhs) != 1 {
+								return "", false
+							}
+							leftName, ok := typedStatement.Lhs[0].(*ast.Ident)
+							if !ok || leftName.Name == "" {
+								return "", false
+							}
+							translatedValue, translatedKind, _, translatedOK := translateExpression(typedStatement.Rhs[0], locals)
+							if !translatedOK {
+								return "", false
+							}
+							if typedStatement.Tok == token.DEFINE {
 								if leftName.Name == "_" {
-									continue
-								}
-								localKind, ok := locals[leftName.Name]
-								if !ok {
 									return "", false
 								}
-								if localKind != translatedKind && !(localKind == "error" && translatedKind == "int") {
+								if translatedKind != "int" && translatedKind != "string" && translatedKind != "error" {
 									return "", false
 								}
-								translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftName.Name, translatedValue))
-							case *ast.IncDecStmt:
-								ident, ok := typedStatement.X.(*ast.Ident)
-								if !ok || ident.Name == "" {
-									return "", false
-								}
-								localKind, ok := locals[ident.Name]
-								if !ok || localKind != "int" {
-									return "", false
-								}
-								switch typedStatement.Tok {
-								case token.INC:
-									translatedStatements.WriteString(fmt.Sprintf("\t%s += 1;\n", ident.Name))
-								case token.DEC:
-									translatedStatements.WriteString(fmt.Sprintf("\t%s -= 1;\n", ident.Name))
+								locals[leftName.Name] = translatedKind
+								switch translatedKind {
+								case "int", "error":
+									translatedStatements.WriteString(fmt.Sprintf("\tint %s = %s;\n", leftName.Name, translatedValue))
+								case "string":
+									translatedStatements.WriteString(fmt.Sprintf("\tchar *%s = %s;\n", leftName.Name, translatedValue))
 								default:
 									return "", false
 								}
-							case *ast.IfStmt:
-								if typedStatement.Init != nil {
-									return "", false
+								continue
+							}
+							if typedStatement.Tok != token.ASSIGN {
+								return "", false
+							}
+							if leftName.Name == "_" {
+								continue
+							}
+							localKind, ok := locals[leftName.Name]
+							if !ok {
+								return "", false
+							}
+							if localKind != translatedKind && !(localKind == "error" && translatedKind == "int") {
+								return "", false
+							}
+							translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftName.Name, translatedValue))
+						case *ast.IncDecStmt:
+							ident, ok := typedStatement.X.(*ast.Ident)
+							if !ok || ident.Name == "" {
+								return "", false
+							}
+							localKind, ok := locals[ident.Name]
+							if !ok || localKind != "int" {
+								return "", false
+							}
+							switch typedStatement.Tok {
+							case token.INC:
+								translatedStatements.WriteString(fmt.Sprintf("\t%s += 1;\n", ident.Name))
+							case token.DEC:
+								translatedStatements.WriteString(fmt.Sprintf("\t%s -= 1;\n", ident.Name))
+							default:
+								return "", false
+							}
+						case *ast.IfStmt:
+							if typedStatement.Init != nil {
+								return "", false
 							}
 							translatedCondition, conditionKind, _, conditionOK := translateExpression(typedStatement.Cond, locals)
 							if !conditionOK || conditionKind != "int" {
@@ -3247,100 +3248,100 @@ func Build(input Input) (Result, error) {
 									return "", false
 								}
 							}
-							case *ast.ForStmt:
-								loopLocals := map[string]string{}
-								for name, kind := range locals {
-									loopLocals[name] = kind
+						case *ast.ForStmt:
+							loopLocals := map[string]string{}
+							for name, kind := range locals {
+								loopLocals[name] = kind
+							}
+							initFragment := ""
+							if typedStatement.Init != nil {
+								initAssign, ok := typedStatement.Init.(*ast.AssignStmt)
+								if !ok || len(initAssign.Lhs) != 1 || len(initAssign.Rhs) != 1 {
+									return "", false
 								}
-								initFragment := ""
-								if typedStatement.Init != nil {
-									initAssign, ok := typedStatement.Init.(*ast.AssignStmt)
-									if !ok || len(initAssign.Lhs) != 1 || len(initAssign.Rhs) != 1 {
+								leftName, ok := initAssign.Lhs[0].(*ast.Ident)
+								if !ok || leftName.Name == "" || leftName.Name == "_" {
+									return "", false
+								}
+								translatedValue, translatedKind, _, translatedOK := translateExpression(initAssign.Rhs[0], loopLocals)
+								if !translatedOK || translatedKind != "int" {
+									return "", false
+								}
+								switch initAssign.Tok {
+								case token.DEFINE:
+									if _, exists := loopLocals[leftName.Name]; exists {
 										return "", false
 									}
-									leftName, ok := initAssign.Lhs[0].(*ast.Ident)
-									if !ok || leftName.Name == "" || leftName.Name == "_" {
+									loopLocals[leftName.Name] = "int"
+									initFragment = fmt.Sprintf("int %s = %s", leftName.Name, translatedValue)
+								case token.ASSIGN:
+									localKind, ok := loopLocals[leftName.Name]
+									if !ok || localKind != "int" {
 										return "", false
 									}
-									translatedValue, translatedKind, _, translatedOK := translateExpression(initAssign.Rhs[0], loopLocals)
+									initFragment = fmt.Sprintf("%s = %s", leftName.Name, translatedValue)
+								default:
+									return "", false
+								}
+							}
+							conditionFragment := "1"
+							if typedStatement.Cond != nil {
+								translatedCondition, conditionKind, _, conditionOK := translateExpression(typedStatement.Cond, loopLocals)
+								if !conditionOK || conditionKind != "int" {
+									return "", false
+								}
+								conditionFragment = translatedCondition
+							}
+							postFragment := ""
+							if typedStatement.Post != nil {
+								switch postStatement := typedStatement.Post.(type) {
+								case *ast.IncDecStmt:
+									postIdent, ok := postStatement.X.(*ast.Ident)
+									if !ok || postIdent.Name == "" {
+										return "", false
+									}
+									postKind, ok := loopLocals[postIdent.Name]
+									if !ok || postKind != "int" {
+										return "", false
+									}
+									switch postStatement.Tok {
+									case token.INC:
+										postFragment = fmt.Sprintf("%s += 1", postIdent.Name)
+									case token.DEC:
+										postFragment = fmt.Sprintf("%s -= 1", postIdent.Name)
+									default:
+										return "", false
+									}
+								case *ast.AssignStmt:
+									if len(postStatement.Lhs) != 1 || len(postStatement.Rhs) != 1 || postStatement.Tok != token.ASSIGN {
+										return "", false
+									}
+									postName, ok := postStatement.Lhs[0].(*ast.Ident)
+									if !ok || postName.Name == "" || postName.Name == "_" {
+										return "", false
+									}
+									postKind, ok := loopLocals[postName.Name]
+									if !ok || postKind != "int" {
+										return "", false
+									}
+									translatedValue, translatedKind, _, translatedOK := translateExpression(postStatement.Rhs[0], loopLocals)
 									if !translatedOK || translatedKind != "int" {
 										return "", false
 									}
-									switch initAssign.Tok {
-									case token.DEFINE:
-										if _, exists := loopLocals[leftName.Name]; exists {
-											return "", false
-										}
-										loopLocals[leftName.Name] = "int"
-										initFragment = fmt.Sprintf("int %s = %s", leftName.Name, translatedValue)
-									case token.ASSIGN:
-										localKind, ok := loopLocals[leftName.Name]
-										if !ok || localKind != "int" {
-											return "", false
-										}
-										initFragment = fmt.Sprintf("%s = %s", leftName.Name, translatedValue)
-									default:
-										return "", false
-									}
-								}
-								conditionFragment := "1"
-								if typedStatement.Cond != nil {
-									translatedCondition, conditionKind, _, conditionOK := translateExpression(typedStatement.Cond, loopLocals)
-									if !conditionOK || conditionKind != "int" {
-										return "", false
-									}
-									conditionFragment = translatedCondition
-								}
-								postFragment := ""
-								if typedStatement.Post != nil {
-									switch postStatement := typedStatement.Post.(type) {
-									case *ast.IncDecStmt:
-										postIdent, ok := postStatement.X.(*ast.Ident)
-										if !ok || postIdent.Name == "" {
-											return "", false
-										}
-										postKind, ok := loopLocals[postIdent.Name]
-										if !ok || postKind != "int" {
-											return "", false
-										}
-										switch postStatement.Tok {
-										case token.INC:
-											postFragment = fmt.Sprintf("%s += 1", postIdent.Name)
-										case token.DEC:
-											postFragment = fmt.Sprintf("%s -= 1", postIdent.Name)
-										default:
-											return "", false
-										}
-									case *ast.AssignStmt:
-										if len(postStatement.Lhs) != 1 || len(postStatement.Rhs) != 1 || postStatement.Tok != token.ASSIGN {
-											return "", false
-										}
-										postName, ok := postStatement.Lhs[0].(*ast.Ident)
-										if !ok || postName.Name == "" || postName.Name == "_" {
-											return "", false
-										}
-										postKind, ok := loopLocals[postName.Name]
-										if !ok || postKind != "int" {
-											return "", false
-										}
-										translatedValue, translatedKind, _, translatedOK := translateExpression(postStatement.Rhs[0], loopLocals)
-										if !translatedOK || translatedKind != "int" {
-											return "", false
-										}
-										postFragment = fmt.Sprintf("%s = %s", postName.Name, translatedValue)
-									default:
-										return "", false
-									}
-								}
-								translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, loopLocals, functionReturnsInt)
-								if !bodyOK {
+									postFragment = fmt.Sprintf("%s = %s", postName.Name, translatedValue)
+								default:
 									return "", false
 								}
-								translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
-							case *ast.ReturnStmt:
-								if functionReturnsInt {
-									if len(typedStatement.Results) != 1 {
-										return "", false
+							}
+							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, loopLocals, functionReturnsInt)
+							if !bodyOK {
+								return "", false
+							}
+							translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
+						case *ast.ReturnStmt:
+							if functionReturnsInt {
+								if len(typedStatement.Results) != 1 {
+									return "", false
 								}
 								translatedResult, resultKind, _, resultOK := translateExpression(typedStatement.Results[0], locals)
 								if !resultOK || resultKind != "int" {
@@ -3414,96 +3415,96 @@ func Build(input Input) (Result, error) {
 						}
 					}
 				}
-					if supportsRunnableProgram {
-						loweredSourceContents.WriteString("\ntypedef unsigned int tinygo_wasi_size_t;\n")
-						loweredSourceContents.WriteString("typedef unsigned int tinygo_wasi_errno_t;\n")
-						loweredSourceContents.WriteString("typedef unsigned int tinygo_wasi_fd_t;\n")
-						loweredSourceContents.WriteString("typedef struct {\n\tchar *buf;\n\ttinygo_wasi_size_t buf_len;\n} tinygo_wasi_iovec_t;\n")
-						loweredSourceContents.WriteString("typedef struct {\n\tconst char *buf;\n\ttinygo_wasi_size_t buf_len;\n} tinygo_wasi_ciovec_t;\n")
-						runtimeStorage := "static "
-						if len(generatedImportedPrototypes) > 0 {
-							runtimeStorage = ""
-						}
-						loweredSourceContents.WriteString("__attribute__((__import_module__(\"wasi_snapshot_preview1\"), __import_name__(\"fd_read\")))\n")
-						loweredSourceContents.WriteString("extern tinygo_wasi_errno_t tinygo_runtime_fd_read_import(tinygo_wasi_fd_t fd, tinygo_wasi_iovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nread);\n")
-						loweredSourceContents.WriteString("__attribute__((__import_module__(\"wasi_snapshot_preview1\"), __import_name__(\"fd_write\")))\n")
-						loweredSourceContents.WriteString("extern tinygo_wasi_errno_t tinygo_runtime_fd_write_import(tinygo_wasi_fd_t fd, const tinygo_wasi_ciovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nwritten);\n")
-						loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_fd_read(tinygo_wasi_fd_t fd, tinygo_wasi_iovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nread) {\n", runtimeStorage))
-						loweredSourceContents.WriteString("\treturn tinygo_runtime_fd_read_import(fd, iovs, iovs_len, nread);\n")
-						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_fd_write(tinygo_wasi_fd_t fd, const tinygo_wasi_ciovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nwritten) {\n", runtimeStorage))
-						loweredSourceContents.WriteString("\treturn tinygo_runtime_fd_write_import(fd, iovs, iovs_len, nwritten);\n")
-						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_is_space(char value) {\n", runtimeStorage))
-						loweredSourceContents.WriteString("\treturn value == ' ' || value == '\\n' || value == '\\r' || value == '\\t';\n")
-						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_read_line(char *buffer, tinygo_wasi_size_t capacity) {\n", runtimeStorage))
-						loweredSourceContents.WriteString("\tif (capacity == 0u) {\n")
-						loweredSourceContents.WriteString("\t\treturn 0u;\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\ttinygo_wasi_size_t length = 0u;\n")
-						loweredSourceContents.WriteString("\twhile (length + 1u < capacity) {\n")
-						loweredSourceContents.WriteString("\t\ttinygo_wasi_iovec_t iovec = { buffer + length, 1u };\n")
-						loweredSourceContents.WriteString("\t\ttinygo_wasi_size_t nread = 0u;\n")
-						loweredSourceContents.WriteString("\t\tif (tinygo_runtime_fd_read(0u, &iovec, 1u, &nread) != 0u || nread == 0u) {\n")
-						loweredSourceContents.WriteString("\t\t\tbreak;\n")
-						loweredSourceContents.WriteString("\t\t}\n")
-						loweredSourceContents.WriteString("\t\tif (buffer[length] == '\\n') {\n")
-						loweredSourceContents.WriteString("\t\t\tlength += 1u;\n")
-						loweredSourceContents.WriteString("\t\t\tbreak;\n")
-						loweredSourceContents.WriteString("\t\t}\n")
-						loweredSourceContents.WriteString("\t\tlength += 1u;\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\tbuffer[length] = '\\0';\n")
-						loweredSourceContents.WriteString("\treturn length;\n")
-						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString(fmt.Sprintf("%schar *tinygo_runtime_trim_space(char *value) {\n", runtimeStorage))
-						loweredSourceContents.WriteString("\twhile (*value != '\\0' && tinygo_runtime_is_space(*value)) {\n")
-						loweredSourceContents.WriteString("\t\tvalue += 1;\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\ttinygo_wasi_size_t length = 0u;\n")
-						loweredSourceContents.WriteString("\twhile (value[length] != '\\0') {\n")
-						loweredSourceContents.WriteString("\t\tlength += 1u;\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\twhile (length > 0u && tinygo_runtime_is_space(value[length - 1u])) {\n")
-						loweredSourceContents.WriteString("\t\tvalue[length - 1u] = '\\0';\n")
-						loweredSourceContents.WriteString("\t\tlength -= 1u;\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\treturn value;\n")
-						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_parse_i32(char *value, int *out) {\n", runtimeStorage))
-						loweredSourceContents.WriteString("\ttinygo_wasi_size_t index = 0u;\n")
-						loweredSourceContents.WriteString("\tint negative = 0;\n")
-						loweredSourceContents.WriteString("\tint parsed = 0;\n")
-						loweredSourceContents.WriteString("\tif (value[0] == '\\0') {\n")
-						loweredSourceContents.WriteString("\t\t*out = 0;\n")
-						loweredSourceContents.WriteString("\t\treturn 1;\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\tif (value[index] == '-' || value[index] == '+') {\n")
-						loweredSourceContents.WriteString("\t\tnegative = value[index] == '-';\n")
-						loweredSourceContents.WriteString("\t\tindex += 1u;\n")
-						loweredSourceContents.WriteString("\t\tif (value[index] == '\\0') {\n")
-						loweredSourceContents.WriteString("\t\t\t*out = 0;\n")
-						loweredSourceContents.WriteString("\t\t\treturn 1;\n")
-						loweredSourceContents.WriteString("\t\t}\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\tfor (; value[index] != '\\0'; index += 1u) {\n")
-						loweredSourceContents.WriteString("\t\tchar digit = value[index];\n")
-						loweredSourceContents.WriteString("\t\tif (digit < '0' || digit > '9') {\n")
-						loweredSourceContents.WriteString("\t\t\t*out = 0;\n")
-						loweredSourceContents.WriteString("\t\t\treturn 1;\n")
-						loweredSourceContents.WriteString("\t\t}\n")
-						loweredSourceContents.WriteString("\t\tparsed = (parsed * 10) + (digit - '0');\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\tif (negative) {\n")
-						loweredSourceContents.WriteString("\t\tparsed = 0 - parsed;\n")
-						loweredSourceContents.WriteString("\t}\n")
-						loweredSourceContents.WriteString("\t*out = parsed;\n")
-						loweredSourceContents.WriteString("\treturn 0;\n")
-						loweredSourceContents.WriteString("}\n")
-						loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_write(const char *value, tinygo_wasi_size_t len) {\n", runtimeStorage))
-						loweredSourceContents.WriteString("\ttinygo_wasi_ciovec_t iovec = { value, len };\n")
-						loweredSourceContents.WriteString("\ttinygo_wasi_size_t nwritten = 0u;\n")
+				if supportsRunnableProgram {
+					loweredSourceContents.WriteString("\ntypedef unsigned int tinygo_wasi_size_t;\n")
+					loweredSourceContents.WriteString("typedef unsigned int tinygo_wasi_errno_t;\n")
+					loweredSourceContents.WriteString("typedef unsigned int tinygo_wasi_fd_t;\n")
+					loweredSourceContents.WriteString("typedef struct {\n\tchar *buf;\n\ttinygo_wasi_size_t buf_len;\n} tinygo_wasi_iovec_t;\n")
+					loweredSourceContents.WriteString("typedef struct {\n\tconst char *buf;\n\ttinygo_wasi_size_t buf_len;\n} tinygo_wasi_ciovec_t;\n")
+					runtimeStorage := "static "
+					if len(generatedImportedPrototypes) > 0 {
+						runtimeStorage = ""
+					}
+					loweredSourceContents.WriteString("__attribute__((__import_module__(\"wasi_snapshot_preview1\"), __import_name__(\"fd_read\")))\n")
+					loweredSourceContents.WriteString("extern tinygo_wasi_errno_t tinygo_runtime_fd_read_import(tinygo_wasi_fd_t fd, tinygo_wasi_iovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nread);\n")
+					loweredSourceContents.WriteString("__attribute__((__import_module__(\"wasi_snapshot_preview1\"), __import_name__(\"fd_write\")))\n")
+					loweredSourceContents.WriteString("extern tinygo_wasi_errno_t tinygo_runtime_fd_write_import(tinygo_wasi_fd_t fd, const tinygo_wasi_ciovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nwritten);\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_fd_read(tinygo_wasi_fd_t fd, tinygo_wasi_iovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nread) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\treturn tinygo_runtime_fd_read_import(fd, iovs, iovs_len, nread);\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_fd_write(tinygo_wasi_fd_t fd, const tinygo_wasi_ciovec_t *iovs, tinygo_wasi_size_t iovs_len, tinygo_wasi_size_t *nwritten) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\treturn tinygo_runtime_fd_write_import(fd, iovs, iovs_len, nwritten);\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_is_space(char value) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\treturn value == ' ' || value == '\\n' || value == '\\r' || value == '\\t';\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%sunsigned int tinygo_runtime_read_line(char *buffer, tinygo_wasi_size_t capacity) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\tif (capacity == 0u) {\n")
+					loweredSourceContents.WriteString("\t\treturn 0u;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\ttinygo_wasi_size_t length = 0u;\n")
+					loweredSourceContents.WriteString("\twhile (length + 1u < capacity) {\n")
+					loweredSourceContents.WriteString("\t\ttinygo_wasi_iovec_t iovec = { buffer + length, 1u };\n")
+					loweredSourceContents.WriteString("\t\ttinygo_wasi_size_t nread = 0u;\n")
+					loweredSourceContents.WriteString("\t\tif (tinygo_runtime_fd_read(0u, &iovec, 1u, &nread) != 0u || nread == 0u) {\n")
+					loweredSourceContents.WriteString("\t\t\tbreak;\n")
+					loweredSourceContents.WriteString("\t\t}\n")
+					loweredSourceContents.WriteString("\t\tif (buffer[length] == '\\n') {\n")
+					loweredSourceContents.WriteString("\t\t\tlength += 1u;\n")
+					loweredSourceContents.WriteString("\t\t\tbreak;\n")
+					loweredSourceContents.WriteString("\t\t}\n")
+					loweredSourceContents.WriteString("\t\tlength += 1u;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\tbuffer[length] = '\\0';\n")
+					loweredSourceContents.WriteString("\treturn length;\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%schar *tinygo_runtime_trim_space(char *value) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\twhile (*value != '\\0' && tinygo_runtime_is_space(*value)) {\n")
+					loweredSourceContents.WriteString("\t\tvalue += 1;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\ttinygo_wasi_size_t length = 0u;\n")
+					loweredSourceContents.WriteString("\twhile (value[length] != '\\0') {\n")
+					loweredSourceContents.WriteString("\t\tlength += 1u;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\twhile (length > 0u && tinygo_runtime_is_space(value[length - 1u])) {\n")
+					loweredSourceContents.WriteString("\t\tvalue[length - 1u] = '\\0';\n")
+					loweredSourceContents.WriteString("\t\tlength -= 1u;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\treturn value;\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_parse_i32(char *value, int *out) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\ttinygo_wasi_size_t index = 0u;\n")
+					loweredSourceContents.WriteString("\tint negative = 0;\n")
+					loweredSourceContents.WriteString("\tint parsed = 0;\n")
+					loweredSourceContents.WriteString("\tif (value[0] == '\\0') {\n")
+					loweredSourceContents.WriteString("\t\t*out = 0;\n")
+					loweredSourceContents.WriteString("\t\treturn 1;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\tif (value[index] == '-' || value[index] == '+') {\n")
+					loweredSourceContents.WriteString("\t\tnegative = value[index] == '-';\n")
+					loweredSourceContents.WriteString("\t\tindex += 1u;\n")
+					loweredSourceContents.WriteString("\t\tif (value[index] == '\\0') {\n")
+					loweredSourceContents.WriteString("\t\t\t*out = 0;\n")
+					loweredSourceContents.WriteString("\t\t\treturn 1;\n")
+					loweredSourceContents.WriteString("\t\t}\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\tfor (; value[index] != '\\0'; index += 1u) {\n")
+					loweredSourceContents.WriteString("\t\tchar digit = value[index];\n")
+					loweredSourceContents.WriteString("\t\tif (digit < '0' || digit > '9') {\n")
+					loweredSourceContents.WriteString("\t\t\t*out = 0;\n")
+					loweredSourceContents.WriteString("\t\t\treturn 1;\n")
+					loweredSourceContents.WriteString("\t\t}\n")
+					loweredSourceContents.WriteString("\t\tparsed = (parsed * 10) + (digit - '0');\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\tif (negative) {\n")
+					loweredSourceContents.WriteString("\t\tparsed = 0 - parsed;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\t*out = parsed;\n")
+					loweredSourceContents.WriteString("\treturn 0;\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_write(const char *value, tinygo_wasi_size_t len) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\ttinygo_wasi_ciovec_t iovec = { value, len };\n")
+					loweredSourceContents.WriteString("\ttinygo_wasi_size_t nwritten = 0u;\n")
 					loweredSourceContents.WriteString("\t(void)tinygo_runtime_fd_write(1u, &iovec, 1u, &nwritten);\n")
 					loweredSourceContents.WriteString("}\n")
 					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_newline(void) {\n", runtimeStorage))
@@ -3512,7 +3513,7 @@ func Build(input Input) (Result, error) {
 					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_literal(const char *value, tinygo_wasi_size_t len, int newline) {\n", runtimeStorage))
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(value, len);\n")
 					loweredSourceContents.WriteString("\tif (newline != 0) {\n")
-						loweredSourceContents.WriteString("\t\ttinygo_runtime_print_newline();\n")
+					loweredSourceContents.WriteString("\t\ttinygo_runtime_print_newline();\n")
 					loweredSourceContents.WriteString("\t}\n")
 					loweredSourceContents.WriteString("}\n")
 					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_i32(int value, int newline) {\n", runtimeStorage))
@@ -3610,6 +3611,10 @@ func Build(input Input) (Result, error) {
 	compileCommands := make([]CommandInvocation, 0, len(input.CompileJobs))
 	loweredCompileCommands := make([]CommandInvocation, 0, len(input.CompileJobs))
 	loweredObjectFiles := make([]string, 0, len(input.CompileJobs))
+	executionLinkJob := input.LinkJob
+	if input.ExecutionLinkJob != nil {
+		executionLinkJob = *input.ExecutionLinkJob
+	}
 	linkBitcodeInputs := append([]string{}, input.LinkJob.BitcodeInputs...)
 	if len(linkBitcodeInputs) == 0 {
 		linkBitcodeInputs = make([]string, 0, len(input.CompileJobs))
@@ -3618,6 +3623,16 @@ func Build(input Input) (Result, error) {
 				return Result{}, fmt.Errorf("bitcode output path is required for compile job %s", compileJob.ID)
 			}
 			linkBitcodeInputs = append(linkBitcodeInputs, compileJob.BitcodeOutputPath)
+		}
+	}
+	executionLinkBitcodeInputs := append([]string{}, executionLinkJob.BitcodeInputs...)
+	if len(executionLinkBitcodeInputs) == 0 {
+		executionLinkBitcodeInputs = make([]string, 0, len(input.CompileJobs))
+		for _, compileJob := range input.CompileJobs {
+			if compileJob.BitcodeOutputPath == "" {
+				return Result{}, fmt.Errorf("bitcode output path is required for compile job %s", compileJob.ID)
+			}
+			executionLinkBitcodeInputs = append(executionLinkBitcodeInputs, compileJob.BitcodeOutputPath)
 		}
 	}
 	for _, compileJob := range input.CompileJobs {
@@ -3661,11 +3676,11 @@ func Build(input Input) (Result, error) {
 	}
 
 	linkCommandArgv := []string{
-		"/usr/bin/" + input.LinkJob.Linker,
+		"/usr/bin/" + executionLinkJob.Linker,
 	}
-	linkCommandArgv = append(linkCommandArgv, input.LinkJob.LDFlags...)
-	linkCommandArgv = append(linkCommandArgv, linkBitcodeInputs...)
-	linkCommandArgv = append(linkCommandArgv, "-o", input.LinkJob.ArtifactOutputPath)
+	linkCommandArgv = append(linkCommandArgv, executionLinkJob.LDFlags...)
+	linkCommandArgv = append(linkCommandArgv, executionLinkBitcodeInputs...)
+	linkCommandArgv = append(linkCommandArgv, "-o", executionLinkJob.ArtifactOutputPath)
 
 	commandBatchManifestContents, err := json.Marshal(CommandBatchManifest{
 		CompileCommands: compileCommands,
@@ -3705,9 +3720,9 @@ func Build(input Input) (Result, error) {
 		return Result{}, err
 	}
 	commandArtifactManifestContents, err := json.Marshal(CommandArtifactManifest{
-		ArtifactOutputPath: input.LinkJob.ArtifactOutputPath,
+		ArtifactOutputPath: executionLinkJob.ArtifactOutputPath,
 		ArtifactKind:       runnableCommandArtifactKind,
-		BitcodeFiles:       append([]string{}, linkBitcodeInputs...),
+		BitcodeFiles:       append([]string{}, executionLinkBitcodeInputs...),
 		Entrypoint:         runnableCommandArtifactEntrypoint,
 		Reason:             runnableCommandArtifactReason,
 		Runnable:           runnableCommandArtifact,

@@ -731,10 +731,19 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 	}) {
 		t.Fatalf("unexpected lowering link job: %#v", loweringPlanManifest.LinkJob)
 	}
+	if loweringPlanManifest.ExecutionLinkJob == nil || !reflect.DeepEqual(*loweringPlanManifest.ExecutionLinkJob, LoweringLinkJob{
+		Linker:             "wasm-ld",
+		LDFlags:            []string{"--stack-first", "--no-demangle"},
+		ArtifactOutputPath: "/working/out.wasm",
+		BitcodeInputs:      []string{"/working/tinygo-work/program-000.bc", "/working/tinygo-work/imported-000.bc", "/working/tinygo-work/stdlib-000.bc"},
+	}) {
+		t.Fatalf("unexpected lowering execution link job: %#v", loweringPlanManifest.ExecutionLinkJob)
+	}
 	var backendInputManifest struct {
-		EntryFile   string               `json:"entryFile"`
-		CompileJobs []LoweringCompileJob `json:"compileJobs"`
-		LinkJob     LoweringLinkJob      `json:"linkJob"`
+		EntryFile        string               `json:"entryFile"`
+		CompileJobs      []LoweringCompileJob `json:"compileJobs"`
+		LinkJob          LoweringLinkJob      `json:"linkJob"`
+		ExecutionLinkJob *LoweringLinkJob     `json:"executionLinkJob"`
 	}
 	if err := json.Unmarshal([]byte(result.GeneratedFiles[6].Contents), &backendInputManifest); err != nil {
 		t.Fatalf("json.Unmarshal(backend-input): %v", err)
@@ -743,7 +752,12 @@ func TestBuildProducesCompileGroups(t *testing.T) {
 		!reflect.DeepEqual(backendInputManifest.CompileJobs, loweringPlanManifest.CompileJobs) ||
 		backendInputManifest.LinkJob.Linker != loweringPlanManifest.LinkJob.Linker ||
 		!reflect.DeepEqual(backendInputManifest.LinkJob.LDFlags, loweringPlanManifest.LinkJob.LDFlags) ||
-		backendInputManifest.LinkJob.ArtifactOutputPath != loweringPlanManifest.LinkJob.ArtifactOutputPath {
+		backendInputManifest.LinkJob.ArtifactOutputPath != loweringPlanManifest.LinkJob.ArtifactOutputPath ||
+		backendInputManifest.ExecutionLinkJob == nil ||
+		loweringPlanManifest.ExecutionLinkJob == nil ||
+		backendInputManifest.ExecutionLinkJob.Linker != loweringPlanManifest.ExecutionLinkJob.Linker ||
+		!reflect.DeepEqual(backendInputManifest.ExecutionLinkJob.LDFlags, loweringPlanManifest.ExecutionLinkJob.LDFlags) ||
+		backendInputManifest.ExecutionLinkJob.ArtifactOutputPath != loweringPlanManifest.ExecutionLinkJob.ArtifactOutputPath {
 		t.Fatalf("unexpected backend input manifest: %#v", backendInputManifest)
 	}
 	if strings.Contains(result.GeneratedFiles[6].Contents, "\"loweredUnits\"") {

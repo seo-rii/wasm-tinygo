@@ -4700,10 +4700,21 @@ test('verifyLoweringPlanAgainstWorkItemsManifest accepts a normalized lowering p
         '/working/tinygo-work/stdlib-000.bc',
       ],
     },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
+      artifactOutputPath: '/working/out.wasm',
+      bitcodeInputs: [
+        '/working/tinygo-work/program-000.bc',
+        '/working/tinygo-work/imported-000.bc',
+        '/working/tinygo-work/stdlib-000.bc',
+      ],
+    },
   })
 
   assert.equal(verification.compileJobs.length, 3)
   assert.equal(verification.linkJob.artifactOutputPath, '/working/out.wasm')
+  assert.deepEqual(verification.executionLinkJob?.ldflags, ['--stack-first', '--no-demangle'])
   assert.equal(verification.compileJobs[0]?.modulePath, 'example.com/app')
 })
 
@@ -4785,6 +4796,12 @@ test('verifyCommandBatchAgainstLoweringPlanAndLoweredSourcesManifest accepts a n
       artifactOutputPath: '/working/out.wasm',
       bitcodeInputs: ['/working/tinygo-work/program-000.bc', '/working/tinygo-work/stdlib-000.bc'],
     },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
+      artifactOutputPath: '/working/out.wasm',
+      bitcodeInputs: ['/working/tinygo-work/program-000.bc', '/working/tinygo-work/stdlib-000.bc'],
+    },
   }, {
     entryFile: '/workspace/main.go',
     optimizeFlag: '-Oz',
@@ -4818,7 +4835,7 @@ test('verifyCommandBatchAgainstLoweringPlanAndLoweredSourcesManifest accepts a n
       },
     ],
     linkCommand: {
-      argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '--no-entry', '--export-all', '/working/tinygo-work/program-000.bc', '/working/tinygo-work/stdlib-000.bc', '-o', '/working/out.wasm'],
+      argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '/working/tinygo-work/program-000.bc', '/working/tinygo-work/stdlib-000.bc', '-o', '/working/out.wasm'],
       cwd: '/working',
     },
   })
@@ -4852,6 +4869,12 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest acc
     linkJob: {
       linker: 'wasm-ld',
       ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      artifactOutputPath: '/working/out.wasm',
+      bitcodeInputs: ['/working/tinygo-work/program-000.bc'],
+    },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
       artifactOutputPath: '/working/out.wasm',
       bitcodeInputs: ['/working/tinygo-work/program-000.bc'],
     },
@@ -4899,11 +4922,17 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest acc
       ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
       artifactOutputPath: '/working/out.wasm',
     },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
+      artifactOutputPath: '/working/out.wasm',
+    },
   })
 
   assert.equal(verification.compileJobs.length, 1)
   assert.equal(verification.loweredUnits.length, 1)
   assert.equal(verification.linkJob.artifactOutputPath, '/working/out.wasm')
+  assert.deepEqual(verification.executionLinkJob?.ldflags, ['--stack-first', '--no-demangle'])
   assert.equal(verification.loweredUnits[0]?.modulePath, 'example.com/app')
 })
 
@@ -4930,6 +4959,12 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest rej
     linkJob: {
       linker: 'wasm-ld',
       ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      artifactOutputPath: '/working/out.wasm',
+      bitcodeInputs: ['/working/tinygo-work/program-000.bc'],
+    },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
       artifactOutputPath: '/working/out.wasm',
       bitcodeInputs: ['/working/tinygo-work/program-000.bc'],
     },
@@ -4976,6 +5011,11 @@ test('verifyBackendInputManifestAgainstLoweringPlanAndLoweredSourcesManifest rej
       ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
       artifactOutputPath: '/working/out.wasm',
     },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
+      artifactOutputPath: '/working/out.wasm',
+    },
   }), /frontend backend input did not match lowering plan and lowered sources manifests/)
 })
 
@@ -4998,6 +5038,11 @@ test('verifyCommandBatchAgainstLoweringPlanAndLoweredSourcesManifest rejects mis
     linkJob: {
       linker: 'wasm-ld',
       ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      artifactOutputPath: '/working/out.wasm',
+    },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
       artifactOutputPath: '/working/out.wasm',
     },
   }, {
@@ -5046,6 +5091,11 @@ test('verifyCommandBatchAgainstBackendInputManifest accepts a normalized backend
       ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
       artifactOutputPath: '/working/out.wasm',
     },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
+      artifactOutputPath: '/working/out.wasm',
+    },
   }, {
     compileCommands: [
       {
@@ -5054,7 +5104,7 @@ test('verifyCommandBatchAgainstBackendInputManifest accepts a normalized backend
       },
     ],
     linkCommand: {
-      argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '--no-entry', '--export-all', '/working/tinygo-work/program-000.bc', '-o', '/working/out.wasm'],
+      argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '/working/tinygo-work/program-000.bc', '-o', '/working/out.wasm'],
       cwd: '/working',
     },
   })
@@ -5085,6 +5135,11 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
     linkJob: {
       linker: 'wasm-ld',
       ldflags: ['--stack-first', '--no-demangle', '--no-entry', '--export-all'],
+      artifactOutputPath: '/working/out.wasm',
+    },
+    executionLinkJob: {
+      linker: 'wasm-ld',
+      ldflags: ['--stack-first', '--no-demangle'],
       artifactOutputPath: '/working/out.wasm',
     },
   }, {
@@ -5229,7 +5284,7 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
             },
           ],
           linkCommand: {
-            argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '--no-entry', '--export-all', '/working/tinygo-work/program-000.bc', '-o', '/working/out.wasm'],
+            argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '/working/tinygo-work/program-000.bc', '-o', '/working/out.wasm'],
             cwd: '/working',
           },
         }),
