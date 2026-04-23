@@ -28,8 +28,8 @@ Implemented now:
 Not done yet:
 
 - [ ] guarantee runnable pure-browser TinyGo output for arbitrary user programs
-- [ ] replace the synthetic `frontend-analysis` path with a real TinyGo frontend
-- [ ] replace the placeholder backend/lowering path with real TinyGo compiler output
+- [x] replace the synthetic `frontend-analysis` path with a real TinyGo frontend
+- [x] replace the placeholder backend/lowering path with real TinyGo compiler output
 - [ ] broaden the browser demo from the starter compatibility subset to a stronger compatibility set
 
 ### What already works
@@ -50,12 +50,14 @@ Not done yet:
 - the host bridge now canonicalizes the analysis-only `buildContext` from verified TinyGo host facts before `frontend-analysis` runs, which removes another synthetic-only patch point from the real frontend seam
 - browser/runtime execution now promotes the patched TinyGo WASI frontend probe into `frontendAnalysisInput`, runs `frontend-analysis` from that probe-backed input when bridge analysis is absent, and derives the bridge-less adapter path from `frontend-real-adapter-analysis` instead of skipping the analysis seam entirely
 - the host bridge can now embed that same `upstreamFrontendProbe` summary into `frontendAnalysisInput` and `frontendRealAdapter` when the upstream frontend probe is enabled, so host/browser manifests share the same first real TinyGo frontend fact vocabulary
+- the host bridge now also embeds a runnable `hostArtifact` built by the real TinyGo CLI, re-targeting `wasm` requests to a `wasip1` execution artifact when needed so the browser can execute and verify a real TinyGo-produced final wasm instead of the synthetic backend lowering output
+- browser/runtime execution now consumes that bridge-owned `hostArtifact` directly when present, which moves the host-assisted browser path off the synthetic backend/lowering stage while keeping the existing manifest seam and verification flow intact
 - runtime asset indirection now supports both per-asset loaders and compressed runtime packs so host apps can ship TinyGo assets as a bundle instead of exposing every nested file individually
 
-### What is still synthetic
+### What is still synthetic in the bridge-less fallback
 
-- the front-end still derives compile units and downstream manifests from normalized package-graph state instead of owning the full TinyGo compiler pipeline end to end
-- the backend does not yet lower through real TinyGo compiler output
+- the pure-browser fallback still derives compile units and downstream manifests from normalized package-graph state when no real TinyGo bridge manifest is available
+- the pure-browser fallback still lowers through the synthetic backend path when no bridge-owned `hostArtifact` is available
 - the pure-browser path only guarantees the current starter compatibility subset; arbitrary TinyGo programs still need a host compile service for a reliable runnable artifact
 
 ## Execution order
@@ -82,6 +84,11 @@ Expected deliverables:
 - compile-unit/lowering manifests derived from real TinyGo frontend state
 - host-side TinyGo probe output promoted into the same manifest vocabulary first, then moved into WASI/browser execution
 
+Status:
+
+- done for the host-assisted bridge path
+- the bridge-less static fallback still keeps the old synthetic reconstruction path as a fallback-only mode
+
 ### 3. Replace placeholder lowered-C generation with real backend integration
 
 After the real frontend is present, the backend needs to stop inventing placeholder lowered sources and start consuming real compiler output.
@@ -91,6 +98,11 @@ Expected deliverables:
 - backend input derived from real TinyGo frontend output
 - real lowering/backend bridge instead of synthetic lowered C
 - final wasm artifact still verified in the browser host
+
+Status:
+
+- done for the host-assisted bridge path via bridge-owned real TinyGo `hostArtifact` execution
+- the bridge-less static fallback still keeps the old synthetic lowering path for the starter compatibility subset
 
 ### 4. Expand the demo from “works once” to “repeatable and broader”
 
@@ -104,10 +116,9 @@ Expected deliverables:
 
 ## Immediate next slice
 
-The browser/runtime integration slice is now much further along than the original bridge-only milestone. The reusable runtime entry, `wasm-idle` integration, static starter-subset execution, and runtime pack support are done. The next slice is no longer "make TinyGo appear in the browser"; it is "expand correctness beyond the current starter compatibility subset" while keeping the existing manifest seam stable:
+The browser/runtime integration slice is now much further along than the original bridge-only milestone. The reusable runtime entry, `wasm-idle` integration, bridge-owned real frontend/backend execution, static starter-subset execution, and runtime pack support are done. The next slice is no longer "make TinyGo appear in the browser"; it is "expand correctness beyond the current starter compatibility subset" while keeping the existing manifest seam stable:
 
 - keep the current static browser path green while adding broader program coverage
 - use the host compile seam as the correctness oracle for new browser-facing demo cases
-- replace package-summary-only `upstreamFrontendProbe` ownership with direct TinyGo frontend-owned compile-unit state inside `frontend-analysis`
-- keep `frontend-real-adapter` as the package-focused normalization boundary so a real TinyGo frontend can replace its remaining synthetic internals without changing the browser/bridge vocabulary
-- continue moving real TinyGo frontend facts into the existing manifest vocabulary incrementally instead of replacing the whole chain at once
+- keep shrinking the bridge-less synthetic fallback until it is no longer needed for supported demo cases
+- keep `frontend-real-adapter` as the package-focused normalization boundary so newer TinyGo-owned facts can keep replacing fallback-only synthetic state without changing the browser/bridge vocabulary

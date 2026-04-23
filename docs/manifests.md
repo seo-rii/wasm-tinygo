@@ -45,6 +45,7 @@ The repository also has a host-side normalization flow around the real TinyGo CL
 - a `frontendAnalysis` result produced by `go-probe frontend-analysis`, optionally carrying that same upstream probe summary
 - a package-focused `frontendRealAdapter` result produced by `go-probe frontend-real-adapter`
 - a compatibility-only `realFrontendAnalysis` alias that mirrors `frontendRealAdapter` for older verifiers
+- a bridge-owned `hostArtifact` that carries a real TinyGo-built wasm execution artifact as base64 plus its detected entrypoint, command argv, target, and runnable state
 - a `frontendHandoff` summary that proves the synthetic compile-unit manifest still lines up with those normalized TinyGo facts
 
 The promoted `frontendHandoff`/bridge coverage vocabulary returned by `verifyCompileUnitManifestAgainstDriverBridgeManifest` is:
@@ -62,6 +63,8 @@ The promoted `frontendHandoff`/bridge coverage vocabulary returned by `verifyCom
 - `programImportAlias`
 
 Browser logs use the same summary to print `frontend bridge coverage ...` with the package coverage counts, file coverage counts, and alias state in one line. `alias=direct` means the program compile unit already uses the real entry package import path. `alias=synthetic` means the program compile unit still uses the synthetic `command-line-arguments` alias for that entry package.
+
+When the host bridge can also provide a runnable real TinyGo wasm artifact, it records that artifact as `hostArtifact`. For `wasm` requests the bridge retargets a separate host compile to `wasip1` so the browser still gets a runnable execution artifact with a supported entrypoint. Browser/runtime execution now prefers that bridge-owned `hostArtifact` over the synthetic backend stage, so the host-assisted path no longer depends on `/working/tinygo-backend-result.json`, `/working/tinygo-lowered-*.json`, or the placeholder lowered-C artifact path to reach a final runnable wasm.
 
 ## Front-end handoff contract
 
