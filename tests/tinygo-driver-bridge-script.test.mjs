@@ -575,6 +575,30 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
     },
   })
   assert.deepEqual(manifest.realFrontendAnalysis, manifest.frontendRealAdapter)
+  assert.equal(manifest.hostArtifact.artifactKind, 'probe')
+  assert.equal(manifest.hostArtifact.bytesBase64, 'AGFzbQEAAAA=')
+  assert.deepEqual(manifest.hostArtifact.command.slice(0, 9), [
+    fakeTinyGoPath,
+    'build',
+    '-target',
+    'wasip1',
+    '-opt',
+    'z',
+    '-scheduler',
+    'tasks',
+    '-panic',
+  ])
+  assert.equal(manifest.hostArtifact.command[9], 'trap')
+  assert.equal(manifest.hostArtifact.command[10], '-o')
+  assert.match(manifest.hostArtifact.command[11], /tinygo-bridge-execution\.wasm$/)
+  assert.equal(manifest.hostArtifact.command[12], entryPath)
+  assert.equal(manifest.hostArtifact.entrypoint, null)
+  assert.deepEqual(manifest.hostArtifact.logs, [])
+  assert.equal(manifest.hostArtifact.path, outputPath)
+  assert.equal(manifest.hostArtifact.reason, 'missing-wasi-entrypoint')
+  assert.equal(manifest.hostArtifact.runnable, false)
+  assert.equal(manifest.hostArtifact.size, 8)
+  assert.equal(manifest.hostArtifact.target, 'wasip1')
   assert.deepEqual(manifest.driverBuildTags, ['gc.precise', 'scheduler.tasks', 'tinygo.wasm'])
   assert.deepEqual(manifest.hostBuildTags, ['gc.precise', 'purego', 'scheduler.tasks', 'tinygo', 'tinygo.unicore', 'tinygo.wasm'])
   assert.equal(manifest.driverResultPath, path.join(workspaceDir, 'tinygo-result.json'))

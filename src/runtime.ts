@@ -962,6 +962,17 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       let frontendLoweredBitcodeCompileCommands: ToolInvocation[] | null = null
       let frontendCompileUnitVerification: ReturnType<typeof verifyCompileUnitManifestAgainstCompileRequest> | null = null
       let frontendBootstrapArtifactBytes: Uint8Array | null = null
+      let bridgedHostArtifact:
+        | {
+            artifactKind: 'probe' | 'bootstrap' | 'execution'
+            bytes: Uint8Array
+            entrypoint: '_start' | '_initialize' | 'main' | null
+            path: string
+            reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
+            runnable: boolean
+            target?: string
+          }
+        | null = null
       let artifactProbeVerified = false
 
       setPhase('smoke', 'executing', 'running')
@@ -1449,181 +1460,227 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         if (frontendToolPlan?.length) {
           appendLog(`frontend tool plan ${frontendToolPlan.length} step(s)`, 'idle')
         }
-        appendLog('run backend handoff consumer', 'running')
-        const backendWorkingContents = new Map<string, File | Directory>()
-        const backendWorkspaceContents = buildDirectoryContentsFromTextEntries(
-          workspaceFiles ?? { 'main.go': bootstrapGoEntrySource },
-          textEncoder,
-        )
-        for (const file of [...filesToMaterialize, ...(frontendResult.generatedFiles ?? [])]) {
-          if (!file.path.startsWith('/working/')) {
-            continue
+        if (driverBridgeManifest?.hostArtifact?.bytesBase64) {
+          const hostArtifactBytes = Uint8Array.from(
+            atob(driverBridgeManifest.hostArtifact.bytesBase64),
+            (char) => char.charCodeAt(0),
+          )
+          const hostArtifactExportNames = WebAssembly.Module.exports(
+            new WebAssembly.Module(hostArtifactBytes),
+          ).map((entry) => entry.name)
+          const hostArtifactEntrypoint = driverBridgeManifest.hostArtifact.entrypoint ?? (
+            hostArtifactExportNames.includes('_start')
+              ? '_start'
+              : hostArtifactExportNames.includes('_initialize')
+                ? '_initialize'
+                : hostArtifactExportNames.includes('main')
+                  ? 'main'
+                  : null
+          )
+          bridgedHostArtifact = {
+            artifactKind: driverBridgeManifest.hostArtifact.artifactKind ?? 'execution',
+            bytes: hostArtifactBytes,
+            entrypoint: hostArtifactEntrypoint,
+            path:
+              frontendRealAdapterManifest?.toolchain?.artifactOutputPath ??
+              frontendAnalysisManifest?.toolchain?.artifactOutputPath ??
+              result.artifact ??
+              driverBridgeManifest.hostArtifact.path ??
+              '/working/out.wasm',
+            reason:
+              hostArtifactEntrypoint === null
+                ? (driverBridgeManifest.hostArtifact.reason ?? 'missing-wasi-entrypoint')
+                : driverBridgeManifest.hostArtifact.reason,
+            runnable: driverBridgeManifest.hostArtifact.runnable ?? (hostArtifactEntrypoint !== null),
+            target: driverBridgeManifest.hostArtifact.target,
           }
-          const parts = file.path.replace('/working/', '').split('/').filter(Boolean)
-          let currentDirectory = backendWorkingContents
-          for (const [index, part] of parts.entries()) {
-            if (index === parts.length - 1) {
-              currentDirectory.set(part, new File(textEncoder.encode(file.contents)))
+          for (const line of driverBridgeManifest.hostArtifact.logs ?? []) {
+            appendLog(line, 'success')
+          }
+          if ((driverBridgeManifest.hostArtifact.command ?? []).length !== 0) {
+            appendLog(`bridge host artifact command=${(driverBridgeManifest.hostArtifact.command ?? []).join(' ')}`, 'idle')
+          }
+          appendLog(
+            `backend source=bridge host artifact target=${bridgedHostArtifact.target ?? 'unknown'} runnable=${bridgedHostArtifact.runnable} path=${bridgedHostArtifact.path}`,
+            bridgedHostArtifact.runnable ? 'success' : 'idle',
+          )
+        } else {
+          appendLog('run backend handoff consumer', 'running')
+          const backendWorkingContents = new Map<string, File | Directory>()
+          const backendWorkspaceContents = buildDirectoryContentsFromTextEntries(
+            workspaceFiles ?? { 'main.go': bootstrapGoEntrySource },
+            textEncoder,
+          )
+          for (const file of [...filesToMaterialize, ...(frontendResult.generatedFiles ?? [])]) {
+            if (!file.path.startsWith('/working/')) {
               continue
             }
-            const existing = currentDirectory.get(part)
-            if (existing instanceof Directory) {
-              currentDirectory = existing.contents as unknown as Map<string, File | Directory>
-              continue
-            }
-            const directory = new Directory(new Map())
-            currentDirectory.set(part, directory)
-            currentDirectory = directory.contents as unknown as Map<string, File | Directory>
-          }
-        }
-        const backendWorking = new PreopenDirectory('/working', backendWorkingContents)
-        const backendWorkspace = new PreopenDirectory('/workspace', backendWorkspaceContents)
-        const backendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`backend ${line}`, 'running'))
-        const backendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`backend ${line}`, 'error'))
-        const backendWasi = new WASI(
-          ['tinygo-backend'],
-          ['WASM_TINYGO_MODE=backend'],
-          [new OpenFile(new File([])), backendStdout, backendStderr, backendWorking, backendWorkspace],
-        )
-        const backendInstance = await instantiateWasiModule(frontendModuleBytes, {
-          wasi_snapshot_preview1: backendWasi.wasiImport,
-        })
-        let backendExitCode = 0
-        try {
-          backendExitCode = backendWasi.start(backendInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
-        } catch (error) {
-          if (error instanceof WASIProcExit) {
-            backendExitCode = error.code
-          } else {
-            throw error
-          }
-        }
-        const backendResultNode = backendWorking.dir.contents.get('tinygo-backend-result.json')
-        if (!(backendResultNode instanceof File)) {
-          throw new Error(`tinygo backend did not write /working/tinygo-backend-result.json (exit ${backendExitCode})`)
-        }
-        const backendResult = JSON.parse(textDecoder.decode(backendResultNode.data)) as TinyGoBackendResultManifest
-        if (!backendResult.ok) {
-          throw new Error((backendResult.diagnostics ?? []).join('; ') || `tinygo backend returned a failed result (exit ${backendExitCode})`)
-        }
-        const backendResultVerification = verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest(
-          parsedBackendInputManifest,
-          {
-            bitcodeFiles: backendInputVerification.compileJobs.map((compileJob) => compileJob.bitcodeOutputPath ?? ''),
-          } as TinyGoLoweredBitcodeManifest,
-          backendResult,
-        )
-        frontendLoweredBitcodeManifestVerification = backendResultVerification.loweredBitcodeManifest
-        if (backendResultVerification.generatedFiles.length) {
-          for (const file of backendResultVerification.generatedFiles) {
-            appendLog(`backend materialize ${file.path}`, 'running')
-          }
-          await materializeGeneratedFiles(writableFileSystem, backendResultVerification.generatedFiles)
-        }
-        const commandBatchVerification = backendResultVerification.commandBatch
-        const loweredCommandBatchVerification = backendResultVerification.loweredCommandBatch
-        const loweredArtifactVerification = backendResultVerification.loweredArtifact
-        const commandArtifactVerification = backendResultVerification.commandArtifact
-        const loweredIRVerification = backendResultVerification.loweredIR
-        frontendLoweredIRVerification = loweredIRVerification
-        frontendLoweredArtifactVerification = loweredArtifactVerification
-        frontendCommandArtifactVerification = commandArtifactVerification
-        frontendLoweredSourcesManifest = backendResultVerification.loweredSources
-        appendLog(
-          `backend lowered ir units=${loweredIRVerification.units?.length ?? 0} imports=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.imports?.length ?? 0), 0)} functions=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.functions?.length ?? 0), 0)} types=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.types?.length ?? 0), 0)} consts=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.constants?.length ?? 0), 0)} vars=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.variables?.length ?? 0), 0)} decls=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.declarations?.length ?? 0), 0)}`,
-          'idle',
-        )
-        appendLog(
-          `backend lowered command batch compile=${loweredCommandBatchVerification.compileCommands.length} linkArgv=${loweredCommandBatchVerification.linkCommand.argv.length}`,
-          'idle',
-        )
-        appendLog(
-          `backend lowered artifact objects=${loweredArtifactVerification.objectFiles.length} output=${loweredArtifactVerification.artifactOutputPath}`,
-          'idle',
-        )
-        appendLog(
-          `backend command batch compile=${commandBatchVerification.compileCommands.length} linkArgv=${commandBatchVerification.linkCommand.argv.length}`,
-          'idle',
-        )
-        appendLog(
-          `backend command artifact output=${commandArtifactVerification.artifactOutputPath} inputs=${commandArtifactVerification.bitcodeFiles.length}`,
-          'idle',
-        )
-        appendLog(
-          `backend lowered bitcode outputs=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length} last=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length === 0 ? 'none' : backendResultVerification.loweredBitcodeManifest.bitcodeFiles[backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length - 1] ?? 'none'}`,
-          'idle',
-        )
-        if (frontendToolPlan?.length) {
-          appendLog('frontend bootstrap tool plan skipped: backend lowering is active', 'idle')
-        }
-        for (const step of [...loweredCommandBatchVerification.compileCommands, loweredCommandBatchVerification.linkCommand]) {
-          appendLog(`$ ${step.argv.join(' ')}`, 'running')
-          const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
-          if (stepResult.returncode !== 0) {
-            setPhase('smoke', 'failed', 'error')
-            if (stepResult.stdout.trim() !== '') {
-              appendLog(stepResult.stdout.trim(), 'error')
-            }
-            if (stepResult.stderr.trim() !== '') {
-              appendLog(stepResult.stderr.trim(), 'error')
-            }
-            appendLog(`lowered build step failed with exit code ${stepResult.returncode}`, 'error')
-            return
-          }
-        }
-        const loweredBitcodeCompileCommands = commandBatchVerification.compileCommands
-        frontendLoweredBitcodeCompileCommands = loweredBitcodeCompileCommands
-        const loweredBitcodeOutputDirectories = new Set<string>()
-        for (const step of loweredBitcodeCompileCommands) {
-          const outputPath = step.argv[step.argv.length - 1] ?? ''
-          const segments = outputPath.split('/').filter(Boolean)
-          let currentPath = ''
-          for (const [index, segment] of segments.entries()) {
-            currentPath += `/${segment}`
-            if (index === 0 || index === segments.length - 1 || loweredBitcodeOutputDirectories.has(currentPath)) {
-              continue
-            }
-            try {
-              await writableFileSystem.mkdir(currentPath)
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
-              if (!message.includes('exists')) {
-                throw error
+            const parts = file.path.replace('/working/', '').split('/').filter(Boolean)
+            let currentDirectory = backendWorkingContents
+            for (const [index, part] of parts.entries()) {
+              if (index === parts.length - 1) {
+                currentDirectory.set(part, new File(textEncoder.encode(file.contents)))
+                continue
               }
+              const existing = currentDirectory.get(part)
+              if (existing instanceof Directory) {
+                currentDirectory = existing.contents as unknown as Map<string, File | Directory>
+                continue
+              }
+              const directory = new Directory(new Map())
+              currentDirectory.set(part, directory)
+              currentDirectory = directory.contents as unknown as Map<string, File | Directory>
             }
-            loweredBitcodeOutputDirectories.add(currentPath)
           }
-        }
-        for (const step of loweredBitcodeCompileCommands) {
-          appendLog(`$ ${step.argv.join(' ')}`, 'running')
-          const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
-          if (stepResult.returncode !== 0) {
+          const backendWorking = new PreopenDirectory('/working', backendWorkingContents)
+          const backendWorkspace = new PreopenDirectory('/workspace', backendWorkspaceContents)
+          const backendStdout = ConsoleStdout.lineBuffered((line) => appendLog(`backend ${line}`, 'running'))
+          const backendStderr = ConsoleStdout.lineBuffered((line) => appendLog(`backend ${line}`, 'error'))
+          const backendWasi = new WASI(
+            ['tinygo-backend'],
+            ['WASM_TINYGO_MODE=backend'],
+            [new OpenFile(new File([])), backendStdout, backendStderr, backendWorking, backendWorkspace],
+          )
+          const backendInstance = await instantiateWasiModule(frontendModuleBytes, {
+            wasi_snapshot_preview1: backendWasi.wasiImport,
+          })
+          let backendExitCode = 0
+          try {
+            backendExitCode = backendWasi.start(backendInstance as { exports: { memory: WebAssembly.Memory; _start: () => unknown } })
+          } catch (error) {
+            if (error instanceof WASIProcExit) {
+              backendExitCode = error.code
+            } else {
+              throw error
+            }
+          }
+          const backendResultNode = backendWorking.dir.contents.get('tinygo-backend-result.json')
+          if (!(backendResultNode instanceof File)) {
+            throw new Error(`tinygo backend did not write /working/tinygo-backend-result.json (exit ${backendExitCode})`)
+          }
+          const backendResult = JSON.parse(textDecoder.decode(backendResultNode.data)) as TinyGoBackendResultManifest
+          if (!backendResult.ok) {
+            throw new Error((backendResult.diagnostics ?? []).join('; ') || `tinygo backend returned a failed result (exit ${backendExitCode})`)
+          }
+          const backendResultVerification = verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest(
+            parsedBackendInputManifest,
+            {
+              bitcodeFiles: backendInputVerification.compileJobs.map((compileJob) => compileJob.bitcodeOutputPath ?? ''),
+            } as TinyGoLoweredBitcodeManifest,
+            backendResult,
+          )
+          frontendLoweredBitcodeManifestVerification = backendResultVerification.loweredBitcodeManifest
+          if (backendResultVerification.generatedFiles.length) {
+            for (const file of backendResultVerification.generatedFiles) {
+              appendLog(`backend materialize ${file.path}`, 'running')
+            }
+            await materializeGeneratedFiles(writableFileSystem, backendResultVerification.generatedFiles)
+          }
+          const commandBatchVerification = backendResultVerification.commandBatch
+          const loweredCommandBatchVerification = backendResultVerification.loweredCommandBatch
+          const loweredArtifactVerification = backendResultVerification.loweredArtifact
+          const commandArtifactVerification = backendResultVerification.commandArtifact
+          const loweredIRVerification = backendResultVerification.loweredIR
+          frontendLoweredIRVerification = loweredIRVerification
+          frontendLoweredArtifactVerification = loweredArtifactVerification
+          frontendCommandArtifactVerification = commandArtifactVerification
+          frontendLoweredSourcesManifest = backendResultVerification.loweredSources
+          appendLog(
+            `backend lowered ir units=${loweredIRVerification.units?.length ?? 0} imports=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.imports?.length ?? 0), 0)} functions=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.functions?.length ?? 0), 0)} types=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.types?.length ?? 0), 0)} consts=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.constants?.length ?? 0), 0)} vars=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.variables?.length ?? 0), 0)} decls=${(loweredIRVerification.units ?? []).reduce((count, unit) => count + (unit.declarations?.length ?? 0), 0)}`,
+            'idle',
+          )
+          appendLog(
+            `backend lowered command batch compile=${loweredCommandBatchVerification.compileCommands.length} linkArgv=${loweredCommandBatchVerification.linkCommand.argv.length}`,
+            'idle',
+          )
+          appendLog(
+            `backend lowered artifact objects=${loweredArtifactVerification.objectFiles.length} output=${loweredArtifactVerification.artifactOutputPath}`,
+            'idle',
+          )
+          appendLog(
+            `backend command batch compile=${commandBatchVerification.compileCommands.length} linkArgv=${commandBatchVerification.linkCommand.argv.length}`,
+            'idle',
+          )
+          appendLog(
+            `backend command artifact output=${commandArtifactVerification.artifactOutputPath} inputs=${commandArtifactVerification.bitcodeFiles.length}`,
+            'idle',
+          )
+          appendLog(
+            `backend lowered bitcode outputs=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length} last=${backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length === 0 ? 'none' : backendResultVerification.loweredBitcodeManifest.bitcodeFiles[backendResultVerification.loweredBitcodeManifest.bitcodeFiles.length - 1] ?? 'none'}`,
+            'idle',
+          )
+          if (frontendToolPlan?.length) {
+            appendLog('frontend bootstrap tool plan skipped: backend lowering is active', 'idle')
+          }
+          for (const step of [...loweredCommandBatchVerification.compileCommands, loweredCommandBatchVerification.linkCommand]) {
+            appendLog(`$ ${step.argv.join(' ')}`, 'running')
+            const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
+            if (stepResult.returncode !== 0) {
+              setPhase('smoke', 'failed', 'error')
+              if (stepResult.stdout.trim() !== '') {
+                appendLog(stepResult.stdout.trim(), 'error')
+              }
+              if (stepResult.stderr.trim() !== '') {
+                appendLog(stepResult.stderr.trim(), 'error')
+              }
+              appendLog(`lowered build step failed with exit code ${stepResult.returncode}`, 'error')
+              return
+            }
+          }
+          const loweredBitcodeCompileCommands = commandBatchVerification.compileCommands
+          frontendLoweredBitcodeCompileCommands = loweredBitcodeCompileCommands
+          const loweredBitcodeOutputDirectories = new Set<string>()
+          for (const step of loweredBitcodeCompileCommands) {
+            const outputPath = step.argv[step.argv.length - 1] ?? ''
+            const segments = outputPath.split('/').filter(Boolean)
+            let currentPath = ''
+            for (const [index, segment] of segments.entries()) {
+              currentPath += `/${segment}`
+              if (index === 0 || index === segments.length - 1 || loweredBitcodeOutputDirectories.has(currentPath)) {
+                continue
+              }
+              try {
+                await writableFileSystem.mkdir(currentPath)
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                if (!message.includes('exists')) {
+                  throw error
+                }
+              }
+              loweredBitcodeOutputDirectories.add(currentPath)
+            }
+          }
+          for (const step of loweredBitcodeCompileCommands) {
+            appendLog(`$ ${step.argv.join(' ')}`, 'running')
+            const stepResult = await runtime._run_process_impl(step.argv, { cwd: step.cwd })
+            if (stepResult.returncode !== 0) {
+              setPhase('smoke', 'failed', 'error')
+              if (stepResult.stdout.trim() !== '') {
+                appendLog(stepResult.stdout.trim(), 'error')
+              }
+              if (stepResult.stderr.trim() !== '') {
+                appendLog(stepResult.stderr.trim(), 'error')
+              }
+              appendLog(`lowered bitcode step failed with exit code ${stepResult.returncode}`, 'error')
+              return
+            }
+          }
+          appendLog(`$ ${commandBatchVerification.linkCommand.argv.join(' ')}`, 'running')
+          const commandLinkResult = await runtime._run_process_impl(
+            commandBatchVerification.linkCommand.argv,
+            { cwd: commandBatchVerification.linkCommand.cwd },
+          )
+          if (commandLinkResult.returncode !== 0) {
             setPhase('smoke', 'failed', 'error')
-            if (stepResult.stdout.trim() !== '') {
-              appendLog(stepResult.stdout.trim(), 'error')
+            if (commandLinkResult.stdout.trim() !== '') {
+              appendLog(commandLinkResult.stdout.trim(), 'error')
             }
-            if (stepResult.stderr.trim() !== '') {
-              appendLog(stepResult.stderr.trim(), 'error')
+            if (commandLinkResult.stderr.trim() !== '') {
+              appendLog(commandLinkResult.stderr.trim(), 'error')
             }
-            appendLog(`lowered bitcode step failed with exit code ${stepResult.returncode}`, 'error')
+            appendLog(`final artifact link failed with exit code ${commandLinkResult.returncode}`, 'error')
             return
           }
-        }
-        appendLog(`$ ${commandBatchVerification.linkCommand.argv.join(' ')}`, 'running')
-        const commandLinkResult = await runtime._run_process_impl(
-          commandBatchVerification.linkCommand.argv,
-          { cwd: commandBatchVerification.linkCommand.cwd },
-        )
-        if (commandLinkResult.returncode !== 0) {
-          setPhase('smoke', 'failed', 'error')
-          if (commandLinkResult.stdout.trim() !== '') {
-            appendLog(commandLinkResult.stdout.trim(), 'error')
-          }
-          if (commandLinkResult.stderr.trim() !== '') {
-            appendLog(commandLinkResult.stderr.trim(), 'error')
-          }
-          appendLog(`final artifact link failed with exit code ${commandLinkResult.returncode}`, 'error')
-          return
         }
       } else {
         for (const step of result.plan) {
@@ -1643,24 +1700,28 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         }
       }
 
-      const artifactPath = frontendCommandArtifactVerification?.artifactOutputPath ?? result.artifact ?? '/working/out.wasm'
-      const artifact = await fileSystem.readFile(artifactPath)
+      const artifactPath =
+        bridgedHostArtifact?.path ??
+        frontendCommandArtifactVerification?.artifactOutputPath ??
+        result.artifact ??
+        '/working/out.wasm'
+      const artifact = bridgedHostArtifact?.bytes ?? await fileSystem.readFile(artifactPath)
       const artifactBytes = typeof artifact === 'string' ? textEncoder.encode(artifact) : artifact
       const size = artifactBytes.byteLength
       const exportNames = WebAssembly.Module.exports(
         new WebAssembly.Module(new Uint8Array(artifactBytes)),
       ).map((entry) => entry.name)
-      const manifestArtifactKind = frontendCommandArtifactVerification?.artifactKind
+      const manifestArtifactKind = bridgedHostArtifact?.artifactKind ?? frontendCommandArtifactVerification?.artifactKind
       const hasBootstrapManifestExports =
         manifestArtifactKind === undefined &&
         exportNames.includes('tinygo_embedded_manifest_len') &&
         exportNames.includes('tinygo_embedded_manifest_ptr')
       lastBuildArtifactPath = artifactPath
       lastBuildArtifactBytes = new Uint8Array(artifactBytes)
-      lastBuildArtifactKind = frontendCommandArtifactVerification?.artifactKind ?? (
+      lastBuildArtifactKind = bridgedHostArtifact?.artifactKind ?? frontendCommandArtifactVerification?.artifactKind ?? (
         hasBootstrapManifestExports ? 'bootstrap' : 'execution'
       )
-      lastBuildArtifactEntrypoint = frontendCommandArtifactVerification?.entrypoint ?? (
+      lastBuildArtifactEntrypoint = bridgedHostArtifact?.entrypoint ?? frontendCommandArtifactVerification?.entrypoint ?? (
         hasBootstrapManifestExports
         ? null
         : exportNames.includes('_start')
@@ -1671,10 +1732,10 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
               ? 'main'
               : null
       )
-      lastBuildArtifactRunnable = frontendCommandArtifactVerification?.runnable ?? (lastBuildArtifactEntrypoint !== null)
+      lastBuildArtifactRunnable = bridgedHostArtifact?.runnable ?? frontendCommandArtifactVerification?.runnable ?? (lastBuildArtifactEntrypoint !== null)
       lastBuildArtifactReason = lastBuildArtifactRunnable
         ? undefined
-        : frontendCommandArtifactVerification?.reason ?? (
+        : bridgedHostArtifact?.reason ?? frontendCommandArtifactVerification?.reason ?? (
           hasBootstrapManifestExports
             ? 'bootstrap-artifact'
             : 'missing-wasi-entrypoint'
@@ -1690,59 +1751,67 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         )
       }
       if (frontendResult) {
-        if (!frontendCommandArtifactVerification) {
-          throw new Error('missing command artifact verification for final artifact output')
+        if (bridgedHostArtifact) {
+          appendLog(
+            `frontend final artifact source=bridge host artifact target=${bridgedHostArtifact.target ?? 'unknown'} output=${artifactPath}`,
+            'success',
+          )
+          appendLog('frontend lowered verification skipped: bridge host artifact bypassed synthetic backend lowering', 'idle')
+        } else {
+          if (!frontendCommandArtifactVerification) {
+            throw new Error('missing command artifact verification for final artifact output')
+          }
+          const finalArtifactVerification = verifyTinyGoFinalArtifactFile(frontendCommandArtifactVerification, {
+            path: artifactPath,
+            bytes: artifact,
+          })
+          appendLog(
+            `frontend final artifact verified format=${finalArtifactVerification.format} output=${finalArtifactVerification.path}`,
+            'success',
+          )
+          if (!frontendLoweredArtifactVerification) {
+            throw new Error('missing lowered artifact verification for lowered object outputs')
+          }
+          const loweredObjectVerification = verifyTinyGoLoweredObjectFiles(
+            frontendLoweredArtifactVerification,
+            await Promise.all(frontendLoweredArtifactVerification.objectFiles.map(async (objectFile) => ({
+              path: objectFile,
+              bytes: await fileSystem.readFile(objectFile),
+            }))),
+          )
+          appendLog(
+            `frontend lowered objects ready count=${loweredObjectVerification.objectFiles.length} total=${loweredObjectVerification.totalBytes.toLocaleString()} bytes`,
+            'success',
+          )
+          appendLog(
+            `frontend lowered objects verified format=wasm count=${loweredObjectVerification.objectFiles.length}`,
+            'success',
+          )
+          if (!frontendLoweredBitcodeCompileCommands) {
+            throw new Error('missing lowered bitcode compile commands for lowered bitcode outputs')
+          }
+          if (!frontendLoweredBitcodeManifestVerification) {
+            throw new Error('missing lowered bitcode manifest verification for lowered bitcode outputs')
+          }
+          const loweredBitcodeVerification = verifyTinyGoLoweredBitcodeFiles(
+            frontendLoweredBitcodeManifestVerification.bitcodeFiles,
+            await Promise.all(frontendLoweredBitcodeManifestVerification.bitcodeFiles.map(async (bitcodeFile) => ({
+              path: bitcodeFile,
+              bytes: await fileSystem.readFile(bitcodeFile),
+            }))),
+          )
+          appendLog(
+            `frontend lowered bitcode ready count=${loweredBitcodeVerification.bitcodeFiles.length} total=${loweredBitcodeVerification.totalBytes.toLocaleString()} bytes`,
+            'success',
+          )
+          appendLog(
+            `frontend lowered bitcode verified format=llvm-bc count=${loweredBitcodeVerification.bitcodeFiles.length}`,
+            'success',
+          )
+          const loweredArtifact = await fileSystem.readFile('/working/tinygo-lowered-out.wasm')
+          const loweredArtifactSize = typeof loweredArtifact === 'string' ? loweredArtifact.length : loweredArtifact.byteLength
+          appendLog(`frontend lowered artifact ready: /working/tinygo-lowered-out.wasm (${loweredArtifactSize.toLocaleString()} bytes)`, 'success')
         }
-        const finalArtifactVerification = verifyTinyGoFinalArtifactFile(frontendCommandArtifactVerification, {
-          path: artifactPath,
-          bytes: artifact,
-        })
-        appendLog(
-          `frontend final artifact verified format=${finalArtifactVerification.format} output=${finalArtifactVerification.path}`,
-          'success',
-        )
-        if (!frontendLoweredArtifactVerification) {
-          throw new Error('missing lowered artifact verification for lowered object outputs')
-        }
-        const loweredObjectVerification = verifyTinyGoLoweredObjectFiles(
-          frontendLoweredArtifactVerification,
-          await Promise.all(frontendLoweredArtifactVerification.objectFiles.map(async (objectFile) => ({
-            path: objectFile,
-            bytes: await fileSystem.readFile(objectFile),
-          }))),
-        )
-        appendLog(
-          `frontend lowered objects ready count=${loweredObjectVerification.objectFiles.length} total=${loweredObjectVerification.totalBytes.toLocaleString()} bytes`,
-          'success',
-        )
-        appendLog(
-          `frontend lowered objects verified format=wasm count=${loweredObjectVerification.objectFiles.length}`,
-          'success',
-        )
-        if (!frontendLoweredBitcodeCompileCommands) {
-          throw new Error('missing lowered bitcode compile commands for lowered bitcode outputs')
-        }
-        if (!frontendLoweredBitcodeManifestVerification) {
-          throw new Error('missing lowered bitcode manifest verification for lowered bitcode outputs')
-        }
-        const loweredBitcodeVerification = verifyTinyGoLoweredBitcodeFiles(
-          frontendLoweredBitcodeManifestVerification.bitcodeFiles,
-          await Promise.all(frontendLoweredBitcodeManifestVerification.bitcodeFiles.map(async (bitcodeFile) => ({
-            path: bitcodeFile,
-            bytes: await fileSystem.readFile(bitcodeFile),
-          }))),
-        )
-        appendLog(
-          `frontend lowered bitcode ready count=${loweredBitcodeVerification.bitcodeFiles.length} total=${loweredBitcodeVerification.totalBytes.toLocaleString()} bytes`,
-          'success',
-        )
-        appendLog(
-          `frontend lowered bitcode verified format=llvm-bc count=${loweredBitcodeVerification.bitcodeFiles.length}`,
-          'success',
-        )
-        const loweredArtifact = await fileSystem.readFile('/working/tinygo-lowered-out.wasm')
-        const loweredArtifactSize = typeof loweredArtifact === 'string' ? loweredArtifact.length : loweredArtifact.byteLength
-        appendLog(`frontend lowered artifact ready: /working/tinygo-lowered-out.wasm (${loweredArtifactSize.toLocaleString()} bytes)`, 'success')
       }
       try {
         appendLog('frontend final artifact compiled module=ok', 'success')

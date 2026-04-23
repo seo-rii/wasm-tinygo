@@ -17,6 +17,7 @@ import {
   verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest,
 } from '../src/compile-unit.ts'
 import { buildTinyGoUpstreamFrontendProbeWasm } from './build-tinygo-upstream-frontend-probe.mjs'
+import { buildTinyGoHostProbe } from './tinygo-host-compiler.mjs'
 import { resolveTinyGoToolchainPaths } from './tinygo-toolchain-paths.mjs'
 
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -60,6 +61,20 @@ const includeUpstreamFrontendProbe =
 const goBin = process.env.WASM_TINYGO_GO_BIN ?? 'go'
 const tinygoBin = process.env.WASM_TINYGO_TINYGO_BIN ?? tinygoToolchainPaths.binPath
 const tinygoRoot = process.env.WASM_TINYGO_TINYGOROOT ?? tinygoToolchainPaths.rootPath
+
+const detectEntrypoint = (wasmBytes) => {
+  const exportNames = WebAssembly.Module.exports(new WebAssembly.Module(wasmBytes)).map((entry) => entry.name)
+  if (exportNames.includes('_start')) {
+    return '_start'
+  }
+  if (exportNames.includes('_initialize')) {
+    return '_initialize'
+  }
+  if (exportNames.includes('main')) {
+    return 'main'
+  }
+  return null
+}
 
 let request
 try {
@@ -635,6 +650,55 @@ verifyFrontendAnalysisAgainstRealDriverBridgeManifest(frontendRealAdapterResult.
   target: verification.target,
 })
 
+let hostArtifact
+const hostArtifactLogicalPath =
+  frontendRealAdapterResult.adapter?.toolchain?.artifactOutputPath ??
+  frontendAnalysisResult?.analysis?.toolchain?.artifactOutputPath ??
+  frontendInput.toolchain?.artifactOutputPath ??
+  verification.artifactOutputPath
+let hostArtifactManifest = hostProbeManifest
+let hostArtifactBytes = await readFile(hostProbeManifest.artifact?.path ?? request.output)
+let hostArtifactTarget = verification.target
+let hostArtifactEntrypoint = detectEntrypoint(hostArtifactBytes)
+
+if (
+  (verification.target === 'wasm' || verification.target === 'wasip1') &&
+  (verification.target !== 'wasip1' || hostArtifactEntrypoint === null)
+) {
+  hostArtifactManifest = await buildTinyGoHostProbe({
+    request: {
+      ...request,
+      command: 'build',
+      entry: request.entry,
+      optimize: request.optimize ?? 'z',
+      output: path.join(workDir, 'tinygo-bridge-execution.wasm'),
+      panic: request.panic ?? 'trap',
+      scheduler: request.scheduler ?? verification.scheduler,
+      target: 'wasip1',
+    },
+    skipRuntime: true,
+    workDir,
+  })
+  hostArtifactBytes = await readFile(hostArtifactManifest.artifact.path)
+  hostArtifactTarget = 'wasip1'
+  hostArtifactEntrypoint = detectEntrypoint(hostArtifactBytes)
+}
+
+if (hostArtifactLogicalPath && hostArtifactBytes.byteLength !== 0) {
+  hostArtifact = {
+    artifactKind: hostArtifactEntrypoint === null ? 'probe' : 'execution',
+    bytesBase64: Buffer.from(hostArtifactBytes).toString('base64'),
+    command: hostArtifactManifest.command ?? [],
+    entrypoint: hostArtifactEntrypoint,
+    logs: hostArtifactManifest.runtime?.logs ?? [],
+    path: hostArtifactLogicalPath,
+    ...(hostArtifactEntrypoint === null ? { reason: 'missing-wasi-entrypoint' } : {}),
+    runnable: hostArtifactEntrypoint !== null,
+    size: hostArtifactBytes.byteLength,
+    target: hostArtifactTarget,
+  }
+}
+
 let upstreamFrontendProbe
 if (includeUpstreamFrontendProbe) {
   const textEncoder = new TextEncoder()
@@ -894,6 +958,7 @@ await writeFile(bridgeManifestPath, `${JSON.stringify({
   hostProbeManifestPath,
   llvmTriple: verification.llvmTriple,
   packageGraph,
+  ...(hostArtifact ? { hostArtifact } : {}),
   ...(upstreamFrontendProbe ? { upstreamFrontendProbe } : {}),
   runtime: hostProbeManifest.runtime ?? {},
   scheduler: verification.scheduler,

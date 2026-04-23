@@ -538,6 +538,18 @@ export type TinyGoDriverBridgeManifest = {
   frontendAnalysis?: TinyGoFrontendAnalysisManifest
   frontendRealAdapter?: TinyGoFrontendAnalysisManifest
   realFrontendAnalysis?: TinyGoFrontendAnalysisManifest
+  hostArtifact?: {
+    artifactKind?: 'probe' | 'bootstrap' | 'execution'
+    bytesBase64?: string
+    command?: string[]
+    entrypoint?: '_start' | '_initialize' | 'main' | null
+    logs?: string[]
+    path?: string
+    reason?: 'bootstrap-artifact' | 'missing-wasi-entrypoint'
+    runnable?: boolean
+    size?: number
+    target?: string
+  }
   scheduler?: string
   target?: string
   toolchain?: {
