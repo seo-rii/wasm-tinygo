@@ -114,6 +114,7 @@ export type TinyGoFrontendInputManifest = {
     name?: string
     standard?: boolean
   }>
+  upstreamFrontendProbe?: TinyGoUpstreamFrontendProbeResult
 }
 
 export type TinyGoFrontendAnalysisManifest = {
@@ -168,6 +169,7 @@ export type TinyGoFrontendAnalysisManifest = {
     name?: string
     standard?: boolean
   }>
+  upstreamFrontendProbe?: TinyGoUpstreamFrontendProbeResult
 }
 
 export type TinyGoIntermediateManifest = {

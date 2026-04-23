@@ -14,30 +14,49 @@ import (
 	"wasm-tinygo/internal/tinygotarget"
 )
 
+type UpstreamFrontendProbePackage struct {
+	ImportPath string   `json:"importPath"`
+	Name       string   `json:"name"`
+	FileCount  int      `json:"fileCount"`
+	Imports    []string `json:"imports"`
+}
+
+type UpstreamFrontendProbeResult struct {
+	RequestedTarget  string                         `json:"requestedTarget"`
+	MainImportPath   string                         `json:"mainImportPath"`
+	MainPackageName  string                         `json:"mainPackageName"`
+	PackageCount     int                            `json:"packageCount"`
+	FileCount        int                            `json:"fileCount"`
+	DeclarationCount int                            `json:"declarationCount"`
+	Imports          []string                       `json:"imports"`
+	Packages         []UpstreamFrontendProbePackage `json:"packages"`
+}
+
 type Input struct {
-	BuildTags            []string                  `json:"buildTags"`
-	BuildContext         BuildContext              `json:"buildContext"`
-	Toolchain            Toolchain                 `json:"toolchain"`
-	Target               string                    `json:"target"`
-	LLVMTarget           string                    `json:"llvmTarget"`
-	Linker               string                    `json:"linker"`
-	ModulePath           string                    `json:"modulePath"`
-	PackageGraph         []PackageGraphPackage     `json:"packageGraph,omitempty"`
-	CFlags               []string                  `json:"cflags"`
-	LDFlags              []string                  `json:"ldflags"`
-	OptimizeFlag         string                    `json:"optimizeFlag"`
-	EntryFile            string                    `json:"entryFile"`
-	TranslationUnitPath  string                    `json:"translationUnitPath"`
-	ObjectOutputPath     string                    `json:"objectOutputPath"`
-	ArtifactOutputPath   string                    `json:"artifactOutputPath"`
-	SourceSelection      SourceSelection           `json:"sourceSelection"`
-	CompileUnits         []IntermediateCompileUnit `json:"compileUnits,omitempty"`
-	TargetAssetFiles     []string                  `json:"targetAssetFiles"`
-	RuntimeSupportFiles  []string                  `json:"runtimeSupportFiles"`
-	ProgramFiles         []string                  `json:"programFiles"`
-	ImportedPackageFiles []string                  `json:"importedPackageFiles"`
-	StdlibPackageFiles   []string                  `json:"stdlibPackageFiles"`
-	AllCompileFiles      []string                  `json:"allCompileFiles"`
+	BuildTags             []string                     `json:"buildTags"`
+	BuildContext          BuildContext                 `json:"buildContext"`
+	Toolchain             Toolchain                    `json:"toolchain"`
+	Target                string                       `json:"target"`
+	LLVMTarget            string                       `json:"llvmTarget"`
+	Linker                string                       `json:"linker"`
+	ModulePath            string                       `json:"modulePath"`
+	PackageGraph          []PackageGraphPackage        `json:"packageGraph,omitempty"`
+	UpstreamFrontendProbe *UpstreamFrontendProbeResult `json:"upstreamFrontendProbe,omitempty"`
+	CFlags                []string                     `json:"cflags"`
+	LDFlags               []string                     `json:"ldflags"`
+	OptimizeFlag          string                       `json:"optimizeFlag"`
+	EntryFile             string                       `json:"entryFile"`
+	TranslationUnitPath   string                       `json:"translationUnitPath"`
+	ObjectOutputPath      string                       `json:"objectOutputPath"`
+	ArtifactOutputPath    string                       `json:"artifactOutputPath"`
+	SourceSelection       SourceSelection              `json:"sourceSelection"`
+	CompileUnits          []IntermediateCompileUnit    `json:"compileUnits,omitempty"`
+	TargetAssetFiles      []string                     `json:"targetAssetFiles"`
+	RuntimeSupportFiles   []string                     `json:"runtimeSupportFiles"`
+	ProgramFiles          []string                     `json:"programFiles"`
+	ImportedPackageFiles  []string                     `json:"importedPackageFiles"`
+	StdlibPackageFiles    []string                     `json:"stdlibPackageFiles"`
+	AllCompileFiles       []string                     `json:"allCompileFiles"`
 }
 
 type Toolchain struct {
@@ -218,15 +237,16 @@ type AdapterToolchain struct {
 }
 
 type Adapter struct {
-	BuildContext            BuildContext              `json:"buildContext"`
-	EntryFile               string                    `json:"entryFile"`
-	OptimizeFlag            string                    `json:"optimizeFlag,omitempty"`
-	CompileUnitManifestPath string                    `json:"compileUnitManifestPath"`
-	AllCompileFiles         []string                  `json:"allCompileFiles"`
-	CompileGroups           []CompileGroup            `json:"compileGroups"`
-	CompileUnits            []IntermediateCompileUnit `json:"compileUnits"`
-	PackageGraph            []PackageGraphPackage     `json:"packageGraph"`
-	Toolchain               AdapterToolchain          `json:"toolchain"`
+	BuildContext            BuildContext                 `json:"buildContext"`
+	EntryFile               string                       `json:"entryFile"`
+	OptimizeFlag            string                       `json:"optimizeFlag,omitempty"`
+	CompileUnitManifestPath string                       `json:"compileUnitManifestPath"`
+	AllCompileFiles         []string                     `json:"allCompileFiles"`
+	CompileGroups           []CompileGroup               `json:"compileGroups"`
+	CompileUnits            []IntermediateCompileUnit    `json:"compileUnits"`
+	PackageGraph            []PackageGraphPackage        `json:"packageGraph"`
+	UpstreamFrontendProbe   *UpstreamFrontendProbeResult `json:"upstreamFrontendProbe,omitempty"`
+	Toolchain               AdapterToolchain             `json:"toolchain"`
 }
 
 type AdapterResult struct {
@@ -236,28 +256,54 @@ type AdapterResult struct {
 }
 
 type Analysis struct {
-	EntryFile               string                    `json:"entryFile"`
-	BuildTags               []string                  `json:"buildTags"`
-	BuildContext            BuildContext              `json:"buildContext"`
-	ModulePath              string                    `json:"modulePath"`
-	PackageGraph            []PackageGraphPackage     `json:"packageGraph"`
-	OptimizeFlag            string                    `json:"optimizeFlag,omitempty"`
-	Toolchain               Toolchain                 `json:"toolchain"`
-	TargetAssets            []string                  `json:"targetAssets"`
-	RuntimeSupport          []string                  `json:"runtimeSupport"`
-	ProgramFiles            []string                  `json:"programFiles"`
-	ImportedFiles           []string                  `json:"importedFiles"`
-	StdlibFiles             []string                  `json:"stdlibFiles"`
-	AllCompileFiles         []string                  `json:"allCompileFiles"`
-	CompileUnits            []IntermediateCompileUnit `json:"compileUnits"`
-	CompileGroups           []CompileGroup            `json:"compileGroups"`
-	CompileUnitManifestPath string                    `json:"compileUnitManifestPath"`
-	BootstrapInput          tinygobootstrap.Input     `json:"bootstrapInput"`
-	IntermediateManifest    IntermediateManifest      `json:"intermediateManifest"`
-	LoweringManifest        LoweringManifest          `json:"loweringManifest"`
-	WorkItemsManifest       WorkItemsManifest         `json:"workItemsManifest"`
-	LoweringPlanManifest    LoweringPlanManifest      `json:"loweringPlanManifest"`
-	BackendInput            tinygobackend.Input       `json:"backendInput"`
+	EntryFile               string                       `json:"entryFile"`
+	BuildTags               []string                     `json:"buildTags"`
+	BuildContext            BuildContext                 `json:"buildContext"`
+	ModulePath              string                       `json:"modulePath"`
+	PackageGraph            []PackageGraphPackage        `json:"packageGraph"`
+	UpstreamFrontendProbe   *UpstreamFrontendProbeResult `json:"upstreamFrontendProbe,omitempty"`
+	OptimizeFlag            string                       `json:"optimizeFlag,omitempty"`
+	Toolchain               Toolchain                    `json:"toolchain"`
+	TargetAssets            []string                     `json:"targetAssets"`
+	RuntimeSupport          []string                     `json:"runtimeSupport"`
+	ProgramFiles            []string                     `json:"programFiles"`
+	ImportedFiles           []string                     `json:"importedFiles"`
+	StdlibFiles             []string                     `json:"stdlibFiles"`
+	AllCompileFiles         []string                     `json:"allCompileFiles"`
+	CompileUnits            []IntermediateCompileUnit    `json:"compileUnits"`
+	CompileGroups           []CompileGroup               `json:"compileGroups"`
+	CompileUnitManifestPath string                       `json:"compileUnitManifestPath"`
+	BootstrapInput          tinygobootstrap.Input        `json:"bootstrapInput"`
+	IntermediateManifest    IntermediateManifest         `json:"intermediateManifest"`
+	LoweringManifest        LoweringManifest             `json:"loweringManifest"`
+	WorkItemsManifest       WorkItemsManifest            `json:"workItemsManifest"`
+	LoweringPlanManifest    LoweringPlanManifest         `json:"loweringPlanManifest"`
+	BackendInput            tinygobackend.Input          `json:"backendInput"`
+}
+
+func cloneUpstreamFrontendProbeResult(input *UpstreamFrontendProbeResult) *UpstreamFrontendProbeResult {
+	if input == nil {
+		return nil
+	}
+	clone := &UpstreamFrontendProbeResult{
+		RequestedTarget:  input.RequestedTarget,
+		MainImportPath:   input.MainImportPath,
+		MainPackageName:  input.MainPackageName,
+		PackageCount:     input.PackageCount,
+		FileCount:        input.FileCount,
+		DeclarationCount: input.DeclarationCount,
+		Imports:          append([]string{}, input.Imports...),
+		Packages:         make([]UpstreamFrontendProbePackage, 0, len(input.Packages)),
+	}
+	for _, packageInfo := range input.Packages {
+		clone.Packages = append(clone.Packages, UpstreamFrontendProbePackage{
+			ImportPath: packageInfo.ImportPath,
+			Name:       packageInfo.Name,
+			FileCount:  packageInfo.FileCount,
+			Imports:    append([]string{}, packageInfo.Imports...),
+		})
+	}
+	return clone
 }
 
 func Analyze(input Input) (Analysis, error) {
@@ -824,6 +870,83 @@ func Analyze(input Input) (Analysis, error) {
 			Standard:   compileUnit.Standard,
 		})
 	}
+	upstreamFrontendProbe := cloneUpstreamFrontendProbeResult(input.UpstreamFrontendProbe)
+	if upstreamFrontendProbe != nil {
+		if upstreamFrontendProbe.RequestedTarget != "" && upstreamFrontendProbe.RequestedTarget != input.Toolchain.Target {
+			return Analysis{}, fmt.Errorf("upstream frontend probe target %q does not match toolchain target %q", upstreamFrontendProbe.RequestedTarget, input.Toolchain.Target)
+		}
+		if upstreamFrontendProbe.PackageCount != 0 && upstreamFrontendProbe.PackageCount != len(upstreamFrontendProbe.Packages) {
+			return Analysis{}, fmt.Errorf("upstream frontend probe packageCount does not match packages")
+		}
+		probePackages := map[string]UpstreamFrontendProbePackage{}
+		for _, packageInfo := range upstreamFrontendProbe.Packages {
+			if packageInfo.ImportPath == "" {
+				return Analysis{}, fmt.Errorf("upstream frontend probe packages must include importPath")
+			}
+			if _, ok := probePackages[packageInfo.ImportPath]; ok {
+				return Analysis{}, fmt.Errorf("upstream frontend probe packages must not repeat importPath %q", packageInfo.ImportPath)
+			}
+			probePackages[packageInfo.ImportPath] = packageInfo
+		}
+		if len(probePackages) < len(normalizedPackageGraph) {
+			return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+		}
+		sortedStringSlicesMatch := func(left, right []string) bool {
+			leftSorted := append([]string{}, left...)
+			rightSorted := append([]string{}, right...)
+			sort.Strings(leftSorted)
+			sort.Strings(rightSorted)
+			if len(leftSorted) != len(rightSorted) {
+				return false
+			}
+			for index := range leftSorted {
+				if leftSorted[index] != rightSorted[index] {
+					return false
+				}
+			}
+			return true
+		}
+		programPackage := PackageGraphPackage{}
+		programPackageCount := 0
+		for _, packageInfo := range normalizedPackageGraph {
+			if packageInfo.ImportPath == "" {
+				return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+			}
+			probePackage, ok := probePackages[packageInfo.ImportPath]
+			if !ok {
+				return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+			}
+			if packageInfo.Name != "" && probePackage.Name != "" && probePackage.Name != packageInfo.Name {
+				return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+			}
+			expectedFileCount := len(packageInfo.Files.GoFiles)
+			if packageInfo.ImportPath == "unsafe" {
+				expectedFileCount = 0
+			}
+			if probePackage.FileCount < expectedFileCount {
+				return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+			}
+			if !sortedStringSlicesMatch(packageInfo.Imports, probePackage.Imports) {
+				return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+			}
+			if !packageInfo.DepOnly && !packageInfo.Standard {
+				programPackage = packageInfo
+				programPackageCount++
+			}
+		}
+		if programPackageCount != 1 {
+			return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+		}
+		if upstreamFrontendProbe.MainImportPath != "" && upstreamFrontendProbe.MainImportPath != programPackage.ImportPath {
+			return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+		}
+		if upstreamFrontendProbe.MainPackageName != "" && upstreamFrontendProbe.MainPackageName != programPackage.Name {
+			return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+		}
+		if !sortedStringSlicesMatch(programPackage.Imports, upstreamFrontendProbe.Imports) {
+			return Analysis{}, fmt.Errorf("upstream frontend probe package summaries did not match frontend analysis")
+		}
+	}
 	normalizedBuildContext := BuildContext{
 		Target:     input.Toolchain.Target,
 		LLVMTarget: llvmTarget,
@@ -1086,6 +1209,7 @@ func Analyze(input Input) (Analysis, error) {
 		BuildContext:            normalizedBuildContext,
 		ModulePath:              input.ModulePath,
 		PackageGraph:            normalizedPackageGraph,
+		UpstreamFrontendProbe:   upstreamFrontendProbe,
 		OptimizeFlag:            input.OptimizeFlag,
 		Toolchain:               normalizedToolchain,
 		TargetAssets:            append([]string{}, targetAssets...),
@@ -1240,6 +1364,7 @@ func AdaptReal(analysis Analysis) (Adapter, error) {
 		CompileGroups:           compileGroups,
 		CompileUnits:            compileUnits,
 		PackageGraph:            append([]PackageGraphPackage{}, analysis.PackageGraph...),
+		UpstreamFrontendProbe:   cloneUpstreamFrontendProbeResult(analysis.UpstreamFrontendProbe),
 		Toolchain: AdapterToolchain{
 			Target:              analysis.Toolchain.Target,
 			LLVMTarget:          analysis.Toolchain.LLVMTarget,

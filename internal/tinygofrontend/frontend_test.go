@@ -91,6 +91,38 @@ func analysisSplitTestInput() Input {
 	}
 }
 
+func upstreamFrontendProbeTestResult() *UpstreamFrontendProbeResult {
+	return &UpstreamFrontendProbeResult{
+		RequestedTarget:  "wasm",
+		MainImportPath:   "command-line-arguments",
+		MainPackageName:  "main",
+		PackageCount:     3,
+		FileCount:        3,
+		DeclarationCount: 7,
+		Imports:          []string{"example.com/app/lib"},
+		Packages: []UpstreamFrontendProbePackage{
+			{
+				ImportPath: "command-line-arguments",
+				Name:       "main",
+				FileCount:  1,
+				Imports:    []string{"example.com/app/lib"},
+			},
+			{
+				ImportPath: "example.com/app/lib",
+				Name:       "helper",
+				FileCount:  1,
+				Imports:    []string{"fmt"},
+			},
+			{
+				ImportPath: "fmt",
+				Name:       "fmt",
+				FileCount:  1,
+				Imports:    []string{"errors", "io"},
+			},
+		},
+	}
+}
+
 func TestAnalyzeNormalizesFrontendBuildState(t *testing.T) {
 	analysis, err := Analyze(analysisSplitTestInput())
 	if err != nil {
@@ -153,6 +185,52 @@ func TestAnalyzeNormalizesFrontendBuildState(t *testing.T) {
 		{DepOnly: true, Dir: "/working/.tinygo-root/src/fmt", Files: PackageGraphFiles{GoFiles: []string{"print.go"}}, ImportPath: "fmt", Imports: []string{"errors", "io"}, ModulePath: "", Name: "fmt", Standard: true},
 	}) {
 		t.Fatalf("unexpected analysis package graph: %#v", analysis.PackageGraph)
+	}
+}
+
+func TestAnalyzePreservesUpstreamFrontendProbeFacts(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.UpstreamFrontendProbe = upstreamFrontendProbeTestResult()
+
+	analysis, err := Analyze(input)
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(analysis.UpstreamFrontendProbe, input.UpstreamFrontendProbe) {
+		t.Fatalf("unexpected analysis upstream frontend probe: %#v", analysis.UpstreamFrontendProbe)
+	}
+	input.UpstreamFrontendProbe.Packages[0].Imports[0] = "changed"
+	if reflect.DeepEqual(analysis.UpstreamFrontendProbe, input.UpstreamFrontendProbe) {
+		t.Fatalf("analysis upstream frontend probe aliased input: %#v", analysis.UpstreamFrontendProbe)
+	}
+
+	adapter, err := BuildRealAdapter(analysisSplitTestInputWithUpstreamFrontendProbe())
+	if err != nil {
+		t.Fatalf("BuildRealAdapter returned error: %v", err)
+	}
+	if !reflect.DeepEqual(adapter.UpstreamFrontendProbe, analysis.UpstreamFrontendProbe) {
+		t.Fatalf("unexpected adapter upstream frontend probe: %#v", adapter.UpstreamFrontendProbe)
+	}
+}
+
+func analysisSplitTestInputWithUpstreamFrontendProbe() Input {
+	input := analysisSplitTestInput()
+	input.UpstreamFrontendProbe = upstreamFrontendProbeTestResult()
+	return input
+}
+
+func TestAnalyzeRejectsMismatchedUpstreamFrontendProbeFacts(t *testing.T) {
+	input := analysisSplitTestInput()
+	input.UpstreamFrontendProbe = upstreamFrontendProbeTestResult()
+	input.UpstreamFrontendProbe.Packages[1].Imports = []string{"io"}
+
+	_, err := Analyze(input)
+	if err == nil {
+		t.Fatal("Analyze succeeded without matching upstream frontend probe facts")
+	}
+	if !strings.Contains(err.Error(), "upstream frontend probe package summaries did not match frontend analysis") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
