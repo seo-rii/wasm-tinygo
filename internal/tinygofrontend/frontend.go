@@ -872,9 +872,6 @@ func Analyze(input Input) (Analysis, error) {
 	}
 	upstreamFrontendProbe := cloneUpstreamFrontendProbeResult(input.UpstreamFrontendProbe)
 	if upstreamFrontendProbe != nil {
-		if upstreamFrontendProbe.RequestedTarget != "" && upstreamFrontendProbe.RequestedTarget != input.Toolchain.Target {
-			return Analysis{}, fmt.Errorf("upstream frontend probe target %q does not match toolchain target %q", upstreamFrontendProbe.RequestedTarget, input.Toolchain.Target)
-		}
 		if upstreamFrontendProbe.PackageCount != 0 && upstreamFrontendProbe.PackageCount != len(upstreamFrontendProbe.Packages) {
 			return Analysis{}, fmt.Errorf("upstream frontend probe packageCount does not match packages")
 		}

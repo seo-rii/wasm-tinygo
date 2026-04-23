@@ -93,7 +93,7 @@ func analysisSplitTestInput() Input {
 
 func upstreamFrontendProbeTestResult() *UpstreamFrontendProbeResult {
 	return &UpstreamFrontendProbeResult{
-		RequestedTarget:  "wasm",
+		RequestedTarget:  "wasip1",
 		MainImportPath:   "command-line-arguments",
 		MainPackageName:  "main",
 		PackageCount:     3,
