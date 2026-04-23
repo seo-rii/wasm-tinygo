@@ -87,8 +87,16 @@ func Factorial(n int) int {
 \treturn n * Factorial(n-1)
 }
 
+func Sum(n int) int {
+\ttotal := 0
+\tfor i := 1; i <= n; i++ {
+\t\ttotal = total + i
+\t}
+\treturn total
+}
+
 func Total(n int) int {
-\treturn Factorial(n) + Bonus
+\treturn Factorial(n) + Sum(2)
 }
 `,
     'main.go': `package main

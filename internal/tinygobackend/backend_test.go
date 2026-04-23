@@ -1080,8 +1080,16 @@ func Factorial(n int) int {
 	return n * Factorial(n-1)
 }
 
+func Sum(n int) int {
+	total := 0
+	for i := 1; i <= n; i++ {
+		total = total + i
+	}
+	return total
+}
+
 func Total(n int) int {
-	return Factorial(n) + Bonus
+	return Factorial(n) + Sum(2)
 }
 `), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(helper.go): %v", err)
@@ -1170,6 +1178,12 @@ func Total(n int) int {
 	}
 	if !strings.Contains(importedLoweredSource, "int tinygo_imported_000_Factorial(int n)") {
 		t.Fatalf("expected imported lowered source to lower recursive helper, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "int tinygo_imported_000_Sum(int n)") {
+		t.Fatalf("expected imported lowered source to lower loop helper, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "for (int i = 1; (i <= n); i += 1)") {
+		t.Fatalf("expected imported lowered source to lower helper loop, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "int tinygo_imported_000_Total(int n)") {
 		t.Fatalf("expected imported lowered source to lower exported int helper, got: %q", importedLoweredSource)
