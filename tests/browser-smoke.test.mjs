@@ -57,6 +57,7 @@ go 1.22
 import "fmt"
 
 const bonus = 3
+const label = "factorial_plus_bonus"
 
 func factorial(n int) int {
 \tif n <= 1 {
@@ -66,7 +67,6 @@ func factorial(n int) int {
 }
 
 func main() {
-\tlabel := "factorial_plus_bonus"
 \tfmt.Printf("%s=%d input=%d\\n", label, factorial(5)+bonus, 5)
 }
 `,
@@ -81,6 +81,8 @@ go 1.22
 import "fmt"
 
 const Bonus = 3
+const InputLabel = "helper_input"
+const OutputLabel = "imported_total"
 
 func Factorial(n int) int {
 \tif n <= 1 {
@@ -98,12 +100,11 @@ func Sum(n int) int {
 }
 
 func Report(n int) {
-\tlabel := "helper_input"
-\tfmt.Printf("%s=%d\\n", label, n)
+\tfmt.Printf("%s=%d\\n", InputLabel, n)
 }
 
 func Label() string {
-\treturn "imported_total"
+\treturn OutputLabel
 }
 
 func Total(n int) int {

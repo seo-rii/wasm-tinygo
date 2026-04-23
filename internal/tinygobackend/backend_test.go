@@ -734,7 +734,7 @@ func TestBuildProducesRunnableExecutionArtifactsForSimpleProgramSubset(t *testin
 func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testing.T) {
 	dir := t.TempDir()
 	entryPath := filepath.Join(dir, "main.go")
-	starterSource := "package main\n\nimport (\n\t\"bufio\"\n\t\"fmt\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nconst bonus = 3\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tline, _ := bufio.NewReader(os.Stdin).ReadString('\\n')\n\tn, err := strconv.Atoi(strings.TrimSpace(line))\n\tif err != nil {\n\t\tn = 4\n\t}\n\tlabel := \"factorial_plus_bonus\"\n\tfmt.Printf(\"%s=%d input=%d\\n\", label, factorial(n)+bonus, n)\n}\n"
+	starterSource := "package main\n\nimport (\n\t\"bufio\"\n\t\"fmt\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nconst bonus = 3\nconst label = \"factorial_plus_bonus\"\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tline, _ := bufio.NewReader(os.Stdin).ReadString('\\n')\n\tn, err := strconv.Atoi(strings.TrimSpace(line))\n\tif err != nil {\n\t\tn = 4\n\t}\n\tfmt.Printf(\"%s=%d input=%d\\n\", label, factorial(n)+bonus, n)\n}\n"
 	if err := os.WriteFile(entryPath, []byte(starterSource), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(main.go): %v", err)
 	}
@@ -885,8 +885,8 @@ func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testin
 	if !strings.Contains(loweredSourceContents, "err = tinygo_runtime_parse_i32(tinygo_runtime_trim_space(line), &n);") {
 		t.Fatalf("expected lowered source to lower strconv.Atoi(strings.TrimSpace(...)), got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "char *label = \"factorial_plus_bonus\";") {
-		t.Fatalf("expected lowered source to lower string local variables, got: %q", loweredSourceContents)
+	if !strings.Contains(loweredSourceContents, "static char *label = \"factorial_plus_bonus\";") {
+		t.Fatalf("expected lowered source to lower string constants, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "char *tinygo_printf_arg_000 = label;") {
 		t.Fatalf("expected lowered source to evaluate fmt.Printf string placeholder first, got: %q", loweredSourceContents)
@@ -1094,6 +1094,8 @@ func main() {
 import "fmt"
 
 const Bonus = 3
+const InputLabel = "helper_input"
+const OutputLabel = "imported_total"
 
 func Factorial(n int) int {
 	if n <= 1 {
@@ -1111,12 +1113,11 @@ func Sum(n int) int {
 }
 
 func Report(n int) {
-	label := "helper_input"
-	fmt.Printf("%s=%d\n", label, n)
+	fmt.Printf("%s=%d\n", InputLabel, n)
 }
 
 func Label() string {
-	return "imported_total"
+	return OutputLabel
 }
 
 func Total(n int) int {
@@ -1220,6 +1221,12 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "static const int tinygo_imported_000_Bonus = 3;") {
 		t.Fatalf("expected imported lowered source to prefix imported constants, got: %q", importedLoweredSource)
 	}
+	if !strings.Contains(importedLoweredSource, "static char *tinygo_imported_000_InputLabel = \"helper_input\";") {
+		t.Fatalf("expected imported lowered source to prefix imported string constants, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "static char *tinygo_imported_000_OutputLabel = \"imported_total\";") {
+		t.Fatalf("expected imported lowered source to prefix imported string constants, got: %q", importedLoweredSource)
+	}
 	if !strings.Contains(importedLoweredSource, "int tinygo_imported_000_Factorial(int n)") {
 		t.Fatalf("expected imported lowered source to lower recursive helper, got: %q", importedLoweredSource)
 	}
@@ -1232,7 +1239,7 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "void tinygo_imported_000_Report(int n)") {
 		t.Fatalf("expected imported lowered source to lower void helper with int parameter, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "char *tinygo_printf_arg_000 = label;") {
+	if !strings.Contains(importedLoweredSource, "char *tinygo_printf_arg_000 = tinygo_imported_000_InputLabel;") {
 		t.Fatalf("expected imported lowered source to evaluate fmt.Printf string placeholder first, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "tinygo_runtime_print_string(tinygo_printf_arg_000, 0);") {
@@ -1253,8 +1260,8 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "char* tinygo_imported_000_Label(void)") {
 		t.Fatalf("expected imported lowered source to lower exported string helper, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "return \"imported_total\";") {
-		t.Fatalf("expected imported lowered source to return string literal from helper, got: %q", importedLoweredSource)
+	if !strings.Contains(importedLoweredSource, "return tinygo_imported_000_OutputLabel;") {
+		t.Fatalf("expected imported lowered source to return string constant from helper, got: %q", importedLoweredSource)
 	}
 
 	var commandArtifactManifest struct {

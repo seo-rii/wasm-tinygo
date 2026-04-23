@@ -249,6 +249,7 @@ func Build(input Input) (Result, error) {
 		ImportedPackages    map[string]*runnablePackage
 		ConstantOrder       []string
 		ConstantDefinitions map[string]string
+		ConstantKinds       map[string]string
 		ConstantSymbols     map[string]string
 		FunctionOrder       []string
 		FunctionDecls       map[string]*ast.FuncDecl
@@ -296,6 +297,7 @@ func Build(input Input) (Result, error) {
 			ImportedPackages:    map[string]*runnablePackage{},
 			ConstantOrder:       make([]string, 0),
 			ConstantDefinitions: map[string]string{},
+			ConstantKinds:       map[string]string{},
 			ConstantSymbols:     map[string]string{},
 			FunctionOrder:       make([]string, 0),
 			FunctionDecls:       map[string]*ast.FuncDecl{},
@@ -373,7 +375,7 @@ func Build(input Input) (Result, error) {
 							}
 							if valueSpec.Type != nil {
 								typeIdent, ok := valueSpec.Type.(*ast.Ident)
-								if !ok || typeIdent.Name != "int" {
+								if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string") {
 									runnablePackageFailures[loweredUnit.ID] = true
 									return nil, false
 								}
@@ -393,13 +395,26 @@ func Build(input Input) (Result, error) {
 								}
 								switch typedValue := valueSpec.Values[index].(type) {
 								case *ast.BasicLit:
-									if typedValue.Kind != token.INT {
+									switch typedValue.Kind {
+									case token.INT:
+										pkg.ConstantOrder = append(pkg.ConstantOrder, name.Name)
+										pkg.ConstantKinds[name.Name] = "int"
+										pkg.ConstantSymbols[name.Name] = constantSymbol
+										pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", constantSymbol, typedValue.Value)
+									case token.STRING:
+										unquotedValue, err := strconv.Unquote(typedValue.Value)
+										if err != nil {
+											runnablePackageFailures[loweredUnit.ID] = true
+											return nil, false
+										}
+										pkg.ConstantOrder = append(pkg.ConstantOrder, name.Name)
+										pkg.ConstantKinds[name.Name] = "string"
+										pkg.ConstantSymbols[name.Name] = constantSymbol
+										pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static char *%s = %s;\n", constantSymbol, strconv.Quote(unquotedValue))
+									default:
 										runnablePackageFailures[loweredUnit.ID] = true
 										return nil, false
 									}
-									pkg.ConstantOrder = append(pkg.ConstantOrder, name.Name)
-									pkg.ConstantSymbols[name.Name] = constantSymbol
-									pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", constantSymbol, typedValue.Value)
 								case *ast.UnaryExpr:
 									if typedValue.Op != token.SUB {
 										runnablePackageFailures[loweredUnit.ID] = true
@@ -411,6 +426,7 @@ func Build(input Input) (Result, error) {
 										return nil, false
 									}
 									pkg.ConstantOrder = append(pkg.ConstantOrder, name.Name)
+									pkg.ConstantKinds[name.Name] = "int"
 									pkg.ConstantSymbols[name.Name] = constantSymbol
 									pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = -%s;\n", constantSymbol, basicValue.Value)
 								default:
@@ -660,7 +676,11 @@ func Build(input Input) (Result, error) {
 				return typedExpression.Name, localKind, 0, true
 			}
 			if constantSymbol, ok := pkg.ConstantSymbols[typedExpression.Name]; ok {
-				return constantSymbol, "int", 0, true
+				constantKind, ok := pkg.ConstantKinds[typedExpression.Name]
+				if !ok {
+					return "", "", 0, false
+				}
+				return constantSymbol, constantKind, 0, true
 			}
 			if typedExpression.Name == "nil" {
 				return "0", "nil", 0, true
@@ -3290,6 +3310,7 @@ func Build(input Input) (Result, error) {
 			}
 			aliasToImportPath := map[string]string{}
 			topLevelConstants := map[string]struct{}{}
+			topLevelConstantKinds := map[string]string{}
 			topLevelFunctionReturnsInt := map[string]bool{}
 			topLevelFunctionDefinitions := map[string]string{}
 			topLevelFunctionParameters := map[string][]string{}
@@ -3350,7 +3371,7 @@ func Build(input Input) (Result, error) {
 							}
 							if valueSpec.Type != nil {
 								typeIdent, ok := valueSpec.Type.(*ast.Ident)
-								if !ok || typeIdent.Name != "int" {
+								if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string") {
 									supportsRunnableProgram = false
 									continue
 								}
@@ -3363,13 +3384,26 @@ func Build(input Input) (Result, error) {
 								valueExpression := valueSpec.Values[index]
 								switch typedValue := valueExpression.(type) {
 								case *ast.BasicLit:
-									if typedValue.Kind != token.INT {
+									switch typedValue.Kind {
+									case token.INT:
+										topLevelConstants[name.Name] = struct{}{}
+										topLevelConstantKinds[name.Name] = "int"
+										constantOrder = append(constantOrder, name.Name)
+										topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", name.Name, typedValue.Value)
+									case token.STRING:
+										unquotedValue, err := strconv.Unquote(typedValue.Value)
+										if err != nil {
+											supportsRunnableProgram = false
+											continue
+										}
+										topLevelConstants[name.Name] = struct{}{}
+										topLevelConstantKinds[name.Name] = "string"
+										constantOrder = append(constantOrder, name.Name)
+										topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static char *%s = %s;\n", name.Name, strconv.Quote(unquotedValue))
+									default:
 										supportsRunnableProgram = false
 										continue
 									}
-									topLevelConstants[name.Name] = struct{}{}
-									constantOrder = append(constantOrder, name.Name)
-									topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", name.Name, typedValue.Value)
 								case *ast.UnaryExpr:
 									if typedValue.Op != token.SUB {
 										supportsRunnableProgram = false
@@ -3381,6 +3415,7 @@ func Build(input Input) (Result, error) {
 										continue
 									}
 									topLevelConstants[name.Name] = struct{}{}
+									topLevelConstantKinds[name.Name] = "int"
 									constantOrder = append(constantOrder, name.Name)
 									topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = -%s;\n", name.Name, basicValue.Value)
 								default:
@@ -3486,7 +3521,11 @@ func Build(input Input) (Result, error) {
 							return typedExpression.Name, localKind, 0, true
 						}
 						if _, ok := topLevelConstants[typedExpression.Name]; ok {
-							return typedExpression.Name, "int", 0, true
+							constantKind, ok := topLevelConstantKinds[typedExpression.Name]
+							if !ok {
+								return "", "", 0, false
+							}
+							return typedExpression.Name, constantKind, 0, true
 						}
 						if typedExpression.Name == "nil" {
 							return "0", "nil", 0, true
