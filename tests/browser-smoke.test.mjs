@@ -54,6 +54,8 @@ go 1.22
 `,
     'main.go': `package main
 
+import "fmt"
+
 const bonus = 3
 
 func factorial(n int) int {
@@ -64,8 +66,8 @@ func factorial(n int) int {
 }
 
 func main() {
-\tprint("factorial_plus_bonus=")
-\tprintln(factorial(5) + bonus)
+\tfmt.Print("factorial_plus_bonus=")
+\tfmt.Println(factorial(5) + bonus)
 }
 `,
   }

@@ -3793,6 +3793,7 @@ export const verifyCommandBatchAgainstLoweringPlanAndLoweredSourcesManifest = (
 export const verifyCommandBatchAgainstBackendInputManifest = (
   backendInputManifest: TinyGoBackendInputManifest,
   commandBatchManifest: TinyGoCommandBatchManifest,
+  commandArtifactManifest?: TinyGoCommandArtifactManifest,
 ) => {
   const loweredUnitsByID = new Map(
     deriveLoweredUnitsFromBackendInputManifest(
@@ -3836,10 +3837,21 @@ export const verifyCommandBatchAgainstBackendInputManifest = (
   }
 
   const linkJob = backendInputManifest.executionLinkJob ?? backendInputManifest.linkJob ?? {}
+  const ldflags = [...(linkJob.ldflags ?? [])]
+  if (commandArtifactManifest?.runnable === true && commandArtifactManifest.entrypoint === 'main') {
+    const hasNoEntry = ldflags.includes('--no-entry')
+    const hasMainExport = ldflags.includes('--export=main') || ldflags.includes('--export-all')
+    if (!hasNoEntry) {
+      ldflags.push('--no-entry')
+    }
+    if (!hasMainExport) {
+      ldflags.push('--export=main')
+    }
+  }
   const linkCommand = {
     argv: [
       `/usr/bin/${linkJob.linker ?? ''}`,
-      ...(linkJob.ldflags ?? []),
+      ...ldflags,
       ...deriveExecutionLinkBitcodeInputsFromBackendInputManifest(
         backendInputManifest,
         'frontend command batch did not match backend input manifest',
@@ -4250,6 +4262,7 @@ export const verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeMani
     commandBatch: verifyCommandBatchAgainstBackendInputManifest(
       backendInputManifest,
       commandBatchManifest,
+      commandArtifactManifest,
     ),
   }
 }

@@ -5271,7 +5271,10 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
         path: '/working/tinygo-command-artifact.json',
         contents: JSON.stringify({
           artifactOutputPath: '/working/out.wasm',
+          artifactKind: 'execution',
           bitcodeFiles: ['/working/tinygo-work/program-000.bc'],
+          entrypoint: 'main',
+          runnable: true,
         }),
       },
       {
@@ -5284,7 +5287,7 @@ test('verifyBackendResultManifestAgainstBackendInputAndLoweredBitcodeManifest ac
             },
           ],
           linkCommand: {
-            argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '/working/tinygo-work/program-000.bc', '-o', '/working/out.wasm'],
+            argv: ['/usr/bin/wasm-ld', '--stack-first', '--no-demangle', '--no-entry', '--export=main', '/working/tinygo-work/program-000.bc', '-o', '/working/out.wasm'],
             cwd: '/working',
           },
         }),

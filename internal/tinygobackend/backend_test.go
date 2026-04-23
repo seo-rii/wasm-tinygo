@@ -463,8 +463,11 @@ func main() {
 	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-lowered-command-batch.json"]), &loweredCommandBatch); err != nil {
 		t.Fatalf("json.Unmarshal(lowered-command-batch): %v", err)
 	}
-	if slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--no-entry") || slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--export-all") {
-		t.Fatalf("expected lowered execution link command to omit probe-only flags, got %#v", loweredCommandBatch.LinkCommand.Argv)
+	if !slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--no-entry") || !slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--export=main") {
+		t.Fatalf("expected lowered execution link command to export the main entrypoint, got %#v", loweredCommandBatch.LinkCommand.Argv)
+	}
+	if slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--export-all") {
+		t.Fatalf("expected lowered execution link command to omit export-all probe flag, got %#v", loweredCommandBatch.LinkCommand.Argv)
 	}
 	if !slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--stack-first") || !slices.Contains(loweredCommandBatch.LinkCommand.Argv, "--no-demangle") {
 		t.Fatalf("expected lowered execution link command to preserve execution ldflags, got %#v", loweredCommandBatch.LinkCommand.Argv)
@@ -474,8 +477,11 @@ func main() {
 	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-command-batch.json"]), &commandBatch); err != nil {
 		t.Fatalf("json.Unmarshal(command-batch): %v", err)
 	}
-	if slices.Contains(commandBatch.LinkCommand.Argv, "--no-entry") || slices.Contains(commandBatch.LinkCommand.Argv, "--export-all") {
-		t.Fatalf("expected final execution link command to omit probe-only flags, got %#v", commandBatch.LinkCommand.Argv)
+	if !slices.Contains(commandBatch.LinkCommand.Argv, "--no-entry") || !slices.Contains(commandBatch.LinkCommand.Argv, "--export=main") {
+		t.Fatalf("expected final execution link command to export the main entrypoint, got %#v", commandBatch.LinkCommand.Argv)
+	}
+	if slices.Contains(commandBatch.LinkCommand.Argv, "--export-all") {
+		t.Fatalf("expected final execution link command to omit export-all probe flag, got %#v", commandBatch.LinkCommand.Argv)
 	}
 	if !slices.Contains(commandBatch.LinkCommand.Argv, "--stack-first") || !slices.Contains(commandBatch.LinkCommand.Argv, "--no-demangle") {
 		t.Fatalf("expected final execution link command to preserve execution ldflags, got %#v", commandBatch.LinkCommand.Argv)
@@ -496,6 +502,82 @@ func main() {
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32((factorial(5) + bonus), 1);") {
 		t.Fatalf("expected lowered source to lower println integer payload, got: %q", loweredSourceContents)
+	}
+}
+
+func TestBuildMarksFmtPrintProgramArtifactsRunnable(t *testing.T) {
+	tempDir := t.TempDir()
+	entryPath := filepath.Join(tempDir, "main.go")
+	if err := os.WriteFile(entryPath, []byte(`package main
+
+import "fmt"
+
+const bonus = 3
+
+func factorial(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	return n * factorial(n-1)
+}
+
+func main() {
+	fmt.Print("factorial_plus_bonus=")
+	fmt.Println(factorial(5) + bonus)
+}
+`), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(main.go): %v", err)
+	}
+
+	result, err := Build(Input{
+		EntryFile: entryPath,
+		CompileJobs: []CompileJob{
+			{
+				ID:                "program-000",
+				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{"fmt"},
+				DepOnly:           false,
+				ModulePath:        "example.com/app",
+				PackageName:       "main",
+				PackageDir:        tempDir,
+				Files:             []string{entryPath},
+				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory", "-mnontrapping-fptoint"},
+				OptimizeFlag:      "-Oz",
+				Standard:          false,
+			},
+		},
+		LinkJob: LinkJob{
+			Linker:             "wasm-ld",
+			LDFlags:            []string{"--stack-first", "--no-demangle"},
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	generatedFilesByPath := map[string]string{}
+	for _, generatedFile := range result.GeneratedFiles {
+		generatedFilesByPath[generatedFile.Path] = generatedFile.Contents
+	}
+
+	var commandArtifactManifest CommandArtifactManifest
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-command-artifact.json"]), &commandArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(command-artifact): %v", err)
+	}
+	if commandArtifactManifest.ArtifactKind != "execution" || commandArtifactManifest.Entrypoint == nil || *commandArtifactManifest.Entrypoint != "main" || !commandArtifactManifest.Runnable {
+		t.Fatalf("expected runnable command artifact manifest, got %#v", commandArtifactManifest)
+	}
+
+	loweredSourceContents := generatedFilesByPath["/working/tinygo-lowered/program-000.c"]
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"factorial_plus_bonus=\", 21u, 0);") {
+		t.Fatalf("expected lowered source to lower fmt.Print string payload, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32((factorial(5) + bonus), 1);") {
+		t.Fatalf("expected lowered source to lower fmt.Println integer payload, got: %q", loweredSourceContents)
 	}
 }
 

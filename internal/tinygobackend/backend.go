@@ -3051,6 +3051,30 @@ func Build(input Input) (Result, error) {
 								continue
 							}
 							if importPath, selectorName, ok := resolveImportedSelector(callExpression.Fun); ok {
+								if importPath == "fmt" && (selectorName == "Print" || selectorName == "Println") {
+									for argumentIndex, argument := range callExpression.Args {
+										translatedArgument, argumentKind, byteLength, argumentOK := translateExpression(argument, locals)
+										if !argumentOK {
+											return "", false
+										}
+										newline := 0
+										if selectorName == "Println" && argumentIndex == len(callExpression.Args)-1 {
+											newline = 1
+										}
+										switch argumentKind {
+										case "string":
+											translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
+										case "int":
+											translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
+										default:
+											return "", false
+										}
+									}
+									if selectorName == "Println" && len(callExpression.Args) == 0 {
+										translatedStatements.WriteString("\ttinygo_runtime_print_newline();\n")
+									}
+									continue
+								}
 								if importPath == "fmt" && selectorName == "Printf" && len(callExpression.Args) == 2 {
 									formatArgument, ok := callExpression.Args[0].(*ast.BasicLit)
 									if !ok || formatArgument.Kind != token.STRING {
@@ -3678,7 +3702,26 @@ func Build(input Input) (Result, error) {
 	linkCommandArgv := []string{
 		"/usr/bin/" + executionLinkJob.Linker,
 	}
-	linkCommandArgv = append(linkCommandArgv, executionLinkJob.LDFlags...)
+	executionLDFlags := append([]string{}, executionLinkJob.LDFlags...)
+	if runnableCommandArtifactEntrypoint != nil && *runnableCommandArtifactEntrypoint == "main" {
+		hasNoEntry := false
+		hasMainExport := false
+		for _, flag := range executionLDFlags {
+			if flag == "--no-entry" {
+				hasNoEntry = true
+			}
+			if flag == "--export=main" || flag == "--export-all" {
+				hasMainExport = true
+			}
+		}
+		if !hasNoEntry {
+			executionLDFlags = append(executionLDFlags, "--no-entry")
+		}
+		if !hasMainExport {
+			executionLDFlags = append(executionLDFlags, "--export=main")
+		}
+	}
+	linkCommandArgv = append(linkCommandArgv, executionLDFlags...)
 	linkCommandArgv = append(linkCommandArgv, executionLinkBitcodeInputs...)
 	linkCommandArgv = append(linkCommandArgv, "-o", executionLinkJob.ArtifactOutputPath)
 
@@ -3695,7 +3738,26 @@ func Build(input Input) (Result, error) {
 	loweredLinkCommandArgv := []string{
 		"/usr/bin/" + input.LinkJob.Linker,
 	}
-	loweredLinkCommandArgv = append(loweredLinkCommandArgv, input.LinkJob.LDFlags...)
+	loweredLDFlags := append([]string{}, input.LinkJob.LDFlags...)
+	if runnableLoweredArtifactEntrypoint != nil && *runnableLoweredArtifactEntrypoint == "main" {
+		hasNoEntry := false
+		hasMainExport := false
+		for _, flag := range loweredLDFlags {
+			if flag == "--no-entry" {
+				hasNoEntry = true
+			}
+			if flag == "--export=main" || flag == "--export-all" {
+				hasMainExport = true
+			}
+		}
+		if !hasNoEntry {
+			loweredLDFlags = append(loweredLDFlags, "--no-entry")
+		}
+		if !hasMainExport {
+			loweredLDFlags = append(loweredLDFlags, "--export=main")
+		}
+	}
+	loweredLinkCommandArgv = append(loweredLinkCommandArgv, loweredLDFlags...)
 	loweredLinkCommandArgv = append(loweredLinkCommandArgv, loweredObjectFiles...)
 	loweredLinkCommandArgv = append(loweredLinkCommandArgv, "-o", "/working/tinygo-lowered-out.wasm")
 	loweredCommandBatchManifestContents, err := json.Marshal(CommandBatchManifest{
