@@ -808,8 +808,8 @@ func Build(input Input) (Result, error) {
 			return "", "", 0, false
 		}
 	}
-	var translateRunnableStatementList func(*runnablePackage, []ast.Stmt, map[string]string, string) (string, bool)
-	translateRunnableStatementList = func(pkg *runnablePackage, statements []ast.Stmt, locals map[string]string, functionReturnKind string) (string, bool) {
+	var translateRunnableStatementList func(*runnablePackage, []ast.Stmt, map[string]string, string, int) (string, bool)
+	translateRunnableStatementList = func(pkg *runnablePackage, statements []ast.Stmt, locals map[string]string, functionReturnKind string, loopDepth int) (string, bool) {
 		var translatedStatements strings.Builder
 		for _, statement := range statements {
 			switch typedStatement := statement.(type) {
@@ -978,6 +978,18 @@ func Build(input Input) (Result, error) {
 				default:
 					return "", false
 				}
+			case *ast.BranchStmt:
+				if typedStatement.Label != nil || loopDepth == 0 {
+					return "", false
+				}
+				switch typedStatement.Tok {
+				case token.BREAK:
+					translatedStatements.WriteString("\tbreak;\n")
+				case token.CONTINUE:
+					translatedStatements.WriteString("\tcontinue;\n")
+				default:
+					return "", false
+				}
 			case *ast.IfStmt:
 				if typedStatement.Init != nil {
 					return "", false
@@ -986,7 +998,7 @@ func Build(input Input) (Result, error) {
 				if !conditionOK || conditionKind != "int" {
 					return "", false
 				}
-				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, locals, functionReturnKind)
+				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, locals, functionReturnKind, loopDepth)
 				if !bodyOK {
 					return "", false
 				}
@@ -994,13 +1006,13 @@ func Build(input Input) (Result, error) {
 				if typedStatement.Else != nil {
 					switch typedElse := typedStatement.Else.(type) {
 					case *ast.BlockStmt:
-						translatedElse, elseOK := translateRunnableStatementList(pkg, typedElse.List, locals, functionReturnKind)
+						translatedElse, elseOK := translateRunnableStatementList(pkg, typedElse.List, locals, functionReturnKind, loopDepth)
 						if !elseOK {
 							return "", false
 						}
 						translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", translatedElse))
 					case *ast.IfStmt:
-						translatedElse, elseOK := translateRunnableStatementList(pkg, []ast.Stmt{typedElse}, locals, functionReturnKind)
+						translatedElse, elseOK := translateRunnableStatementList(pkg, []ast.Stmt{typedElse}, locals, functionReturnKind, loopDepth)
 						if !elseOK {
 							return "", false
 						}
@@ -1096,7 +1108,7 @@ func Build(input Input) (Result, error) {
 						return "", false
 					}
 				}
-				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, loopLocals, functionReturnKind)
+				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, loopLocals, functionReturnKind, loopDepth+1)
 				if !bodyOK {
 					return "", false
 				}
@@ -1165,7 +1177,7 @@ func Build(input Input) (Result, error) {
 			for _, parameterName := range pkg.FunctionParameters[functionName] {
 				locals[parameterName] = "int"
 			}
-			translatedBody, bodyOK := translateRunnableStatementList(pkg, functionDecl.Body.List, locals, pkg.FunctionReturnKinds[functionName])
+			translatedBody, bodyOK := translateRunnableStatementList(pkg, functionDecl.Body.List, locals, pkg.FunctionReturnKinds[functionName], 0)
 			if !bodyOK {
 				return nil, nil, nil, false
 			}
@@ -3669,8 +3681,8 @@ func Build(input Input) (Result, error) {
 						return "", "", 0, false
 					}
 				}
-				var translateStatementList func([]ast.Stmt, map[string]string, bool) (string, bool)
-				translateStatementList = func(statements []ast.Stmt, locals map[string]string, functionReturnsInt bool) (string, bool) {
+				var translateStatementList func([]ast.Stmt, map[string]string, bool, int) (string, bool)
+				translateStatementList = func(statements []ast.Stmt, locals map[string]string, functionReturnsInt bool, loopDepth int) (string, bool) {
 					var translatedStatements strings.Builder
 					for _, statement := range statements {
 						switch typedStatement := statement.(type) {
@@ -3869,6 +3881,18 @@ func Build(input Input) (Result, error) {
 							default:
 								return "", false
 							}
+						case *ast.BranchStmt:
+							if typedStatement.Label != nil || loopDepth == 0 {
+								return "", false
+							}
+							switch typedStatement.Tok {
+							case token.BREAK:
+								translatedStatements.WriteString("\tbreak;\n")
+							case token.CONTINUE:
+								translatedStatements.WriteString("\tcontinue;\n")
+							default:
+								return "", false
+							}
 						case *ast.IfStmt:
 							if typedStatement.Init != nil {
 								return "", false
@@ -3877,7 +3901,7 @@ func Build(input Input) (Result, error) {
 							if !conditionOK || conditionKind != "int" {
 								return "", false
 							}
-							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, locals, functionReturnsInt)
+							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, locals, functionReturnsInt, loopDepth)
 							if !bodyOK {
 								return "", false
 							}
@@ -3885,13 +3909,13 @@ func Build(input Input) (Result, error) {
 							if typedStatement.Else != nil {
 								switch typedElse := typedStatement.Else.(type) {
 								case *ast.BlockStmt:
-									translatedElse, elseOK := translateStatementList(typedElse.List, locals, functionReturnsInt)
+									translatedElse, elseOK := translateStatementList(typedElse.List, locals, functionReturnsInt, loopDepth)
 									if !elseOK {
 										return "", false
 									}
 									translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", translatedElse))
 								case *ast.IfStmt:
-									translatedElse, elseOK := translateStatementList([]ast.Stmt{typedElse}, locals, functionReturnsInt)
+									translatedElse, elseOK := translateStatementList([]ast.Stmt{typedElse}, locals, functionReturnsInt, loopDepth)
 									if !elseOK {
 										return "", false
 									}
@@ -3987,7 +4011,7 @@ func Build(input Input) (Result, error) {
 									return "", false
 								}
 							}
-							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, loopLocals, functionReturnsInt)
+							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, loopLocals, functionReturnsInt, loopDepth+1)
 							if !bodyOK {
 								return "", false
 							}
@@ -4062,7 +4086,7 @@ func Build(input Input) (Result, error) {
 						for _, parameterName := range topLevelFunctionParameters[functionName] {
 							locals[parameterName] = "int"
 						}
-						translatedBody, bodyOK := translateStatementList(functionDecl.Body.List, locals, topLevelFunctionReturnsInt[functionName])
+						translatedBody, bodyOK := translateStatementList(functionDecl.Body.List, locals, topLevelFunctionReturnsInt[functionName], 0)
 						if !bodyOK {
 							supportsRunnableProgram = false
 							break

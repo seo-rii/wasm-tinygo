@@ -1117,7 +1117,13 @@ func Factorial(n int) int {
 
 func Sum(n int) int {
 	total := 0
-	for i := 1; i <= n; i++ {
+	for i := 1; ; i++ {
+		if i > n {
+			break
+		}
+		if i == 0 {
+			continue
+		}
 		total = total + i
 	}
 	return total
@@ -1256,8 +1262,14 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "int tinygo_imported_000_Sum(int n)") {
 		t.Fatalf("expected imported lowered source to lower loop helper, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "for (int i = 1; (i <= n); i += 1)") {
+	if !strings.Contains(importedLoweredSource, "for (int i = 1; 1; i += 1)") {
 		t.Fatalf("expected imported lowered source to lower helper loop, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "break;") {
+		t.Fatalf("expected imported lowered source to lower loop break statements, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "continue;") {
+		t.Fatalf("expected imported lowered source to lower loop continue statements, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "void tinygo_imported_000_Report(int n)") {
 		t.Fatalf("expected imported lowered source to lower void helper with int parameter, got: %q", importedLoweredSource)

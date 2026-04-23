@@ -101,7 +101,13 @@ func Factorial(n int) int {
 
 func Sum(n int) int {
 \ttotal := 0
-\tfor i := 1; i <= n; i++ {
+\tfor i := 1; ; i++ {
+\t\tif i > n {
+\t\t\tbreak
+\t\t}
+\t\tif i == 0 {
+\t\t\tcontinue
+\t\t}
 \t\ttotal = total + i
 \t}
 \treturn total
