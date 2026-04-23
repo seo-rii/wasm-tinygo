@@ -256,6 +256,11 @@ func Build(input Input) (Result, error) {
 		FunctionParameters  map[string][]string
 		FunctionSymbols     map[string]string
 	}
+	type runnableFunctionInfo struct {
+		Symbol     string
+		ReturnsInt bool
+		Parameters []string
+	}
 	supportedRunnableImports := map[string]struct{}{
 		"bufio":   {},
 		"fmt":     {},
@@ -500,109 +505,390 @@ func Build(input Input) (Result, error) {
 		return pkg, true
 	}
 
-	importedRunnableSymbolsByPath := map[string]map[string]string{}
-	importedRunnableSymbolsByID := map[string]map[string]string{}
+	resolveRunnableImportedSelector := func(pkg *runnablePackage, expression ast.Expr) (string, string, bool) {
+		selectorExpression, ok := expression.(*ast.SelectorExpr)
+		if !ok {
+			return "", "", false
+		}
+		packageIdent, ok := selectorExpression.X.(*ast.Ident)
+		if !ok || selectorExpression.Sel == nil {
+			return "", "", false
+		}
+		importPath, ok := pkg.AliasToImportPath[packageIdent.Name]
+		if !ok {
+			return "", "", false
+		}
+		return importPath, selectorExpression.Sel.Name, true
+	}
+	formatRunnableParameterDecls := func(parameterNames []string) string {
+		if len(parameterNames) == 0 {
+			return "void"
+		}
+		parameterDecls := make([]string, 0, len(parameterNames))
+		for _, parameterName := range parameterNames {
+			parameterDecls = append(parameterDecls, fmt.Sprintf("int %s", parameterName))
+		}
+		return strings.Join(parameterDecls, ", ")
+	}
+	var translateRunnableExpression func(*runnablePackage, ast.Expr, map[string]string) (string, string, int, bool)
+	translateRunnableExpression = func(pkg *runnablePackage, expression ast.Expr, locals map[string]string) (string, string, int, bool) {
+		switch typedExpression := expression.(type) {
+		case *ast.BasicLit:
+			if typedExpression.Kind == token.INT {
+				return typedExpression.Value, "int", 0, true
+			}
+			if typedExpression.Kind == token.STRING {
+				unquotedValue, err := strconv.Unquote(typedExpression.Value)
+				if err != nil {
+					return "", "", 0, false
+				}
+				return strconv.Quote(unquotedValue), "string", len([]byte(unquotedValue)), true
+			}
+			return "", "", 0, false
+		case *ast.Ident:
+			if localKind, ok := locals[typedExpression.Name]; ok {
+				return typedExpression.Name, localKind, 0, true
+			}
+			if constantSymbol, ok := pkg.ConstantSymbols[typedExpression.Name]; ok {
+				return constantSymbol, "int", 0, true
+			}
+			if typedExpression.Name == "nil" {
+				return "0", "nil", 0, true
+			}
+			return "", "", 0, false
+		case *ast.BinaryExpr:
+			leftValue, leftKind, _, leftOK := translateRunnableExpression(pkg, typedExpression.X, locals)
+			rightValue, rightKind, _, rightOK := translateRunnableExpression(pkg, typedExpression.Y, locals)
+			if !leftOK || !rightOK {
+				return "", "", 0, false
+			}
+			switch typedExpression.Op {
+			case token.ADD, token.SUB, token.MUL, token.QUO, token.REM:
+				if leftKind != "int" || rightKind != "int" {
+					return "", "", 0, false
+				}
+				return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+			case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ:
+				leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
+				rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
+				if !leftComparable || !rightComparable {
+					return "", "", 0, false
+				}
+				return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+			default:
+				return "", "", 0, false
+			}
+		case *ast.CallExpr:
+			if importPath, selectorName, ok := resolveRunnableImportedSelector(pkg, typedExpression.Fun); ok {
+				if importPath == "strings" && selectorName == "TrimSpace" && len(typedExpression.Args) == 1 {
+					translatedArgument, argumentKind, _, argumentOK := translateRunnableExpression(pkg, typedExpression.Args[0], locals)
+					if !argumentOK || argumentKind != "string" {
+						return "", "", 0, false
+					}
+					return fmt.Sprintf("tinygo_runtime_trim_space(%s)", translatedArgument), "string", 0, true
+				}
+				importedPackage, ok := pkg.ImportedPackages[importPath]
+				if !ok || !ast.IsExported(selectorName) {
+					return "", "", 0, false
+				}
+				returnsInt, ok := importedPackage.FunctionReturnsInt[selectorName]
+				if !ok || !returnsInt {
+					return "", "", 0, false
+				}
+				parameterNames := importedPackage.FunctionParameters[selectorName]
+				if len(parameterNames) != len(typedExpression.Args) {
+					return "", "", 0, false
+				}
+				translatedArgs := make([]string, 0, len(typedExpression.Args))
+				for _, argument := range typedExpression.Args {
+					translatedArgument, argumentKind, _, argumentOK := translateRunnableExpression(pkg, argument, locals)
+					if !argumentOK || argumentKind != "int" {
+						return "", "", 0, false
+					}
+					translatedArgs = append(translatedArgs, translatedArgument)
+				}
+				return fmt.Sprintf("%s(%s)", importedPackage.FunctionSymbols[selectorName], strings.Join(translatedArgs, ", ")), "int", 0, true
+			}
+			functionIdent, ok := typedExpression.Fun.(*ast.Ident)
+			if !ok {
+				return "", "", 0, false
+			}
+			functionName := functionIdent.Name
+			returnsInt, ok := pkg.FunctionReturnsInt[functionName]
+			if !ok || !returnsInt {
+				return "", "", 0, false
+			}
+			parameterNames := pkg.FunctionParameters[functionName]
+			if len(parameterNames) != len(typedExpression.Args) {
+				return "", "", 0, false
+			}
+			translatedArgs := make([]string, 0, len(typedExpression.Args))
+			for _, argument := range typedExpression.Args {
+				translatedArgument, argumentKind, _, argumentOK := translateRunnableExpression(pkg, argument, locals)
+				if !argumentOK || argumentKind != "int" {
+					return "", "", 0, false
+				}
+				translatedArgs = append(translatedArgs, translatedArgument)
+			}
+			return fmt.Sprintf("%s(%s)", pkg.FunctionSymbols[functionName], strings.Join(translatedArgs, ", ")), "int", 0, true
+		case *ast.ParenExpr:
+			return translateRunnableExpression(pkg, typedExpression.X, locals)
+		case *ast.UnaryExpr:
+			translatedValue, translatedKind, _, translatedOK := translateRunnableExpression(pkg, typedExpression.X, locals)
+			if !translatedOK || translatedKind != "int" {
+				return "", "", 0, false
+			}
+			switch typedExpression.Op {
+			case token.SUB, token.ADD:
+				return fmt.Sprintf("(%s%s)", typedExpression.Op.String(), translatedValue), "int", 0, true
+			default:
+				return "", "", 0, false
+			}
+		default:
+			return "", "", 0, false
+		}
+	}
+	var translateRunnableStatementList func(*runnablePackage, []ast.Stmt, map[string]string, bool) (string, bool)
+	translateRunnableStatementList = func(pkg *runnablePackage, statements []ast.Stmt, locals map[string]string, functionReturnsInt bool) (string, bool) {
+		var translatedStatements strings.Builder
+		for _, statement := range statements {
+			switch typedStatement := statement.(type) {
+			case *ast.ExprStmt:
+				callExpression, ok := typedStatement.X.(*ast.CallExpr)
+				if !ok {
+					return "", false
+				}
+				callIdent, callIdentOK := callExpression.Fun.(*ast.Ident)
+				if callIdentOK && (callIdent.Name == "print" || callIdent.Name == "println") {
+					for argumentIndex, argument := range callExpression.Args {
+						translatedArgument, argumentKind, byteLength, argumentOK := translateRunnableExpression(pkg, argument, locals)
+						if !argumentOK {
+							return "", false
+						}
+						newline := 0
+						if callIdent.Name == "println" && argumentIndex == len(callExpression.Args)-1 {
+							newline = 1
+						}
+						switch argumentKind {
+						case "string":
+							translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
+						case "int":
+							translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
+						default:
+							return "", false
+						}
+					}
+					if callIdent.Name == "println" && len(callExpression.Args) == 0 {
+						translatedStatements.WriteString("\ttinygo_runtime_print_newline();\n")
+					}
+					continue
+				}
+				if importPath, selectorName, ok := resolveRunnableImportedSelector(pkg, callExpression.Fun); ok {
+					if importPath == "fmt" && (selectorName == "Print" || selectorName == "Println") {
+						for argumentIndex, argument := range callExpression.Args {
+							translatedArgument, argumentKind, byteLength, argumentOK := translateRunnableExpression(pkg, argument, locals)
+							if !argumentOK {
+								return "", false
+							}
+							newline := 0
+							if selectorName == "Println" && argumentIndex == len(callExpression.Args)-1 {
+								newline = 1
+							}
+							switch argumentKind {
+							case "string":
+								translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
+							case "int":
+								translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
+							default:
+								return "", false
+							}
+						}
+						if selectorName == "Println" && len(callExpression.Args) == 0 {
+							translatedStatements.WriteString("\ttinygo_runtime_print_newline();\n")
+						}
+						continue
+					}
+					importedPackage, ok := pkg.ImportedPackages[importPath]
+					if !ok || !ast.IsExported(selectorName) {
+						return "", false
+					}
+					_, ok = importedPackage.FunctionReturnsInt[selectorName]
+					if !ok {
+						return "", false
+					}
+					parameterNames := importedPackage.FunctionParameters[selectorName]
+					if len(parameterNames) != len(callExpression.Args) {
+						return "", false
+					}
+					translatedArgs := make([]string, 0, len(callExpression.Args))
+					for _, argument := range callExpression.Args {
+						translatedArgument, argumentKind, _, argumentOK := translateRunnableExpression(pkg, argument, locals)
+						if !argumentOK || argumentKind != "int" {
+							return "", false
+						}
+						translatedArgs = append(translatedArgs, translatedArgument)
+					}
+					translatedStatements.WriteString(fmt.Sprintf("\t%s(%s);\n", importedPackage.FunctionSymbols[selectorName], strings.Join(translatedArgs, ", ")))
+					continue
+				}
+				if !callIdentOK {
+					return "", false
+				}
+				returnsInt, ok := pkg.FunctionReturnsInt[callIdent.Name]
+				if !ok {
+					return "", false
+				}
+				if returnsInt {
+					translatedCall, argumentKind, _, callOK := translateRunnableExpression(pkg, callExpression, locals)
+					if !callOK || argumentKind != "int" {
+						return "", false
+					}
+					translatedStatements.WriteString(fmt.Sprintf("\t%s;\n", translatedCall))
+					continue
+				}
+				parameterNames := pkg.FunctionParameters[callIdent.Name]
+				if len(parameterNames) != len(callExpression.Args) {
+					return "", false
+				}
+				translatedArgs := make([]string, 0, len(callExpression.Args))
+				for _, argument := range callExpression.Args {
+					translatedArgument, argumentKind, _, argumentOK := translateRunnableExpression(pkg, argument, locals)
+					if !argumentOK || argumentKind != "int" {
+						return "", false
+					}
+					translatedArgs = append(translatedArgs, translatedArgument)
+				}
+				translatedStatements.WriteString(fmt.Sprintf("\t%s(%s);\n", pkg.FunctionSymbols[callIdent.Name], strings.Join(translatedArgs, ", ")))
+			case *ast.IfStmt:
+				if typedStatement.Init != nil {
+					return "", false
+				}
+				translatedCondition, conditionKind, _, conditionOK := translateRunnableExpression(pkg, typedStatement.Cond, locals)
+				if !conditionOK || conditionKind != "int" {
+					return "", false
+				}
+				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, locals, functionReturnsInt)
+				if !bodyOK {
+					return "", false
+				}
+				translatedStatements.WriteString(fmt.Sprintf("\tif (%s) {\n%s\t}\n", translatedCondition, translatedBody))
+				if typedStatement.Else != nil {
+					switch typedElse := typedStatement.Else.(type) {
+					case *ast.BlockStmt:
+						translatedElse, elseOK := translateRunnableStatementList(pkg, typedElse.List, locals, functionReturnsInt)
+						if !elseOK {
+							return "", false
+						}
+						translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", translatedElse))
+					case *ast.IfStmt:
+						translatedElse, elseOK := translateRunnableStatementList(pkg, []ast.Stmt{typedElse}, locals, functionReturnsInt)
+						if !elseOK {
+							return "", false
+						}
+						trimmedElse := strings.TrimPrefix(translatedElse, "\t")
+						translatedStatements.WriteString("\telse ")
+						translatedStatements.WriteString(trimmedElse)
+					default:
+						return "", false
+					}
+				}
+			case *ast.ReturnStmt:
+				if functionReturnsInt {
+					if len(typedStatement.Results) != 1 {
+						return "", false
+					}
+					translatedResult, resultKind, _, resultOK := translateRunnableExpression(pkg, typedStatement.Results[0], locals)
+					if !resultOK || resultKind != "int" {
+						return "", false
+					}
+					translatedStatements.WriteString(fmt.Sprintf("\treturn %s;\n", translatedResult))
+					continue
+				}
+				if len(typedStatement.Results) != 0 {
+					return "", false
+				}
+				translatedStatements.WriteString("\treturn;\n")
+			default:
+				return "", false
+			}
+		}
+		return translatedStatements.String(), true
+	}
+	generateRunnablePackage := func(pkg *runnablePackage) ([]string, map[string]runnableFunctionInfo, []string, bool) {
+		generatedDefinitions := make([]string, 0)
+		for _, constantName := range pkg.ConstantOrder {
+			constantDefinition := pkg.ConstantDefinitions[constantName]
+			if constantDefinition == "" {
+				return nil, nil, nil, false
+			}
+			generatedDefinitions = append(generatedDefinitions, constantDefinition)
+		}
+		exportedFunctions := map[string]runnableFunctionInfo{}
+		exportedFunctionOrder := make([]string, 0)
+		for _, functionName := range pkg.FunctionOrder {
+			functionSymbol := pkg.FunctionSymbols[functionName]
+			if functionSymbol == "" {
+				return nil, nil, nil, false
+			}
+			storage := "static "
+			if ast.IsExported(functionName) {
+				storage = ""
+				exportedFunctions[functionName] = runnableFunctionInfo{
+					Symbol:     functionSymbol,
+					ReturnsInt: pkg.FunctionReturnsInt[functionName],
+					Parameters: append([]string{}, pkg.FunctionParameters[functionName]...),
+				}
+				exportedFunctionOrder = append(exportedFunctionOrder, functionName)
+			}
+			returnType := "void"
+			if pkg.FunctionReturnsInt[functionName] {
+				returnType = "int"
+			}
+			generatedDefinitions = append(generatedDefinitions, fmt.Sprintf("%s%s %s(%s);\n", storage, returnType, functionSymbol, formatRunnableParameterDecls(pkg.FunctionParameters[functionName])))
+		}
+		for _, functionName := range pkg.FunctionOrder {
+			functionDecl := pkg.FunctionDecls[functionName]
+			if functionDecl == nil {
+				return nil, nil, nil, false
+			}
+			locals := map[string]string{}
+			for _, parameterName := range pkg.FunctionParameters[functionName] {
+				locals[parameterName] = "int"
+			}
+			translatedBody, bodyOK := translateRunnableStatementList(pkg, functionDecl.Body.List, locals, pkg.FunctionReturnsInt[functionName])
+			if !bodyOK {
+				return nil, nil, nil, false
+			}
+			storage := "static "
+			if ast.IsExported(functionName) {
+				storage = ""
+			}
+			returnType := "void"
+			if pkg.FunctionReturnsInt[functionName] {
+				returnType = "int"
+			}
+			generatedDefinitions = append(generatedDefinitions, fmt.Sprintf("%s%s %s(%s) {\n%s}\n", storage, returnType, pkg.FunctionSymbols[functionName], formatRunnableParameterDecls(pkg.FunctionParameters[functionName]), translatedBody))
+		}
+		return generatedDefinitions, exportedFunctions, exportedFunctionOrder, true
+	}
+
+	importedRunnableFunctionsByPath := map[string]map[string]runnableFunctionInfo{}
+	importedRunnableFunctionOrderByPath := map[string][]string{}
 	importedRunnableBodiesByID := map[string][]string{}
 	for _, loweredUnit := range loweredUnits {
 		if loweredUnit.Kind != "imported" || loweredUnit.ImportPath == "" {
 			continue
 		}
-		symbolID := strings.NewReplacer("-", "_", "/", "_", ".", "_").Replace(loweredUnit.ID)
-		supported := true
-		importedSymbols := map[string]string{}
-		importedBodies := make([]string, 0)
-		for _, filePath := range loweredUnit.SourceFiles {
-			if !strings.HasSuffix(filePath, ".go") {
-				supported = false
-				break
-			}
-			parsedFile, parseErr := parser.ParseFile(token.NewFileSet(), filePath, nil, 0)
-			if parseErr != nil {
-				supported = false
-				break
-			}
-			for _, decl := range parsedFile.Decls {
-				functionDecl, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
-				if functionDecl.Name == nil || functionDecl.Name.Name == "" || !ast.IsExported(functionDecl.Name.Name) {
-					continue
-				}
-				if functionDecl.Recv != nil || functionDecl.Type == nil || functionDecl.Type.TypeParams != nil {
-					supported = false
-					break
-				}
-				if functionDecl.Type.Params != nil && len(functionDecl.Type.Params.List) > 0 {
-					supported = false
-					break
-				}
-				if functionDecl.Type.Results != nil && len(functionDecl.Type.Results.List) > 0 {
-					supported = false
-					break
-				}
-				if functionDecl.Body == nil {
-					supported = false
-					break
-				}
-				symbolName := fmt.Sprintf("tinygo_%s_%s", symbolID, functionDecl.Name.Name)
-				if existingSymbol, ok := importedSymbols[functionDecl.Name.Name]; ok && existingSymbol != symbolName {
-					supported = false
-					break
-				}
-				bodyLines := make([]string, 0)
-				for _, statement := range functionDecl.Body.List {
-					exprStatement, ok := statement.(*ast.ExprStmt)
-					if !ok {
-						supported = false
-						break
-					}
-					callExpression, ok := exprStatement.X.(*ast.CallExpr)
-					if !ok || callExpression.Fun == nil {
-						supported = false
-						break
-					}
-					selectorExpression, ok := callExpression.Fun.(*ast.SelectorExpr)
-					if !ok || selectorExpression.Sel == nil {
-						supported = false
-						break
-					}
-					packageIdent, ok := selectorExpression.X.(*ast.Ident)
-					if !ok || packageIdent.Name != "fmt" || selectorExpression.Sel.Name != "Println" {
-						supported = false
-						break
-					}
-					if len(callExpression.Args) != 1 {
-						supported = false
-						break
-					}
-					argumentLiteral, ok := callExpression.Args[0].(*ast.BasicLit)
-					if !ok || argumentLiteral.Kind != token.STRING {
-						supported = false
-						break
-					}
-					unquotedValue, err := strconv.Unquote(argumentLiteral.Value)
-					if err != nil {
-						supported = false
-						break
-					}
-					bodyLines = append(bodyLines, fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 1);\n", strconv.Quote(unquotedValue), len([]byte(unquotedValue))))
-				}
-				if !supported {
-					break
-				}
-				importedSymbols[functionDecl.Name.Name] = symbolName
-				importedBodies = append(importedBodies, fmt.Sprintf("void %s(void) {\n%s}\n", symbolName, strings.Join(bodyLines, "")))
-			}
-			if !supported {
-				break
-			}
-		}
-		if !supported || len(importedSymbols) == 0 {
+		pkg, ok := loadRunnablePackage(loweredUnit)
+		if !ok {
 			continue
 		}
-		importedRunnableSymbolsByPath[loweredUnit.ImportPath] = importedSymbols
-		importedRunnableSymbolsByID[loweredUnit.ID] = importedSymbols
+		importedBodies, importedFunctions, importedFunctionOrder, ok := generateRunnablePackage(pkg)
+		if !ok || len(importedFunctions) == 0 {
+			continue
+		}
+		importedRunnableFunctionsByPath[loweredUnit.ImportPath] = importedFunctions
+		importedRunnableFunctionOrderByPath[loweredUnit.ImportPath] = importedFunctionOrder
 		importedRunnableBodiesByID[loweredUnit.ID] = importedBodies
 	}
 
@@ -2725,6 +3011,8 @@ func Build(input Input) (Result, error) {
 		if loweredUnit.Kind == "imported" {
 			if bodies, ok := importedRunnableBodiesByID[loweredUnit.ID]; ok {
 				loweredSourceContents.WriteString("\nextern void tinygo_runtime_print_literal(const char *value, unsigned int len, int newline);\n")
+				loweredSourceContents.WriteString("extern void tinygo_runtime_print_i32(int value, int newline);\n")
+				loweredSourceContents.WriteString("extern void tinygo_runtime_print_newline(void);\n")
 				for _, body := range bodies {
 					loweredSourceContents.WriteString(body)
 				}
@@ -2764,7 +3052,7 @@ func Build(input Input) (Result, error) {
 									continue
 								}
 								if _, ok := supportedRunnableImports[importPath]; !ok {
-									if _, ok := importedRunnableSymbolsByPath[importPath]; !ok {
+									if _, ok := importedRunnableFunctionsByPath[importPath]; !ok {
 										supportsRunnableProgram = false
 										continue
 									}
@@ -2974,7 +3262,23 @@ func Build(input Input) (Result, error) {
 								}
 								return fmt.Sprintf("tinygo_runtime_trim_space(%s)", translatedArgument), "string", 0, true
 							}
-							return "", "", 0, false
+							importedFunctionMap, ok := importedRunnableFunctionsByPath[importPath]
+							if !ok || !ast.IsExported(selectorName) {
+								return "", "", 0, false
+							}
+							functionInfo, ok := importedFunctionMap[selectorName]
+							if !ok || !functionInfo.ReturnsInt || len(functionInfo.Parameters) != len(typedExpression.Args) {
+								return "", "", 0, false
+							}
+							translatedArgs := make([]string, 0, len(typedExpression.Args))
+							for _, argument := range typedExpression.Args {
+								translatedArgument, argumentKind, _, argumentOK := translateExpression(argument, locals)
+								if !argumentOK || argumentKind != "int" {
+									return "", "", 0, false
+								}
+								translatedArgs = append(translatedArgs, translatedArgument)
+							}
+							return fmt.Sprintf("%s(%s)", functionInfo.Symbol, strings.Join(translatedArgs, ", ")), "int", 0, true
 						}
 						functionIdent, ok := typedExpression.Fun.(*ast.Ident)
 						if !ok {
@@ -3103,15 +3407,23 @@ func Build(input Input) (Result, error) {
 									}
 									continue
 								}
-								if importedSymbolMap, ok := importedRunnableSymbolsByPath[importPath]; ok {
-									if len(callExpression.Args) != 0 {
+								if importedFunctionMap, ok := importedRunnableFunctionsByPath[importPath]; ok {
+									if !ast.IsExported(selectorName) {
 										return "", false
 									}
-									symbolName, ok := importedSymbolMap[selectorName]
-									if !ok || symbolName == "" {
+									functionInfo, ok := importedFunctionMap[selectorName]
+									if !ok || functionInfo.Symbol == "" || len(functionInfo.Parameters) != len(callExpression.Args) {
 										return "", false
 									}
-									translatedStatements.WriteString(fmt.Sprintf("\t%s();\n", symbolName))
+									translatedArgs := make([]string, 0, len(callExpression.Args))
+									for _, argument := range callExpression.Args {
+										translatedArgument, argumentKind, _, argumentOK := translateExpression(argument, locals)
+										if !argumentOK || argumentKind != "int" {
+											return "", false
+										}
+										translatedArgs = append(translatedArgs, translatedArgument)
+									}
+									translatedStatements.WriteString(fmt.Sprintf("\t%s(%s);\n", functionInfo.Symbol, strings.Join(translatedArgs, ", ")))
 									continue
 								}
 								return "", false
@@ -3391,12 +3703,24 @@ func Build(input Input) (Result, error) {
 				generatedFunctionPrototypes := make([]string, 0, len(functionOrder))
 				generatedImportedPrototypes := make([]string, 0)
 				for _, importPath := range aliasToImportPath {
-					importedSymbolMap, ok := importedRunnableSymbolsByPath[importPath]
+					importedFunctionMap, ok := importedRunnableFunctionsByPath[importPath]
 					if !ok {
 						continue
 					}
-					for _, symbolName := range importedSymbolMap {
-						generatedImportedPrototypes = append(generatedImportedPrototypes, fmt.Sprintf("extern void %s(void);\n", symbolName))
+					for _, functionName := range importedRunnableFunctionOrderByPath[importPath] {
+						functionInfo, ok := importedFunctionMap[functionName]
+						if !ok || functionInfo.Symbol == "" {
+							supportsRunnableProgram = false
+							break
+						}
+						returnType := "void"
+						if functionInfo.ReturnsInt {
+							returnType = "int"
+						}
+						generatedImportedPrototypes = append(generatedImportedPrototypes, fmt.Sprintf("%s %s(%s);\n", returnType, functionInfo.Symbol, formatRunnableParameterDecls(functionInfo.Parameters)))
+					}
+					if !supportsRunnableProgram {
+						break
 					}
 				}
 				generatedFunctionBodies := make([]string, 0, len(functionOrder))

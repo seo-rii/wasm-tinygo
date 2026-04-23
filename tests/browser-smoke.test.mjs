@@ -78,18 +78,30 @@ go 1.22
 `,
     'helper/helper.go': `package helper
 
-import "fmt"
+const Bonus = 3
 
-func Run() {
-\tfmt.Println("import-ok")
+func Factorial(n int) int {
+\tif n <= 1 {
+\t\treturn 1
+\t}
+\treturn n * Factorial(n-1)
+}
+
+func Total(n int) int {
+\treturn Factorial(n) + Bonus
 }
 `,
     'main.go': `package main
 
-import "example.com/staticimport/helper"
+import (
+\t"fmt"
+
+\t"example.com/staticimport/helper"
+)
 
 func main() {
-\thelper.Run()
+\tfmt.Print("imported_total=")
+\tfmt.Println(helper.Total(5))
 }
 `,
   }
@@ -1127,7 +1139,7 @@ func main() {
   assert.equal(staticImportedArtifact?.runnable, true)
   assert.equal(staticImportedArtifact?.entrypoint, 'main')
   assert.equal(staticImportedArtifact?.reason, undefined)
-  assert.match(staticImportedActivity ?? '', /import-ok/)
+  assert.match(staticImportedActivity ?? '', /imported_total=123/)
   assert.match(staticImportedActivity ?? '', /execution artifact completed exitCode=0/)
   assert.doesNotMatch(staticImportedActivity ?? '', /frontend analysis verified target=/)
   assert.doesNotMatch(staticImportedActivity ?? '', /frontend analysis tinygo frontend prepared analysis handoff/)
