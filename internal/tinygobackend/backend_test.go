@@ -734,7 +734,7 @@ func TestBuildProducesRunnableExecutionArtifactsForSimpleProgramSubset(t *testin
 func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testing.T) {
 	dir := t.TempDir()
 	entryPath := filepath.Join(dir, "main.go")
-	starterSource := "package main\n\nimport (\n\t\"bufio\"\n\t\"fmt\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nconst bonus = 3\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tline, _ := bufio.NewReader(os.Stdin).ReadString('\\n')\n\tn, err := strconv.Atoi(strings.TrimSpace(line))\n\tif err != nil {\n\t\tn = 4\n\t}\n\tfmt.Printf(\"factorial_plus_bonus=%d\\n\", factorial(n)+bonus)\n}\n"
+	starterSource := "package main\n\nimport (\n\t\"bufio\"\n\t\"fmt\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nconst bonus = 3\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tline, _ := bufio.NewReader(os.Stdin).ReadString('\\n')\n\tn, err := strconv.Atoi(strings.TrimSpace(line))\n\tif err != nil {\n\t\tn = 4\n\t}\n\tlabel := \"factorial_plus_bonus\"\n\tfmt.Printf(\"%s=%d input=%d\\n\", label, factorial(n)+bonus, n)\n}\n"
 	if err := os.WriteFile(entryPath, []byte(starterSource), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(main.go): %v", err)
 	}
@@ -885,11 +885,23 @@ func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testin
 	if !strings.Contains(loweredSourceContents, "err = tinygo_runtime_parse_i32(tinygo_runtime_trim_space(line), &n);") {
 		t.Fatalf("expected lowered source to lower strconv.Atoi(strings.TrimSpace(...)), got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"factorial_plus_bonus=\", 21u, 0);") {
-		t.Fatalf("expected lowered source to lower fmt.Printf prefix, got: %q", loweredSourceContents)
+	if !strings.Contains(loweredSourceContents, "char *label = \"factorial_plus_bonus\";") {
+		t.Fatalf("expected lowered source to lower string local variables, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_string(label, 0);") {
+		t.Fatalf("expected lowered source to lower fmt.Printf string placeholder, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"=\", 1u, 0);") {
+		t.Fatalf("expected lowered source to lower fmt.Printf literal separator, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32((factorial(n) + bonus), 0);") {
-		t.Fatalf("expected lowered source to lower fmt.Printf integer payload, got: %q", loweredSourceContents)
+		t.Fatalf("expected lowered source to lower first fmt.Printf integer payload, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\" input=\", 7u, 0);") {
+		t.Fatalf("expected lowered source to lower fmt.Printf middle literal, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32(n, 0);") {
+		t.Fatalf("expected lowered source to lower second fmt.Printf integer payload, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"\\n\", 1u, 0);") {
 		t.Fatalf("expected lowered source to lower fmt.Printf newline suffix, got: %q", loweredSourceContents)

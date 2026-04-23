@@ -530,6 +530,79 @@ func Build(input Input) (Result, error) {
 		}
 		return strings.Join(parameterDecls, ", ")
 	}
+	appendRunnablePrintArgument := func(translatedStatements *strings.Builder, translatedArgument string, argumentKind string, byteLength int, newline int) bool {
+		switch argumentKind {
+		case "string":
+			if byteLength > 0 {
+				translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
+				return true
+			}
+			translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_string(%s, %d);\n", translatedArgument, newline))
+			return true
+		case "int":
+			translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
+			return true
+		default:
+			return false
+		}
+	}
+	appendRunnablePrintf := func(translatedStatements *strings.Builder, formatArgument ast.Expr, args []ast.Expr, locals map[string]string, translateExpression func(ast.Expr, map[string]string) (string, string, int, bool)) bool {
+		formatLiteral, ok := formatArgument.(*ast.BasicLit)
+		if !ok || formatLiteral.Kind != token.STRING {
+			return false
+		}
+		formatValue, err := strconv.Unquote(formatLiteral.Value)
+		if err != nil {
+			return false
+		}
+		appendLiteral := func(value string) {
+			if value != "" {
+				translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(value), len([]byte(value))))
+			}
+		}
+		argumentIndex := 0
+		segmentStart := 0
+		for index := 0; index < len(formatValue); index++ {
+			if formatValue[index] != '%' {
+				continue
+			}
+			if index+1 >= len(formatValue) {
+				return false
+			}
+			verb := formatValue[index+1]
+			if verb == '%' {
+				appendLiteral(formatValue[segmentStart:index] + "%")
+				segmentStart = index + 2
+				index++
+				continue
+			}
+			if verb != 'd' && verb != 's' {
+				return false
+			}
+			if argumentIndex >= len(args) {
+				return false
+			}
+			appendLiteral(formatValue[segmentStart:index])
+			translatedArgument, argumentKind, byteLength, argumentOK := translateExpression(args[argumentIndex], locals)
+			if !argumentOK {
+				return false
+			}
+			if verb == 'd' && argumentKind != "int" {
+				return false
+			}
+			if verb == 's' && argumentKind != "string" {
+				return false
+			}
+			if !appendRunnablePrintArgument(translatedStatements, translatedArgument, argumentKind, byteLength, 0) {
+				return false
+			}
+			argumentIndex++
+			segmentStart = index + 2
+			index++
+		}
+		appendLiteral(formatValue[segmentStart:])
+		return argumentIndex == len(args)
+	}
 	var translateRunnableExpression func(*runnablePackage, ast.Expr, map[string]string) (string, string, int, bool)
 	translateRunnableExpression = func(pkg *runnablePackage, expression ast.Expr, locals map[string]string) (string, string, int, bool) {
 		switch typedExpression := expression.(type) {
@@ -669,12 +742,7 @@ func Build(input Input) (Result, error) {
 						if callIdent.Name == "println" && argumentIndex == len(callExpression.Args)-1 {
 							newline = 1
 						}
-						switch argumentKind {
-						case "string":
-							translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
-						case "int":
-							translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
-						default:
+						if !appendRunnablePrintArgument(&translatedStatements, translatedArgument, argumentKind, byteLength, newline) {
 							return "", false
 						}
 					}
@@ -694,17 +762,20 @@ func Build(input Input) (Result, error) {
 							if selectorName == "Println" && argumentIndex == len(callExpression.Args)-1 {
 								newline = 1
 							}
-							switch argumentKind {
-							case "string":
-								translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
-							case "int":
-								translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
-							default:
+							if !appendRunnablePrintArgument(&translatedStatements, translatedArgument, argumentKind, byteLength, newline) {
 								return "", false
 							}
 						}
 						if selectorName == "Println" && len(callExpression.Args) == 0 {
 							translatedStatements.WriteString("\ttinygo_runtime_print_newline();\n")
+						}
+						continue
+					}
+					if importPath == "fmt" && selectorName == "Printf" && len(callExpression.Args) >= 1 {
+						if !appendRunnablePrintf(&translatedStatements, callExpression.Args[0], callExpression.Args[1:], locals, func(expression ast.Expr, locals map[string]string) (string, string, int, bool) {
+							return translateRunnableExpression(pkg, expression, locals)
+						}) {
+							return "", false
 						}
 						continue
 					}
@@ -3164,6 +3235,7 @@ func Build(input Input) (Result, error) {
 				loweredSourceContents.WriteString("\nextern void tinygo_runtime_print_literal(const char *value, unsigned int len, int newline);\n")
 				loweredSourceContents.WriteString("extern void tinygo_runtime_print_i32(int value, int newline);\n")
 				loweredSourceContents.WriteString("extern void tinygo_runtime_print_newline(void);\n")
+				loweredSourceContents.WriteString("extern void tinygo_runtime_print_string(const char *value, int newline);\n")
 				for _, body := range bodies {
 					loweredSourceContents.WriteString(body)
 				}
@@ -3491,12 +3563,7 @@ func Build(input Input) (Result, error) {
 									if callIdent.Name == "println" && argumentIndex == len(callExpression.Args)-1 {
 										newline = 1
 									}
-									switch argumentKind {
-									case "string":
-										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
-									case "int":
-										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
-									default:
+									if !appendRunnablePrintArgument(&translatedStatements, translatedArgument, argumentKind, byteLength, newline) {
 										return "", false
 									}
 								}
@@ -3516,12 +3583,7 @@ func Build(input Input) (Result, error) {
 										if selectorName == "Println" && argumentIndex == len(callExpression.Args)-1 {
 											newline = 1
 										}
-										switch argumentKind {
-										case "string":
-											translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, %d);\n", translatedArgument, byteLength, newline))
-										case "int":
-											translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, %d);\n", translatedArgument, newline))
-										default:
+										if !appendRunnablePrintArgument(&translatedStatements, translatedArgument, argumentKind, byteLength, newline) {
 											return "", false
 										}
 									}
@@ -3530,31 +3592,9 @@ func Build(input Input) (Result, error) {
 									}
 									continue
 								}
-								if importPath == "fmt" && selectorName == "Printf" && len(callExpression.Args) == 2 {
-									formatArgument, ok := callExpression.Args[0].(*ast.BasicLit)
-									if !ok || formatArgument.Kind != token.STRING {
+								if importPath == "fmt" && selectorName == "Printf" && len(callExpression.Args) >= 1 {
+									if !appendRunnablePrintf(&translatedStatements, callExpression.Args[0], callExpression.Args[1:], locals, translateExpression) {
 										return "", false
-									}
-									formatValue, err := strconv.Unquote(formatArgument.Value)
-									if err != nil {
-										return "", false
-									}
-									placeholderIndex := strings.Index(formatValue, "%d")
-									if placeholderIndex < 0 || strings.Count(formatValue, "%d") != 1 {
-										return "", false
-									}
-									translatedArgument, argumentKind, _, argumentOK := translateExpression(callExpression.Args[1], locals)
-									if !argumentOK || argumentKind != "int" {
-										return "", false
-									}
-									prefix := formatValue[:placeholderIndex]
-									suffix := formatValue[placeholderIndex+2:]
-									if prefix != "" {
-										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(prefix), len([]byte(prefix))))
-									}
-									translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_i32(%s, 0);\n", translatedArgument))
-									if suffix != "" {
-										translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(suffix), len([]byte(suffix))))
 									}
 									continue
 								}
@@ -4010,6 +4050,16 @@ func Build(input Input) (Result, error) {
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(\"\\n\", 1u);\n")
 					loweredSourceContents.WriteString("}\n")
 					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_literal(const char *value, tinygo_wasi_size_t len, int newline) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\ttinygo_runtime_write(value, len);\n")
+					loweredSourceContents.WriteString("\tif (newline != 0) {\n")
+					loweredSourceContents.WriteString("\t\ttinygo_runtime_print_newline();\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_string(const char *value, int newline) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\ttinygo_wasi_size_t len = 0u;\n")
+					loweredSourceContents.WriteString("\twhile (value[len] != '\\0') {\n")
+					loweredSourceContents.WriteString("\t\tlen += 1u;\n")
+					loweredSourceContents.WriteString("\t}\n")
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(value, len);\n")
 					loweredSourceContents.WriteString("\tif (newline != 0) {\n")
 					loweredSourceContents.WriteString("\t\ttinygo_runtime_print_newline();\n")

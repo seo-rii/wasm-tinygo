@@ -66,8 +66,8 @@ func factorial(n int) int {
 }
 
 func main() {
-\tfmt.Print("factorial_plus_bonus=")
-\tfmt.Println(factorial(5) + bonus)
+\tlabel := "factorial_plus_bonus"
+\tfmt.Printf("%s=%d input=%d\\n", label, factorial(5)+bonus, 5)
 }
 `,
   }
@@ -108,8 +108,8 @@ import (
 )
 
 func main() {
-\tfmt.Print("imported_total=")
-\tfmt.Println(helper.Total(5))
+\tlabel := "imported_total"
+\tfmt.Printf("%s=%d input=%d\\n", label, helper.Total(5), 5)
 }
 `,
   }
@@ -1108,7 +1108,7 @@ func main() {
   assert.match(staticExecutionActivity ?? '', /build artifact ready: \/working\/out\.wasm \([\d,]+ bytes\)/)
   assert.match(staticExecutionActivity ?? '', /execution artifact ready: \/working\/out\.wasm \([\d,]+ bytes\)/)
   assert.match(staticExecutionActivity ?? '', /execution artifact entrypoint=main/)
-  assert.match(staticExecutionActivity ?? '', /factorial_plus_bonus=123/)
+  assert.match(staticExecutionActivity ?? '', /factorial_plus_bonus=123 input=5/)
   assert.match(staticExecutionActivity ?? '', /execution artifact completed exitCode=0/)
   assert.doesNotMatch(staticExecutionActivity ?? '', /frontend analysis verified target=/)
   assert.doesNotMatch(staticExecutionActivity ?? '', /frontend analysis tinygo frontend prepared analysis handoff/)
@@ -1147,7 +1147,7 @@ func main() {
   assert.equal(staticImportedArtifact?.runnable, true)
   assert.equal(staticImportedArtifact?.entrypoint, 'main')
   assert.equal(staticImportedArtifact?.reason, undefined)
-  assert.match(staticImportedActivity ?? '', /imported_total=123/)
+  assert.match(staticImportedActivity ?? '', /imported_total=123 input=5/)
   assert.match(staticImportedActivity ?? '', /execution artifact completed exitCode=0/)
   assert.doesNotMatch(staticImportedActivity ?? '', /frontend analysis verified target=/)
   assert.doesNotMatch(staticImportedActivity ?? '', /frontend analysis tinygo frontend prepared analysis handoff/)
