@@ -888,19 +888,28 @@ func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testin
 	if !strings.Contains(loweredSourceContents, "char *label = \"factorial_plus_bonus\";") {
 		t.Fatalf("expected lowered source to lower string local variables, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_string(label, 0);") {
+	if !strings.Contains(loweredSourceContents, "char *tinygo_printf_arg_000 = label;") {
+		t.Fatalf("expected lowered source to evaluate fmt.Printf string placeholder first, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_string(tinygo_printf_arg_000, 0);") {
 		t.Fatalf("expected lowered source to lower fmt.Printf string placeholder, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"=\", 1u, 0);") {
 		t.Fatalf("expected lowered source to lower fmt.Printf literal separator, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32((factorial(n) + bonus), 0);") {
+	if !strings.Contains(loweredSourceContents, "int tinygo_printf_arg_001 = (factorial(n) + bonus);") {
+		t.Fatalf("expected lowered source to evaluate first fmt.Printf integer payload first, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32(tinygo_printf_arg_001, 0);") {
 		t.Fatalf("expected lowered source to lower first fmt.Printf integer payload, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\" input=\", 7u, 0);") {
 		t.Fatalf("expected lowered source to lower fmt.Printf middle literal, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32(n, 0);") {
+	if !strings.Contains(loweredSourceContents, "int tinygo_printf_arg_002 = n;") {
+		t.Fatalf("expected lowered source to evaluate second fmt.Printf integer payload first, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32(tinygo_printf_arg_002, 0);") {
 		t.Fatalf("expected lowered source to lower second fmt.Printf integer payload, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_literal(\"\\n\", 1u, 0);") {
@@ -1083,6 +1092,8 @@ func main() {
 	}
 	if err := os.WriteFile(helperPath, []byte(`package helper
 
+import "fmt"
+
 const Bonus = 3
 
 func Factorial(n int) int {
@@ -1100,13 +1111,19 @@ func Sum(n int) int {
 	return total
 }
 
+func Report(n int) {
+	label := "helper_input"
+	fmt.Printf("%s=%d\n", label, n)
+}
+
 func Total(n int) int {
+	Report(n)
 	return Factorial(n) + Sum(2)
 }
 `), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(helper.go): %v", err)
 	}
-	if err := os.WriteFile(fmtPath, []byte("package fmt\n\nfunc Print(args ...any) (int, error) { return 0, nil }\nfunc Println(args ...any) (int, error) { return 0, nil }\n"), 0o644); err != nil {
+	if err := os.WriteFile(fmtPath, []byte("package fmt\n\nfunc Print(args ...any) (int, error) { return 0, nil }\nfunc Println(args ...any) (int, error) { return 0, nil }\nfunc Printf(format string, args ...any) (int, error) { return 0, nil }\n"), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(fmt.go): %v", err)
 	}
 
@@ -1133,7 +1150,7 @@ func Total(n int) int {
 				ID:                "imported-000",
 				Kind:              "imported",
 				ImportPath:        "example.com/staticimport/helper",
-				Imports:           []string{},
+				Imports:           []string{"fmt"},
 				DepOnly:           true,
 				ModulePath:        "example.com/staticimport",
 				PackageName:       "helper",
@@ -1197,8 +1214,26 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "for (int i = 1; (i <= n); i += 1)") {
 		t.Fatalf("expected imported lowered source to lower helper loop, got: %q", importedLoweredSource)
 	}
+	if !strings.Contains(importedLoweredSource, "void tinygo_imported_000_Report(int n)") {
+		t.Fatalf("expected imported lowered source to lower void helper with int parameter, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "char *tinygo_printf_arg_000 = label;") {
+		t.Fatalf("expected imported lowered source to evaluate fmt.Printf string placeholder first, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_runtime_print_string(tinygo_printf_arg_000, 0);") {
+		t.Fatalf("expected imported lowered source to lower fmt.Printf string placeholder, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "int tinygo_printf_arg_001 = n;") {
+		t.Fatalf("expected imported lowered source to evaluate fmt.Printf integer placeholder first, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_runtime_print_i32(tinygo_printf_arg_001, 0);") {
+		t.Fatalf("expected imported lowered source to lower fmt.Printf integer placeholder, got: %q", importedLoweredSource)
+	}
 	if !strings.Contains(importedLoweredSource, "int tinygo_imported_000_Total(int n)") {
 		t.Fatalf("expected imported lowered source to lower exported int helper, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Report(n);") {
+		t.Fatalf("expected imported lowered source to call void helper from int helper, got: %q", importedLoweredSource)
 	}
 
 	var commandArtifactManifest struct {

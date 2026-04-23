@@ -546,6 +546,7 @@ func Build(input Input) (Result, error) {
 			return false
 		}
 	}
+	runnablePrintfTempCounter := 0
 	appendRunnablePrintf := func(translatedStatements *strings.Builder, formatArgument ast.Expr, args []ast.Expr, locals map[string]string, translateExpression func(ast.Expr, map[string]string) (string, string, int, bool)) bool {
 		formatLiteral, ok := formatArgument.(*ast.BasicLit)
 		if !ok || formatLiteral.Kind != token.STRING {
@@ -555,9 +556,11 @@ func Build(input Input) (Result, error) {
 		if err != nil {
 			return false
 		}
+		var declarations strings.Builder
+		var outputs strings.Builder
 		appendLiteral := func(value string) {
 			if value != "" {
-				translatedStatements.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(value), len([]byte(value))))
+				outputs.WriteString(fmt.Sprintf("\ttinygo_runtime_print_literal(%s, %du, 0);\n", strconv.Quote(value), len([]byte(value))))
 			}
 		}
 		argumentIndex := 0
@@ -593,7 +596,18 @@ func Build(input Input) (Result, error) {
 			if verb == 's' && argumentKind != "string" {
 				return false
 			}
-			if !appendRunnablePrintArgument(translatedStatements, translatedArgument, argumentKind, byteLength, 0) {
+			tempName := fmt.Sprintf("tinygo_printf_arg_%03d", runnablePrintfTempCounter)
+			runnablePrintfTempCounter++
+			switch argumentKind {
+			case "int":
+				declarations.WriteString(fmt.Sprintf("\tint %s = %s;\n", tempName, translatedArgument))
+			case "string":
+				declarations.WriteString(fmt.Sprintf("\tchar *%s = %s;\n", tempName, translatedArgument))
+				byteLength = 0
+			default:
+				return false
+			}
+			if !appendRunnablePrintArgument(&outputs, tempName, argumentKind, byteLength, 0) {
 				return false
 			}
 			argumentIndex++
@@ -601,7 +615,12 @@ func Build(input Input) (Result, error) {
 			index++
 		}
 		appendLiteral(formatValue[segmentStart:])
-		return argumentIndex == len(args)
+		if argumentIndex != len(args) {
+			return false
+		}
+		translatedStatements.WriteString(declarations.String())
+		translatedStatements.WriteString(outputs.String())
+		return true
 	}
 	var translateRunnableExpression func(*runnablePackage, ast.Expr, map[string]string) (string, string, int, bool)
 	translateRunnableExpression = func(pkg *runnablePackage, expression ast.Expr, locals map[string]string) (string, string, int, bool) {

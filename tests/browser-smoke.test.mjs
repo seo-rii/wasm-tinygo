@@ -78,6 +78,8 @@ go 1.22
 `,
     'helper/helper.go': `package helper
 
+import "fmt"
+
 const Bonus = 3
 
 func Factorial(n int) int {
@@ -95,7 +97,13 @@ func Sum(n int) int {
 \treturn total
 }
 
+func Report(n int) {
+\tlabel := "helper_input"
+\tfmt.Printf("%s=%d\\n", label, n)
+}
+
 func Total(n int) int {
+\tReport(n)
 \treturn Factorial(n) + Sum(2)
 }
 `,
@@ -1147,6 +1155,7 @@ func main() {
   assert.equal(staticImportedArtifact?.runnable, true)
   assert.equal(staticImportedArtifact?.entrypoint, 'main')
   assert.equal(staticImportedArtifact?.reason, undefined)
+  assert.match(staticImportedActivity ?? '', /helper_input=5/)
   assert.match(staticImportedActivity ?? '', /imported_total=123 input=5/)
   assert.match(staticImportedActivity ?? '', /execution artifact completed exitCode=0/)
   assert.doesNotMatch(staticImportedActivity ?? '', /frontend analysis verified target=/)
