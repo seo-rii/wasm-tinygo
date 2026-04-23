@@ -1269,7 +1269,6 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
       },
     ],
     entryFile: entryPath,
-    optimizeFlag: '-Oz',
     packageGraph: [
       {
         depOnly: false,
@@ -1283,14 +1282,8 @@ printf '\\000asm\\001\\000\\000\\000' > "$out"
       },
     ],
     toolchain: {
-      artifactOutputPath: outputPath,
-      cflags: ['-mbulk-memory', '-mnontrapping-fptoint', '-mno-multivalue', '-mno-reference-types', '-msign-ext'],
-      ldflags: ['--stack-first', '--no-demangle'],
-      linker: 'wasm-ld',
       llvmTarget: 'wasm32-unknown-wasi',
-      objectOutputPath: '/working/tinygo-bootstrap.o',
       target: 'wasm',
-      translationUnitPath: '/working/tinygo-bootstrap.c',
     },
   })
   assert.deepEqual(manifest.realFrontendAnalysis, manifest.frontendRealAdapter)

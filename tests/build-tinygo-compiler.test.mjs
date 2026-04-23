@@ -907,7 +907,7 @@ func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildRe
   assert.doesNotMatch(manifest.patchedEntryFailureReason ?? '', /github\.com\/tinygo-org\/tinygo\/cgo/)
 })
 
-test('build-tinygo-compiler falls back to a patched tinygo wasi probe when the direct build fails', async (t) => {
+test('build-tinygo-compiler can directly build the synced tinygo wasi probe entry', async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'wasm-tinygo-compiler-fallback-'))
   t.after(async () => {
     await rm(tempDir, { recursive: true, force: true })
@@ -960,13 +960,10 @@ go 1.22
   assert.equal(wasmBytes[3], 0x6d)
 
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-  assert.equal(manifest.buildMode, 'patched-wasi-probe')
-  assert.equal(manifest.artifactKind, 'bootstrap')
+  assert.equal(manifest.buildMode, 'direct')
+  assert.equal(manifest.artifactKind, 'compiler')
   assert.deepEqual(manifest.blockers, [])
-  assert.match(
-    manifest.fallbackReason ?? '',
-    /no Go files|build failed|directory not found|no required module provides package|package .* is not in std/i,
-  )
+  assert.equal(manifest.fallbackReason, null)
 })
 
 test('classifyTinyGoCompilerBlockers identifies the current upstream wasi blockers', () => {
