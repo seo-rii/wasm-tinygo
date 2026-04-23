@@ -240,6 +240,16 @@ func Build(input Input) (Result, error) {
 			loweredUnitsByImportPath[loweredUnit.ImportPath] = loweredUnit
 		}
 	}
+	runnableBoolLiteralValue := func(name string) (string, bool) {
+		switch name {
+		case "true":
+			return "1", true
+		case "false":
+			return "0", true
+		default:
+			return "", false
+		}
+	}
 	type runnablePackage struct {
 		UnitID              string
 		Kind                string
@@ -375,7 +385,7 @@ func Build(input Input) (Result, error) {
 							}
 							if valueSpec.Type != nil {
 								typeIdent, ok := valueSpec.Type.(*ast.Ident)
-								if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string") {
+								if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string" && typeIdent.Name != "bool") {
 									runnablePackageFailures[loweredUnit.ID] = true
 									return nil, false
 								}
@@ -429,6 +439,16 @@ func Build(input Input) (Result, error) {
 									pkg.ConstantKinds[name.Name] = "int"
 									pkg.ConstantSymbols[name.Name] = constantSymbol
 									pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = -%s;\n", constantSymbol, basicValue.Value)
+								case *ast.Ident:
+									boolValue, ok := runnableBoolLiteralValue(typedValue.Name)
+									if !ok {
+										runnablePackageFailures[loweredUnit.ID] = true
+										return nil, false
+									}
+									pkg.ConstantOrder = append(pkg.ConstantOrder, name.Name)
+									pkg.ConstantKinds[name.Name] = "int"
+									pkg.ConstantSymbols[name.Name] = constantSymbol
+									pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", constantSymbol, boolValue)
 								default:
 									runnablePackageFailures[loweredUnit.ID] = true
 									return nil, false
@@ -672,6 +692,9 @@ func Build(input Input) (Result, error) {
 			}
 			return "", "", 0, false
 		case *ast.Ident:
+			if boolValue, ok := runnableBoolLiteralValue(typedExpression.Name); ok {
+				return boolValue, "int", 0, true
+			}
 			if localKind, ok := locals[typedExpression.Name]; ok {
 				return typedExpression.Name, localKind, 0, true
 			}
@@ -702,6 +725,11 @@ func Build(input Input) (Result, error) {
 				leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
 				rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
 				if !leftComparable || !rightComparable {
+					return "", "", 0, false
+				}
+				return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+			case token.LAND, token.LOR:
+				if leftKind != "int" || rightKind != "int" {
 					return "", "", 0, false
 				}
 				return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
@@ -771,6 +799,8 @@ func Build(input Input) (Result, error) {
 			switch typedExpression.Op {
 			case token.SUB, token.ADD:
 				return fmt.Sprintf("(%s%s)", typedExpression.Op.String(), translatedValue), "int", 0, true
+			case token.NOT:
+				return fmt.Sprintf("(!%s)", translatedValue), "int", 0, true
 			default:
 				return "", "", 0, false
 			}
@@ -3371,7 +3401,7 @@ func Build(input Input) (Result, error) {
 							}
 							if valueSpec.Type != nil {
 								typeIdent, ok := valueSpec.Type.(*ast.Ident)
-								if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string") {
+								if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string" && typeIdent.Name != "bool") {
 									supportsRunnableProgram = false
 									continue
 								}
@@ -3418,6 +3448,16 @@ func Build(input Input) (Result, error) {
 									topLevelConstantKinds[name.Name] = "int"
 									constantOrder = append(constantOrder, name.Name)
 									topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = -%s;\n", name.Name, basicValue.Value)
+								case *ast.Ident:
+									boolValue, ok := runnableBoolLiteralValue(typedValue.Name)
+									if !ok {
+										supportsRunnableProgram = false
+										continue
+									}
+									topLevelConstants[name.Name] = struct{}{}
+									topLevelConstantKinds[name.Name] = "int"
+									constantOrder = append(constantOrder, name.Name)
+									topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", name.Name, boolValue)
 								default:
 									supportsRunnableProgram = false
 								}
@@ -3517,6 +3557,9 @@ func Build(input Input) (Result, error) {
 						}
 						return "", "", 0, false
 					case *ast.Ident:
+						if boolValue, ok := runnableBoolLiteralValue(typedExpression.Name); ok {
+							return boolValue, "int", 0, true
+						}
 						if localKind, ok := locals[typedExpression.Name]; ok {
 							return typedExpression.Name, localKind, 0, true
 						}
@@ -3547,6 +3590,11 @@ func Build(input Input) (Result, error) {
 							leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
 							rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
 							if !leftComparable || !rightComparable {
+								return "", "", 0, false
+							}
+							return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+						case token.LAND, token.LOR:
+							if leftKind != "int" || rightKind != "int" {
 								return "", "", 0, false
 							}
 							return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
@@ -3612,6 +3660,8 @@ func Build(input Input) (Result, error) {
 						switch typedExpression.Op {
 						case token.SUB, token.ADD:
 							return fmt.Sprintf("(%s%s)", typedExpression.Op.String(), translatedValue), "int", 0, true
+						case token.NOT:
+							return fmt.Sprintf("(!%s)", translatedValue), "int", 0, true
 						default:
 							return "", "", 0, false
 						}

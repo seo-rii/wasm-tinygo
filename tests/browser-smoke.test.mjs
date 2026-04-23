@@ -58,6 +58,8 @@ import "fmt"
 
 const bonus = 3
 const label = "factorial_plus_bonus"
+const allowBonus = true
+const skipPenalty bool = false
 
 func factorial(n int) int {
 \tif n <= 1 {
@@ -67,7 +69,11 @@ func factorial(n int) int {
 }
 
 func main() {
-\tfmt.Printf("%s=%d input=%d\\n", label, factorial(5)+bonus, 5)
+\ttotal := factorial(5)
+\tif allowBonus && !skipPenalty {
+\t\ttotal = total + bonus
+\t}
+\tfmt.Printf("%s=%d input=%d\\n", label, total, 5)
 }
 `,
   }
@@ -83,6 +89,8 @@ import "fmt"
 const Bonus = 3
 const InputLabel = "helper_input"
 const OutputLabel = "imported_total"
+const ApplyBonus = true
+const SkipReport bool = false
 
 func Factorial(n int) int {
 \tif n <= 1 {
@@ -108,8 +116,14 @@ func Label() string {
 }
 
 func Total(n int) int {
-\tReport(n)
-\treturn Factorial(n) + Sum(2)
+\tif !SkipReport {
+\t\tReport(n)
+\t}
+\ttotal := Factorial(n) + Sum(2)
+\tif ApplyBonus || false {
+\t\treturn total
+\t}
+\treturn Factorial(n)
 }
 `,
     'main.go': `package main
