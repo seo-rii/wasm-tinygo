@@ -1084,8 +1084,7 @@ import (
 )
 
 func main() {
-	fmt.Print("imported_total=")
-	fmt.Println(helper.Total(5))
+	fmt.Printf("%s=%d\n", helper.Label(), helper.Total(5))
 }
 `), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(main.go): %v", err)
@@ -1114,6 +1113,10 @@ func Sum(n int) int {
 func Report(n int) {
 	label := "helper_input"
 	fmt.Printf("%s=%d\n", label, n)
+}
+
+func Label() string {
+	return "imported_total"
 }
 
 func Total(n int) int {
@@ -1199,7 +1202,19 @@ func Total(n int) int {
 	if !strings.Contains(programLoweredSource, "int tinygo_imported_000_Total(int n);") {
 		t.Fatalf("expected program lowered source to declare imported helper return signature, got: %q", programLoweredSource)
 	}
-	if !strings.Contains(programLoweredSource, "tinygo_runtime_print_i32(tinygo_imported_000_Total(5), 1);") {
+	if !strings.Contains(programLoweredSource, "char *tinygo_printf_arg_") || !strings.Contains(programLoweredSource, "= tinygo_imported_000_Label();") {
+		t.Fatalf("expected program lowered source to evaluate imported string helper before fmt.Printf output, got: %q", programLoweredSource)
+	}
+	if !strings.Contains(programLoweredSource, "int tinygo_printf_arg_") || !strings.Contains(programLoweredSource, "= tinygo_imported_000_Total(5);") {
+		t.Fatalf("expected program lowered source to evaluate imported int helper before fmt.Printf output, got: %q", programLoweredSource)
+	}
+	if !strings.Contains(programLoweredSource, "tinygo_runtime_print_string(tinygo_printf_arg_") {
+		t.Fatalf("expected program lowered source to print imported string helper result, got: %q", programLoweredSource)
+	}
+	if !strings.Contains(programLoweredSource, "tinygo_runtime_print_literal(\"=\", 1u, 0);") {
+		t.Fatalf("expected program lowered source to print fmt.Printf separator literal, got: %q", programLoweredSource)
+	}
+	if !strings.Contains(programLoweredSource, "tinygo_runtime_print_i32(tinygo_printf_arg_") {
 		t.Fatalf("expected program lowered source to print imported helper result, got: %q", programLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "static const int tinygo_imported_000_Bonus = 3;") {
@@ -1234,6 +1249,12 @@ func Total(n int) int {
 	}
 	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Report(n);") {
 		t.Fatalf("expected imported lowered source to call void helper from int helper, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "char* tinygo_imported_000_Label(void)") {
+		t.Fatalf("expected imported lowered source to lower exported string helper, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "return \"imported_total\";") {
+		t.Fatalf("expected imported lowered source to return string literal from helper, got: %q", importedLoweredSource)
 	}
 
 	var commandArtifactManifest struct {

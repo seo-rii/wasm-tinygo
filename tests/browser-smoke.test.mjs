@@ -102,6 +102,10 @@ func Report(n int) {
 \tfmt.Printf("%s=%d\\n", label, n)
 }
 
+func Label() string {
+\treturn "imported_total"
+}
+
 func Total(n int) int {
 \tReport(n)
 \treturn Factorial(n) + Sum(2)
@@ -116,8 +120,7 @@ import (
 )
 
 func main() {
-\tlabel := "imported_total"
-\tfmt.Printf("%s=%d input=%d\\n", label, helper.Total(5), 5)
+\tfmt.Printf("%s=%d input=%d\\n", helper.Label(), helper.Total(5), 5)
 }
 `,
   }

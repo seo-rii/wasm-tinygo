@@ -160,7 +160,7 @@ Currently covered in automated tests:
 - `fmt.Print`, `fmt.Println`, and multi-placeholder `fmt.Printf` for string and integer values (`%s` and `%d`)
 - integer constants, arithmetic, comparisons, local variables, simple loops, and conditionals
 - recursive integer helper functions in the main package
-- local imported packages that expose integer helper functions, including recursive helpers and package-level integer constants
+- local imported packages that expose integer or string helper functions, including recursive helpers and package-level integer constants
 
 This remains a compatibility slice, not a full compiler. Unsupported Go syntax or package patterns still fall back to a non-runnable probe artifact unless the host compile seam provides a real TinyGo wasm artifact.
 

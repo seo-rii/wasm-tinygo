@@ -253,12 +253,14 @@ func Build(input Input) (Result, error) {
 		FunctionOrder       []string
 		FunctionDecls       map[string]*ast.FuncDecl
 		FunctionReturnsInt  map[string]bool
+		FunctionReturnKinds map[string]string
 		FunctionParameters  map[string][]string
 		FunctionSymbols     map[string]string
 	}
 	type runnableFunctionInfo struct {
 		Symbol     string
 		ReturnsInt bool
+		ReturnKind string
 		Parameters []string
 	}
 	supportedRunnableImports := map[string]struct{}{
@@ -298,6 +300,7 @@ func Build(input Input) (Result, error) {
 			FunctionOrder:       make([]string, 0),
 			FunctionDecls:       map[string]*ast.FuncDecl{},
 			FunctionReturnsInt:  map[string]bool{},
+			FunctionReturnKinds: map[string]string{},
 			FunctionParameters:  map[string][]string{},
 			FunctionSymbols:     map[string]string{},
 		}
@@ -447,6 +450,7 @@ func Build(input Input) (Result, error) {
 						}
 					}
 					functionReturnsInt := false
+					functionReturnKind := "void"
 					if typedDecl.Type.Results != nil {
 						if len(typedDecl.Type.Results.List) != 1 {
 							runnablePackageFailures[loweredUnit.ID] = true
@@ -454,11 +458,12 @@ func Build(input Input) (Result, error) {
 						}
 						resultField := typedDecl.Type.Results.List[0]
 						typeIdent, ok := resultField.Type.(*ast.Ident)
-						if !ok || typeIdent.Name != "int" || len(resultField.Names) > 1 {
+						if !ok || len(resultField.Names) > 1 || (typeIdent.Name != "int" && typeIdent.Name != "string") {
 							runnablePackageFailures[loweredUnit.ID] = true
 							return nil, false
 						}
-						functionReturnsInt = true
+						functionReturnKind = typeIdent.Name
+						functionReturnsInt = functionReturnKind == "int"
 					}
 					functionSymbol := typedDecl.Name.Name
 					if loweredUnit.Kind != "program" {
@@ -467,6 +472,7 @@ func Build(input Input) (Result, error) {
 					pkg.FunctionOrder = append(pkg.FunctionOrder, typedDecl.Name.Name)
 					pkg.FunctionDecls[typedDecl.Name.Name] = typedDecl
 					pkg.FunctionReturnsInt[typedDecl.Name.Name] = functionReturnsInt
+					pkg.FunctionReturnKinds[typedDecl.Name.Name] = functionReturnKind
 					pkg.FunctionParameters[typedDecl.Name.Name] = append([]string{}, functionParameters...)
 					pkg.FunctionSymbols[typedDecl.Name.Name] = functionSymbol
 				default:
@@ -480,7 +486,7 @@ func Build(input Input) (Result, error) {
 				runnablePackageFailures[loweredUnit.ID] = true
 				return nil, false
 			}
-			if pkg.FunctionReturnsInt["main"] || len(pkg.FunctionParameters["main"]) != 0 {
+			if pkg.FunctionReturnKinds["main"] != "void" || len(pkg.FunctionParameters["main"]) != 0 {
 				runnablePackageFailures[loweredUnit.ID] = true
 				return nil, false
 			}
@@ -529,6 +535,18 @@ func Build(input Input) (Result, error) {
 			parameterDecls = append(parameterDecls, fmt.Sprintf("int %s", parameterName))
 		}
 		return strings.Join(parameterDecls, ", ")
+	}
+	runnableReturnCType := func(returnKind string) (string, bool) {
+		switch returnKind {
+		case "void":
+			return "void", true
+		case "int":
+			return "int", true
+		case "string":
+			return "char*", true
+		default:
+			return "", false
+		}
 	}
 	appendRunnablePrintArgument := func(translatedStatements *strings.Builder, translatedArgument string, argumentKind string, byteLength int, newline int) bool {
 		switch argumentKind {
@@ -683,8 +701,8 @@ func Build(input Input) (Result, error) {
 				if !ok || !ast.IsExported(selectorName) {
 					return "", "", 0, false
 				}
-				returnsInt, ok := importedPackage.FunctionReturnsInt[selectorName]
-				if !ok || !returnsInt {
+				returnKind, ok := importedPackage.FunctionReturnKinds[selectorName]
+				if !ok || (returnKind != "int" && returnKind != "string") {
 					return "", "", 0, false
 				}
 				parameterNames := importedPackage.FunctionParameters[selectorName]
@@ -699,15 +717,15 @@ func Build(input Input) (Result, error) {
 					}
 					translatedArgs = append(translatedArgs, translatedArgument)
 				}
-				return fmt.Sprintf("%s(%s)", importedPackage.FunctionSymbols[selectorName], strings.Join(translatedArgs, ", ")), "int", 0, true
+				return fmt.Sprintf("%s(%s)", importedPackage.FunctionSymbols[selectorName], strings.Join(translatedArgs, ", ")), returnKind, 0, true
 			}
 			functionIdent, ok := typedExpression.Fun.(*ast.Ident)
 			if !ok {
 				return "", "", 0, false
 			}
 			functionName := functionIdent.Name
-			returnsInt, ok := pkg.FunctionReturnsInt[functionName]
-			if !ok || !returnsInt {
+			returnKind, ok := pkg.FunctionReturnKinds[functionName]
+			if !ok || (returnKind != "int" && returnKind != "string") {
 				return "", "", 0, false
 			}
 			parameterNames := pkg.FunctionParameters[functionName]
@@ -722,7 +740,7 @@ func Build(input Input) (Result, error) {
 				}
 				translatedArgs = append(translatedArgs, translatedArgument)
 			}
-			return fmt.Sprintf("%s(%s)", pkg.FunctionSymbols[functionName], strings.Join(translatedArgs, ", ")), "int", 0, true
+			return fmt.Sprintf("%s(%s)", pkg.FunctionSymbols[functionName], strings.Join(translatedArgs, ", ")), returnKind, 0, true
 		case *ast.ParenExpr:
 			return translateRunnableExpression(pkg, typedExpression.X, locals)
 		case *ast.UnaryExpr:
@@ -740,8 +758,8 @@ func Build(input Input) (Result, error) {
 			return "", "", 0, false
 		}
 	}
-	var translateRunnableStatementList func(*runnablePackage, []ast.Stmt, map[string]string, bool) (string, bool)
-	translateRunnableStatementList = func(pkg *runnablePackage, statements []ast.Stmt, locals map[string]string, functionReturnsInt bool) (string, bool) {
+	var translateRunnableStatementList func(*runnablePackage, []ast.Stmt, map[string]string, string) (string, bool)
+	translateRunnableStatementList = func(pkg *runnablePackage, statements []ast.Stmt, locals map[string]string, functionReturnKind string) (string, bool) {
 		var translatedStatements strings.Builder
 		for _, statement := range statements {
 			switch typedStatement := statement.(type) {
@@ -918,7 +936,7 @@ func Build(input Input) (Result, error) {
 				if !conditionOK || conditionKind != "int" {
 					return "", false
 				}
-				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, locals, functionReturnsInt)
+				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, locals, functionReturnKind)
 				if !bodyOK {
 					return "", false
 				}
@@ -926,13 +944,13 @@ func Build(input Input) (Result, error) {
 				if typedStatement.Else != nil {
 					switch typedElse := typedStatement.Else.(type) {
 					case *ast.BlockStmt:
-						translatedElse, elseOK := translateRunnableStatementList(pkg, typedElse.List, locals, functionReturnsInt)
+						translatedElse, elseOK := translateRunnableStatementList(pkg, typedElse.List, locals, functionReturnKind)
 						if !elseOK {
 							return "", false
 						}
 						translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", translatedElse))
 					case *ast.IfStmt:
-						translatedElse, elseOK := translateRunnableStatementList(pkg, []ast.Stmt{typedElse}, locals, functionReturnsInt)
+						translatedElse, elseOK := translateRunnableStatementList(pkg, []ast.Stmt{typedElse}, locals, functionReturnKind)
 						if !elseOK {
 							return "", false
 						}
@@ -1028,18 +1046,18 @@ func Build(input Input) (Result, error) {
 						return "", false
 					}
 				}
-				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, loopLocals, functionReturnsInt)
+				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, loopLocals, functionReturnKind)
 				if !bodyOK {
 					return "", false
 				}
 				translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
 			case *ast.ReturnStmt:
-				if functionReturnsInt {
+				if functionReturnKind != "void" {
 					if len(typedStatement.Results) != 1 {
 						return "", false
 					}
 					translatedResult, resultKind, _, resultOK := translateRunnableExpression(pkg, typedStatement.Results[0], locals)
-					if !resultOK || resultKind != "int" {
+					if !resultOK || resultKind != functionReturnKind {
 						return "", false
 					}
 					translatedStatements.WriteString(fmt.Sprintf("\treturn %s;\n", translatedResult))
@@ -1077,13 +1095,14 @@ func Build(input Input) (Result, error) {
 				exportedFunctions[functionName] = runnableFunctionInfo{
 					Symbol:     functionSymbol,
 					ReturnsInt: pkg.FunctionReturnsInt[functionName],
+					ReturnKind: pkg.FunctionReturnKinds[functionName],
 					Parameters: append([]string{}, pkg.FunctionParameters[functionName]...),
 				}
 				exportedFunctionOrder = append(exportedFunctionOrder, functionName)
 			}
-			returnType := "void"
-			if pkg.FunctionReturnsInt[functionName] {
-				returnType = "int"
+			returnType, ok := runnableReturnCType(pkg.FunctionReturnKinds[functionName])
+			if !ok {
+				return nil, nil, nil, false
 			}
 			generatedDefinitions = append(generatedDefinitions, fmt.Sprintf("%s%s %s(%s);\n", storage, returnType, functionSymbol, formatRunnableParameterDecls(pkg.FunctionParameters[functionName])))
 		}
@@ -1096,7 +1115,7 @@ func Build(input Input) (Result, error) {
 			for _, parameterName := range pkg.FunctionParameters[functionName] {
 				locals[parameterName] = "int"
 			}
-			translatedBody, bodyOK := translateRunnableStatementList(pkg, functionDecl.Body.List, locals, pkg.FunctionReturnsInt[functionName])
+			translatedBody, bodyOK := translateRunnableStatementList(pkg, functionDecl.Body.List, locals, pkg.FunctionReturnKinds[functionName])
 			if !bodyOK {
 				return nil, nil, nil, false
 			}
@@ -1104,9 +1123,9 @@ func Build(input Input) (Result, error) {
 			if ast.IsExported(functionName) {
 				storage = ""
 			}
-			returnType := "void"
-			if pkg.FunctionReturnsInt[functionName] {
-				returnType = "int"
+			returnType, ok := runnableReturnCType(pkg.FunctionReturnKinds[functionName])
+			if !ok {
+				return nil, nil, nil, false
 			}
 			generatedDefinitions = append(generatedDefinitions, fmt.Sprintf("%s%s %s(%s) {\n%s}\n", storage, returnType, pkg.FunctionSymbols[functionName], formatRunnableParameterDecls(pkg.FunctionParameters[functionName]), translatedBody))
 		}
@@ -3509,7 +3528,7 @@ func Build(input Input) (Result, error) {
 								return "", "", 0, false
 							}
 							functionInfo, ok := importedFunctionMap[selectorName]
-							if !ok || !functionInfo.ReturnsInt || len(functionInfo.Parameters) != len(typedExpression.Args) {
+							if !ok || (functionInfo.ReturnKind != "int" && functionInfo.ReturnKind != "string") || len(functionInfo.Parameters) != len(typedExpression.Args) {
 								return "", "", 0, false
 							}
 							translatedArgs := make([]string, 0, len(typedExpression.Args))
@@ -3520,7 +3539,7 @@ func Build(input Input) (Result, error) {
 								}
 								translatedArgs = append(translatedArgs, translatedArgument)
 							}
-							return fmt.Sprintf("%s(%s)", functionInfo.Symbol, strings.Join(translatedArgs, ", ")), "int", 0, true
+							return fmt.Sprintf("%s(%s)", functionInfo.Symbol, strings.Join(translatedArgs, ", ")), functionInfo.ReturnKind, 0, true
 						}
 						functionIdent, ok := typedExpression.Fun.(*ast.Ident)
 						if !ok {
@@ -3923,9 +3942,10 @@ func Build(input Input) (Result, error) {
 							supportsRunnableProgram = false
 							break
 						}
-						returnType := "void"
-						if functionInfo.ReturnsInt {
-							returnType = "int"
+						returnType, ok := runnableReturnCType(functionInfo.ReturnKind)
+						if !ok {
+							supportsRunnableProgram = false
+							break
 						}
 						generatedImportedPrototypes = append(generatedImportedPrototypes, fmt.Sprintf("%s %s(%s);\n", returnType, functionInfo.Symbol, formatRunnableParameterDecls(functionInfo.Parameters)))
 					}
