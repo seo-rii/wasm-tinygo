@@ -853,11 +853,21 @@ if (includeUpstreamFrontendProbe) {
     packageGraph,
   })
   verifyUpstreamFrontendProbeAgainstFrontendAnalysisInputManifest(upstreamFrontendProbe, frontendAnalysisInput)
+  frontendAnalysisInput.upstreamFrontendProbe = upstreamFrontendProbe
+  await writeFile(frontendAnalysisInputPath, `${JSON.stringify(frontendAnalysisInput, null, 2)}\n`)
   if (frontendAnalysisResult?.analysis) {
+    frontendAnalysisResult.analysis = {
+      ...frontendAnalysisResult.analysis,
+      upstreamFrontendProbe,
+    }
     verifyUpstreamFrontendProbeAgainstFrontendAnalysisManifest(
       upstreamFrontendProbe,
       frontendAnalysisResult.analysis,
     )
+  }
+  frontendRealAdapterResult.adapter = {
+    ...frontendRealAdapterResult.adapter,
+    upstreamFrontendProbe,
   }
   verifyUpstreamFrontendProbeAgainstFrontendRealAdapterManifest(
     upstreamFrontendProbe,
