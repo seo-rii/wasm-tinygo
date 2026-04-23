@@ -57,9 +57,13 @@ go 1.22
 import "fmt"
 
 const bonus = 3
-const label = "factorial_plus_bonus"
+const baseLabel = "factorial_plus_bonus"
 const allowBonus = true
 const skipPenalty bool = false
+
+func label() string {
+\treturn baseLabel
+}
 
 func factorial(n int) int {
 \tif n <= 1 {
@@ -73,7 +77,7 @@ func main() {
 \tif allowBonus && !skipPenalty {
 \t\ttotal = total + bonus
 \t}
-\tfmt.Printf("%s=%d input=%d\\n", label, total, 5)
+\tfmt.Printf("%s=%d input=%d\\n", label(), total, 5)
 }
 `,
   }

@@ -734,7 +734,7 @@ func TestBuildProducesRunnableExecutionArtifactsForSimpleProgramSubset(t *testin
 func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testing.T) {
 	dir := t.TempDir()
 	entryPath := filepath.Join(dir, "main.go")
-	starterSource := "package main\n\nimport (\n\t\"bufio\"\n\t\"fmt\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nconst bonus = 3\nconst label = \"factorial_plus_bonus\"\nconst allowBonus = true\nconst skipPenalty bool = false\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tline, _ := bufio.NewReader(os.Stdin).ReadString('\\n')\n\tn, err := strconv.Atoi(strings.TrimSpace(line))\n\tif err != nil {\n\t\tn = 4\n\t}\n\ttotal := factorial(n)\n\tif allowBonus && !skipPenalty {\n\t\ttotal = total + bonus\n\t}\n\tfmt.Printf(\"%s=%d input=%d\\n\", label, total, n)\n}\n"
+	starterSource := "package main\n\nimport (\n\t\"bufio\"\n\t\"fmt\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nconst bonus = 3\nconst baseLabel = \"factorial_plus_bonus\"\nconst allowBonus = true\nconst skipPenalty bool = false\n\nfunc label() string {\n\treturn baseLabel\n}\n\nfunc factorial(n int) int {\n\tif n <= 1 {\n\t\treturn 1\n\t}\n\treturn n * factorial(n-1)\n}\n\nfunc main() {\n\tline, _ := bufio.NewReader(os.Stdin).ReadString('\\n')\n\tn, err := strconv.Atoi(strings.TrimSpace(line))\n\tif err != nil {\n\t\tn = 4\n\t}\n\ttotal := factorial(n)\n\tif allowBonus && !skipPenalty {\n\t\ttotal = total + bonus\n\t}\n\tfmt.Printf(\"%s=%d input=%d\\n\", label(), total, n)\n}\n"
 	if err := os.WriteFile(entryPath, []byte(starterSource), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(main.go): %v", err)
 	}
@@ -885,8 +885,14 @@ func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testin
 	if !strings.Contains(loweredSourceContents, "err = tinygo_runtime_parse_i32(tinygo_runtime_trim_space(line), &n);") {
 		t.Fatalf("expected lowered source to lower strconv.Atoi(strings.TrimSpace(...)), got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "static char *label = \"factorial_plus_bonus\";") {
+	if !strings.Contains(loweredSourceContents, "static char *baseLabel = \"factorial_plus_bonus\";") {
 		t.Fatalf("expected lowered source to lower string constants, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static char* label(void);") {
+		t.Fatalf("expected lowered source to declare main-package string helpers, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static char* label(void) {\n\treturn baseLabel;\n}") {
+		t.Fatalf("expected lowered source to lower main-package string helpers, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "static const int allowBonus = 1;") {
 		t.Fatalf("expected lowered source to lower true constants, got: %q", loweredSourceContents)
@@ -897,7 +903,7 @@ func TestBuildProducesRunnableExecutionArtifactsForTinyGoStarterSubset(t *testin
 	if !strings.Contains(loweredSourceContents, "if ((allowBonus && (!skipPenalty))) {") {
 		t.Fatalf("expected lowered source to lower logical boolean conditions, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "char *tinygo_printf_arg_000 = label;") {
+	if !strings.Contains(loweredSourceContents, "char *tinygo_printf_arg_000 = label();") {
 		t.Fatalf("expected lowered source to evaluate fmt.Printf string placeholder first, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_string(tinygo_printf_arg_000, 0);") {

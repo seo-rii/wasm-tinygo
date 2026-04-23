@@ -3353,7 +3353,7 @@ func Build(input Input) (Result, error) {
 			aliasToImportPath := map[string]string{}
 			topLevelConstants := map[string]struct{}{}
 			topLevelConstantKinds := map[string]string{}
-			topLevelFunctionReturnsInt := map[string]bool{}
+			topLevelFunctionReturnKinds := map[string]string{}
 			topLevelFunctionDefinitions := map[string]string{}
 			topLevelFunctionParameters := map[string][]string{}
 			functionDecls := map[string]*ast.FuncDecl{}
@@ -3482,7 +3482,6 @@ func Build(input Input) (Result, error) {
 						}
 						functionName := typedDecl.Name.Name
 						functionParameters := make([]string, 0)
-						functionParameterDecls := make([]string, 0)
 						if typedDecl.Type.Params != nil {
 							for _, field := range typedDecl.Type.Params.List {
 								typeIdent, ok := field.Type.(*ast.Ident)
@@ -3496,11 +3495,10 @@ func Build(input Input) (Result, error) {
 										continue
 									}
 									functionParameters = append(functionParameters, name.Name)
-									functionParameterDecls = append(functionParameterDecls, fmt.Sprintf("int %s", name.Name))
 								}
 							}
 						}
-						functionReturnsInt := false
+						functionReturnKind := "void"
 						if typedDecl.Type.Results != nil {
 							if len(typedDecl.Type.Results.List) != 1 {
 								supportsRunnableProgram = false
@@ -3508,24 +3506,27 @@ func Build(input Input) (Result, error) {
 							}
 							resultField := typedDecl.Type.Results.List[0]
 							typeIdent, ok := resultField.Type.(*ast.Ident)
-							if !ok || typeIdent.Name != "int" || len(resultField.Names) > 1 {
+							if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string") || len(resultField.Names) > 1 {
 								supportsRunnableProgram = false
 								continue
 							}
-							functionReturnsInt = true
+							functionReturnKind = typeIdent.Name
 						}
 						if functionName == "main" {
-							if functionReturnsInt || len(functionParameters) != 0 {
+							if functionReturnKind != "void" || len(functionParameters) != 0 {
 								supportsRunnableProgram = false
 								continue
 							}
 							topLevelFunctionDefinitions[functionName] = "int main(void);\n"
-						} else if functionReturnsInt {
-							topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static int %s(%s);\n", functionName, strings.Join(functionParameterDecls, ", "))
 						} else {
-							topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static void %s(%s);\n", functionName, strings.Join(functionParameterDecls, ", "))
+							returnType, ok := runnableReturnCType(functionReturnKind)
+							if !ok {
+								supportsRunnableProgram = false
+								continue
+							}
+							topLevelFunctionDefinitions[functionName] = fmt.Sprintf("static %s %s(%s);\n", returnType, functionName, formatRunnableParameterDecls(functionParameters))
 						}
-						topLevelFunctionReturnsInt[functionName] = functionReturnsInt
+						topLevelFunctionReturnKinds[functionName] = functionReturnKind
 						topLevelFunctionParameters[functionName] = append([]string{}, functionParameters...)
 						functionOrder = append(functionOrder, functionName)
 						functionDecls[functionName] = typedDecl
@@ -3534,7 +3535,7 @@ func Build(input Input) (Result, error) {
 					}
 				}
 			}
-			if _, ok := topLevelFunctionReturnsInt["main"]; !ok {
+			if _, ok := topLevelFunctionReturnKinds["main"]; !ok {
 				supportsRunnableProgram = false
 			}
 			if supportsRunnableProgram {
@@ -3645,8 +3646,8 @@ func Build(input Input) (Result, error) {
 							return "", "", 0, false
 						}
 						functionName := functionIdent.Name
-						returnsInt, ok := topLevelFunctionReturnsInt[functionName]
-						if !ok || !returnsInt {
+						returnKind, ok := topLevelFunctionReturnKinds[functionName]
+						if !ok || (returnKind != "int" && returnKind != "string") {
 							return "", "", 0, false
 						}
 						parameterNames := topLevelFunctionParameters[functionName]
@@ -3661,7 +3662,7 @@ func Build(input Input) (Result, error) {
 							}
 							translatedArgs = append(translatedArgs, translatedArgument)
 						}
-						return fmt.Sprintf("%s(%s)", functionName, strings.Join(translatedArgs, ", ")), "int", 0, true
+						return fmt.Sprintf("%s(%s)", functionName, strings.Join(translatedArgs, ", ")), returnKind, 0, true
 					case *ast.ParenExpr:
 						return translateExpression(typedExpression.X, locals)
 					case *ast.UnaryExpr:
@@ -3681,8 +3682,8 @@ func Build(input Input) (Result, error) {
 						return "", "", 0, false
 					}
 				}
-				var translateStatementList func([]ast.Stmt, map[string]string, bool, int) (string, bool)
-				translateStatementList = func(statements []ast.Stmt, locals map[string]string, functionReturnsInt bool, loopDepth int) (string, bool) {
+				var translateStatementList func([]ast.Stmt, map[string]string, string, int) (string, bool)
+				translateStatementList = func(statements []ast.Stmt, locals map[string]string, functionReturnKind string, loopDepth int) (string, bool) {
 					var translatedStatements strings.Builder
 					for _, statement := range statements {
 						switch typedStatement := statement.(type) {
@@ -3761,9 +3762,9 @@ func Build(input Input) (Result, error) {
 							if !callIdentOK {
 								return "", false
 							}
-							returnsInt := topLevelFunctionReturnsInt[callIdent.Name]
+							returnKind := topLevelFunctionReturnKinds[callIdent.Name]
 							translatedCall, argumentKind, _, callOK := translateExpression(callExpression, locals)
-							if !callOK || argumentKind != "int" && returnsInt {
+							if !callOK || (returnKind == "int" || returnKind == "string") && argumentKind != returnKind {
 								return "", false
 							}
 							translatedStatements.WriteString(fmt.Sprintf("\t%s;\n", translatedCall))
@@ -3901,7 +3902,7 @@ func Build(input Input) (Result, error) {
 							if !conditionOK || conditionKind != "int" {
 								return "", false
 							}
-							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, locals, functionReturnsInt, loopDepth)
+							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, locals, functionReturnKind, loopDepth)
 							if !bodyOK {
 								return "", false
 							}
@@ -3909,13 +3910,13 @@ func Build(input Input) (Result, error) {
 							if typedStatement.Else != nil {
 								switch typedElse := typedStatement.Else.(type) {
 								case *ast.BlockStmt:
-									translatedElse, elseOK := translateStatementList(typedElse.List, locals, functionReturnsInt, loopDepth)
+									translatedElse, elseOK := translateStatementList(typedElse.List, locals, functionReturnKind, loopDepth)
 									if !elseOK {
 										return "", false
 									}
 									translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", translatedElse))
 								case *ast.IfStmt:
-									translatedElse, elseOK := translateStatementList([]ast.Stmt{typedElse}, locals, functionReturnsInt, loopDepth)
+									translatedElse, elseOK := translateStatementList([]ast.Stmt{typedElse}, locals, functionReturnKind, loopDepth)
 									if !elseOK {
 										return "", false
 									}
@@ -4011,18 +4012,18 @@ func Build(input Input) (Result, error) {
 									return "", false
 								}
 							}
-							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, loopLocals, functionReturnsInt, loopDepth+1)
+							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, loopLocals, functionReturnKind, loopDepth+1)
 							if !bodyOK {
 								return "", false
 							}
 							translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
 						case *ast.ReturnStmt:
-							if functionReturnsInt {
+							if functionReturnKind != "void" {
 								if len(typedStatement.Results) != 1 {
 									return "", false
 								}
 								translatedResult, resultKind, _, resultOK := translateExpression(typedStatement.Results[0], locals)
-								if !resultOK || resultKind != "int" {
+								if !resultOK || resultKind != functionReturnKind {
 									return "", false
 								}
 								translatedStatements.WriteString(fmt.Sprintf("\treturn %s;\n", translatedResult))
@@ -4086,7 +4087,12 @@ func Build(input Input) (Result, error) {
 						for _, parameterName := range topLevelFunctionParameters[functionName] {
 							locals[parameterName] = "int"
 						}
-						translatedBody, bodyOK := translateStatementList(functionDecl.Body.List, locals, topLevelFunctionReturnsInt[functionName], 0)
+						functionReturnKind, ok := topLevelFunctionReturnKinds[functionName]
+						if !ok {
+							supportsRunnableProgram = false
+							break
+						}
+						translatedBody, bodyOK := translateStatementList(functionDecl.Body.List, locals, functionReturnKind, 0)
 						if !bodyOK {
 							supportsRunnableProgram = false
 							break
@@ -4095,15 +4101,12 @@ func Build(input Input) (Result, error) {
 							generatedFunctionBodies = append(generatedFunctionBodies, fmt.Sprintf("int main(void) {\n%s\treturn 0;\n}\n", translatedBody))
 							continue
 						}
-						parameterDecls := make([]string, 0, len(topLevelFunctionParameters[functionName]))
-						for _, parameterName := range topLevelFunctionParameters[functionName] {
-							parameterDecls = append(parameterDecls, fmt.Sprintf("int %s", parameterName))
+						returnType, ok := runnableReturnCType(functionReturnKind)
+						if !ok {
+							supportsRunnableProgram = false
+							break
 						}
-						if topLevelFunctionReturnsInt[functionName] {
-							generatedFunctionBodies = append(generatedFunctionBodies, fmt.Sprintf("static int %s(%s) {\n%s}\n", functionName, strings.Join(parameterDecls, ", "), translatedBody))
-						} else {
-							generatedFunctionBodies = append(generatedFunctionBodies, fmt.Sprintf("static void %s(%s) {\n%s}\n", functionName, strings.Join(parameterDecls, ", "), translatedBody))
-						}
+						generatedFunctionBodies = append(generatedFunctionBodies, fmt.Sprintf("static %s %s(%s) {\n%s}\n", returnType, functionName, formatRunnableParameterDecls(topLevelFunctionParameters[functionName]), translatedBody))
 					}
 				}
 				if supportsRunnableProgram {
