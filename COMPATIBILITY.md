@@ -280,7 +280,7 @@ The checked-in headless Chromium smoke test exercises the browser flow end to en
 1. boot `emception`
 2. run the Go/WASI driver
 3. inject and verify normalized TinyGo driver bridge handoffs
-4. run `frontend-analysis`, `frontend-real-adapter`, and the generic `frontend` build behind that verified seam
+4. run probe-backed `frontend-analysis`, `frontend-real-adapter`, and the generic `frontend` build behind that verified seam
 5. execute the emitted compile, lowering, backend, and final artifact plan
 6. generate and verify `/working/out.wasm`
 
@@ -293,4 +293,4 @@ If you want to know whether `wasm-tinygo` is already “TinyGo in the browser”
 - **infrastructure compatibility:** yes, for the first bootstrap slice
 - **TinyGo compiler compatibility:** not yet
 
-The next major compatibility step is replacing the bootstrap `tinygo-compile-unit.json` handoff with a real TinyGo-backed front-end while keeping `clang`/`wasm-ld` execution delegated to `emception`.
+The next major compatibility step is replacing the remaining synthetic compile-unit derivation inside that probe-backed front-end seam with direct TinyGo-owned frontend state while keeping `clang`/`wasm-ld` execution delegated to `emception`.

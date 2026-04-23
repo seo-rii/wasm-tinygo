@@ -41,7 +41,8 @@ The repository also has a host-side normalization flow around the real TinyGo CL
 - an `entryPackage` summary for the requested program
 - a normalized `packageGraph` derived from `tinygo list -deps -json`
 - a package-graph-only `frontendAnalysisInput` handoff produced by `go-probe frontend-analysis`
-- a synthetic `frontendAnalysis` result produced by `go-probe frontend-analysis`
+- an optional `upstreamFrontendProbe` package summary produced by the patched TinyGo WASI frontend probe
+- a `frontendAnalysis` result produced by `go-probe frontend-analysis`, optionally carrying that same upstream probe summary
 - a package-focused `frontendRealAdapter` result produced by `go-probe frontend-real-adapter`
 - a compatibility-only `realFrontendAnalysis` alias that mirrors `frontendRealAdapter` for older verifiers
 - a `frontendHandoff` summary that proves the synthetic compile-unit manifest still lines up with those normalized TinyGo facts
@@ -73,10 +74,13 @@ The key sections are:
 - `sourceSelection`
 - `compileUnits`
 - `packageGraph`
+- `upstreamFrontendProbe`
 
 `compileUnits` remains the execution-facing package grouping for the synthetic front-end. When the planner or bridge omits it, `frontend-analysis` now synthesizes the same grouping from `packageGraph` before it derives downstream manifests.
 
 `packageGraph` is the new analysis-facing vocabulary. It uses `dir + files.goFiles + importPath + imports + depOnly + standard` so the future real TinyGo front-end can consume the same package facts that the host bridge already normalizes from `tinygo list -deps -json`.
+
+`upstreamFrontendProbe` is the first real TinyGo frontend-owned fact promoted into that same contract. It carries the patched TinyGo WASI loader's package summary (`mainImportPath`, per-package `fileCount`, sorted `imports`, and package count) so `frontend-analysis` can reject package-graph drift against real TinyGo frontend state before the browser build continues.
 
 `buildContext` makes the planner-owned target facts explicit in the same handoff:
 
@@ -114,7 +118,7 @@ Today the front-end validates that `buildContext` and `packageGraph` agree with 
 
 The `frontend-analysis` seam now consumes bridged `buildContext` and `packageGraph` facts directly, including normalizing the program package from `command-line-arguments` to the real entry import path when the graph provides it. The host-side real TinyGo bridge now exercises that path with an analysis-only input that drops `compileUnits` and relies on package-graph synthesis before bridge verification runs. Before that analysis step runs, the bridge canonicalizes `buildContext` and `toolchain` from verified TinyGo host facts instead of reusing the synthetic driver copy verbatim, rewrites `packageGraph` to the normalized `tinygo list -deps -json` vocabulary when host facts are available, and still prefers the analysis-owned program package when `tinygo list` is empty or continues to report the entry package as `command-line-arguments`.
 
-That analysis-only bridge artifact is recorded in `tinygo-driver-bridge.json` as `frontendAnalysisInput`. The browser smoke path injects the same payload, re-verifies it before running `frontend-analysis`, and logs `frontend analysis input source=bridge` when the canonical bridge handoff reaches the browser unchanged.
+That analysis-only bridge artifact is recorded in `tinygo-driver-bridge.json` as `frontendAnalysisInput`. When the host bridge already has an `upstreamFrontendProbe`, it now embeds that same summary into `frontendAnalysisInput` and `frontendRealAdapter`. When the browser only has the bridge package graph, it reruns the patched TinyGo WASI frontend probe locally, injects the resulting `upstreamFrontendProbe` into `frontendAnalysisInput`, re-verifies the bridged analysis input, and then runs `frontend-analysis` from that probe-backed input before the adapter/build seam continues.
 
 The front-end build seam now has two equivalent entry points:
 
@@ -124,7 +128,7 @@ The front-end build seam now has two equivalent entry points:
 
 That moves the synthetic emitter behind the package-focused adapter seam instead of keeping it input-owned. The build now reconstructs the synthetic manifest chain from the adapter-owned `buildContext/packageGraph/compileUnits/allCompileFiles` view while still reusing the verified analysis toolchain and optimize facts, so package-facing drift shows up in the emitted `/working/tinygo-compile-unit.json` instead of being hidden behind the older analysis payload. The browser smoke path now reaches that same boundary through the generic `frontend` mode and exposes it as `frontend build mode=frontend` plus `frontend build source=real-adapter`.
 
-The `frontend-real-adapter` seam sits immediately after that step: it reuses the normalized analysis payload, preserves the same `buildContext/packageGraph` vocabulary, fills any remaining package-facing compile-unit facts, rejects mismatches against the package graph, and emits the narrower `frontendRealAdapter` handoff that the host bridge and browser smoke tests compare against real TinyGo facts. The host bridge now also verifies that package-focused adapter view directly against the normalized analysis payload before it compares either side against the final bridge manifest, so analysis-to-adapter drift is caught without waiting for a later bridge-specific mismatch.
+The `frontend-real-adapter` seam sits immediately after that step: it reuses the normalized analysis payload, preserves the same `buildContext/packageGraph` vocabulary, fills any remaining package-facing compile-unit facts, rejects mismatches against the package graph, and emits the narrower `frontendRealAdapter` handoff that the host bridge and browser smoke tests compare against real TinyGo facts. The browser runtime now also uses `frontend-real-adapter-analysis` for bridge-less static execution so the adapter is derived from the just-verified analysis payload instead of bypassing that seam. The host bridge still verifies that package-focused adapter view directly against the normalized analysis payload before it compares either side against the final bridge manifest, so analysis-to-adapter drift is caught without waiting for a later bridge-specific mismatch.
 
 At the bridge boundary, the verifier now checks not only package identity and direct imports but also package file coverage:
 
