@@ -1,6 +1,6 @@
 # Compatibility
 
-This document describes the compatibility level of `wasm-tinygo` as of 2026-03-26.
+This document describes the compatibility level of `wasm-tinygo` as of 2026-04-23.
 
 The current implementation is a **browser-side bootstrap driver**, not a full TinyGo port.
 
@@ -151,6 +151,19 @@ This proves the browser stack can already do these pieces together:
 
 It does **not** yet prove TinyGo compiler compatibility.
 
+### Static browser execution subset
+
+When the host compile seam is unavailable, the browser backend can now produce a runnable `main`-entry wasm artifact for the checked-in starter compatibility subset. That subset is intentionally narrow, but it is no longer just a metadata/probe artifact path.
+
+Currently covered in automated tests:
+
+- `fmt.Print` and `fmt.Println` for string and integer values
+- integer constants, arithmetic, comparisons, local variables, simple loops, and conditionals
+- recursive integer helper functions in the main package
+- local imported packages that expose integer helper functions, including recursive helpers and package-level integer constants
+
+This remains a compatibility slice, not a full compiler. Unsupported Go syntax or package patterns still fall back to a non-runnable probe artifact unless the host compile seam provides a real TinyGo wasm artifact.
+
 ## Browser compatibility
 
 ### Verified
@@ -254,6 +267,7 @@ The app may work outside Chromium-family browsers, but this has not been verifie
 - unresolved external import diagnostics in the built WASI driver
 - invalid source diagnostics flowing through the generated result file
 - browser-side TinyGo front-end handoff consumption that keeps `frontend` behind the verified real-adapter seam before it writes `tinygo-compile-unit.json`
+- static pure-browser execution for a local imported package helper that computes and prints `imported_total=123` without using the host compile seam
 
 The relevant tests live in:
 

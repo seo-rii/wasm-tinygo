@@ -20,7 +20,7 @@ Implemented now:
 - [x] reusable `runtime.js` library entry for browser consumers
 - [x] direct `wasm-idle` integration without the old hidden iframe wrapper
 - [x] host-assisted TinyGo compile path for browser consumers
-- [x] static browser execution for the current minimal TinyGo starter subset
+- [x] static browser execution for the current TinyGo starter compatibility subset
 - [x] real-browser TinyGo probes in `wasm-tinygo` and `wasm-idle`
 - [x] TinyGo runtime asset loader support
 - [x] TinyGo runtime pack support (`runtime-pack.index.json` + `runtime-pack.bin`)
@@ -30,7 +30,7 @@ Not done yet:
 - [ ] guarantee runnable pure-browser TinyGo output for arbitrary user programs
 - [ ] replace the synthetic `frontend-analysis` path with a real TinyGo frontend
 - [ ] replace the placeholder backend/lowering path with real TinyGo compiler output
-- [ ] broaden the browser demo from the minimal starter subset to a stronger compatibility set
+- [ ] broaden the browser demo from the starter compatibility subset to a stronger compatibility set
 
 ### What already works
 
@@ -40,7 +40,8 @@ Not done yet:
 - bootstrap wasm artifact generation
 - lowered wasm artifact generation and probe verification
 - repo-local host TinyGo execution through the pinned upstream release
-- pure-browser execution for the current minimal starter subset in Chromium-based browser smoke and `wasm-idle` static probes
+- pure-browser execution for the current starter compatibility subset in Chromium-based browser smoke and `wasm-idle` static probes
+- the static subset now covers `fmt.Print`/`fmt.Println`, integer constants and expressions, recursion, simple loops and conditionals, and local imported packages that expose integer helper functions
 - normalized `tinygo-driver-bridge.json` generation that compares native driver metadata with the real host-side TinyGo probe for the same request and records how the synthetic frontend handoff lines up with the real entry package facts, package graph facts, direct imports, and promoted bridge coverage summary fields
 - the bridge manifest now exposes the package-focused adapter result as canonical `frontendRealAdapter` while keeping `realFrontendAnalysis` as a compatibility-only alias for older consumers
 - browser-side consumption of the same normalized bridge vocabulary during smoke verification, including the `frontend bridge coverage ...` summary line
@@ -53,7 +54,7 @@ Not done yet:
 
 - the front-end does not yet run the real TinyGo compiler pipeline
 - the backend does not yet lower through real TinyGo compiler output
-- the pure-browser path only guarantees the current minimal starter subset; arbitrary TinyGo programs still need a host compile service for a reliable runnable artifact
+- the pure-browser path only guarantees the current starter compatibility subset; arbitrary TinyGo programs still need a host compile service for a reliable runnable artifact
 
 ## Execution order
 
@@ -101,9 +102,9 @@ Expected deliverables:
 
 ## Immediate next slice
 
-The browser/runtime integration slice is now much further along than the original bridge-only milestone. The reusable runtime entry, `wasm-idle` integration, static minimal-subset execution, and runtime pack support are done. The next slice is no longer "make TinyGo appear in the browser"; it is "expand correctness beyond the minimal starter subset" while keeping the existing manifest seam stable:
+The browser/runtime integration slice is now much further along than the original bridge-only milestone. The reusable runtime entry, `wasm-idle` integration, static starter-subset execution, and runtime pack support are done. The next slice is no longer "make TinyGo appear in the browser"; it is "expand correctness beyond the current starter compatibility subset" while keeping the existing manifest seam stable:
 
-- keep the current minimal static browser path green while adding broader program coverage
+- keep the current static browser path green while adding broader program coverage
 - use the host compile seam as the correctness oracle for new browser-facing demo cases
 - replace the synthetic `frontend-analysis` producer with a real build-only TinyGo frontend adapter while keeping `frontend-real-adapter-build` as the stable synthetic emit boundary
 - keep `frontend-real-adapter` as the package-focused normalization boundary so a real TinyGo frontend can replace its synthetic internals without changing the browser/bridge vocabulary
