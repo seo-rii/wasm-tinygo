@@ -250,8 +250,10 @@ host-side TinyGo probe flow.
 It now checks:
 
 - end-to-end boot, plan, execute, and artifact verification
+- stable demo coverage for both the host-assisted bridge path and the bridge-less static starter-subset path
 - canonical `frontendAnalysisInput` injection into the browser path
 - canonical versus compatibility-alias `frontendRealAdapter` handling
+- explicit failure surfacing for unsupported bridge-less language cases and invalid target overrides
 - reset clearing runtime state and snapshots
 - cache invalidation after workspace or override changes
 - busy-action rejection for hooks

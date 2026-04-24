@@ -55,6 +55,7 @@ import {
   type TinyGoFrontendInputManifest,
   type TinyGoIntermediateManifest,
   type TinyGoLoweredBitcodeManifest,
+  type TinyGoLoweredIRManifest,
   type TinyGoLoweringManifest,
   type TinyGoLoweredSourcesManifest,
   type TinyGoLoweringPlanManifest,
@@ -275,6 +276,67 @@ const buildDirectoryContentsFromTextEntries = (entries: Record<string, string>, 
 
 const normalizeAssetBaseUrl = (assetBaseUrl: string) =>
   assetBaseUrl.endsWith('/') ? assetBaseUrl : `${assetBaseUrl}/`
+
+const describePureBrowserFallbackFailure = (
+  requestedBuildTarget: TinyGoBuildTarget,
+  loweredIRVerification: TinyGoLoweredIRManifest | null,
+) => {
+  if (requestedBuildTarget !== 'wasm' && requestedBuildTarget !== 'wasip1') {
+    return {
+      errorLine: `pure-browser runnable execution currently supports wasm and wasip1 only; requested target ${requestedBuildTarget} requires the host-assisted bridge`,
+      logLine: `pure-browser execution unsupported target=${requestedBuildTarget}: runnable fallback only supports wasm/wasip1`,
+    }
+  }
+  if (!Array.isArray(loweredIRVerification?.units)) {
+    return null
+  }
+  const userUnits = loweredIRVerification.units.filter((unit) => (unit.kind ?? '') === 'program' || (unit.kind ?? '') === 'imported')
+  if (userUnits.length === 0) {
+    return null
+  }
+  const blockers: string[] = []
+  const addBlocker = (label: string) => {
+    if (!blockers.includes(label)) {
+      blockers.push(label)
+    }
+  }
+  if (userUnits.some((unit) => (unit.functions ?? []).some((functionInfo) => functionInfo.method))) {
+    addBlocker('methods')
+  }
+  if (userUnits.some((unit) => (unit.types ?? []).some((typeInfo) => (typeInfo.kind ?? '') === 'struct'))) {
+    addBlocker('struct types')
+  }
+  if (userUnits.some((unit) => (unit.types ?? []).some((typeInfo) => (typeInfo.kind ?? '') === 'interface'))) {
+    addBlocker('interface types')
+  }
+  if (userUnits.some((unit) => (unit.types ?? []).some((typeInfo) => (typeInfo.kind ?? '') === 'map'))) {
+    addBlocker('map types')
+  }
+  if (userUnits.some((unit) => (unit.types ?? []).some((typeInfo) => (typeInfo.kind ?? '') === 'chan'))) {
+    addBlocker('channel types')
+  }
+  if (userUnits.some((unit) => (unit.types ?? []).some((typeInfo) => (typeInfo.kind ?? '') === 'array'))) {
+    addBlocker('array types')
+  }
+  if (userUnits.some((unit) => (unit.types ?? []).some((typeInfo) => (typeInfo.kind ?? '') === 'slice'))) {
+    addBlocker('slice types')
+  }
+  if (userUnits.some((unit) => (unit.types ?? []).some((typeInfo) => (typeInfo.kind ?? '') === 'pointer'))) {
+    addBlocker('pointer types')
+  }
+  if (userUnits.some((unit) => (unit.variables ?? []).length > 0)) {
+    addBlocker('package-level vars')
+  }
+  if (blockers.length === 0) {
+    return null
+  }
+  const preview = blockers.slice(0, 4).join(', ')
+  const summary = blockers.length > 4 ? `${preview} (+${blockers.length - 4} more)` : preview
+  return {
+    errorLine: `pure-browser fallback does not support ${summary}; use the host-assisted bridge for this program`,
+    logLine: `pure-browser execution unsupported features=${summary}`,
+  }
+}
 
 export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntime => {
   const assetBaseUrl = normalizeAssetBaseUrl(options.assetBaseUrl)
@@ -930,6 +992,7 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       lastFrontendAnalysisInputManifest = null
       const buildRequestOverrides =
         injectedBuildRequestOverrides === null ? null : cloneJsonValue(injectedBuildRequestOverrides)
+      const requestedBuildTarget = buildRequestOverrides?.target ?? 'wasm'
       const driverBridgeManifest =
         injectedDriverBridgeManifest === null ? null : cloneJsonValue(injectedDriverBridgeManifest)
       const workspaceFiles = injectedWorkspaceFiles === null ? null : cloneJsonValue(injectedWorkspaceFiles)
@@ -1671,13 +1734,21 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             { cwd: commandBatchVerification.linkCommand.cwd },
           )
           if (commandLinkResult.returncode !== 0) {
-            setPhase('smoke', 'failed', 'error')
             if (commandLinkResult.stdout.trim() !== '') {
               appendLog(commandLinkResult.stdout.trim(), 'error')
             }
             if (commandLinkResult.stderr.trim() !== '') {
               appendLog(commandLinkResult.stderr.trim(), 'error')
             }
+            const pureBrowserFallbackFailure = describePureBrowserFallbackFailure(
+              requestedBuildTarget,
+              frontendLoweredIRVerification,
+            )
+            if (pureBrowserFallbackFailure) {
+              appendLog(pureBrowserFallbackFailure.logLine, 'error')
+              throw new Error(pureBrowserFallbackFailure.errorLine)
+            }
+            setPhase('smoke', 'failed', 'error')
             appendLog(`final artifact link failed with exit code ${commandLinkResult.returncode}`, 'error')
             return
           }
@@ -1969,9 +2040,12 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
         executionArtifactBytes = new Uint8Array(artifactBytes)
         executionArtifactEntrypoint = lastBuildArtifactEntrypoint
       }
-      const requestedBuildTarget = buildRequestOverrides?.target ?? 'wasm'
       const canUseWasip1ExecutionFallback =
         requestedBuildTarget === 'wasm' || requestedBuildTarget === 'wasip1'
+      const pureBrowserFallbackFailure = describePureBrowserFallbackFailure(
+        requestedBuildTarget,
+        frontendLoweredIRVerification,
+      )
       if (
         artifactProbeVerified &&
         options.hostCompileUrl &&
@@ -2050,7 +2124,9 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
             'error',
           )
           appendLog(
-            'host compile seam unavailable; attempting browser-side relink to produce a runnable execution artifact',
+            pureBrowserFallbackFailure
+              ? 'host compile seam unavailable; browser-side fallback cannot recover the current program or target'
+              : 'host compile seam unavailable; attempting browser-side relink to produce a runnable execution artifact',
             'error',
           )
         }
@@ -2064,6 +2140,15 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
           `host compile seam skipped: ${requestedBuildTarget} cannot be replaced with a wasip1 execution artifact`,
           'error',
         )
+      }
+      if (
+        artifactProbeVerified &&
+        executionArtifactBytes === null &&
+        !lastBuildArtifactRunnable &&
+        pureBrowserFallbackFailure
+      ) {
+        appendLog(pureBrowserFallbackFailure.logLine, 'error')
+        throw new Error(pureBrowserFallbackFailure.errorLine)
       }
       if (
         artifactProbeVerified &&

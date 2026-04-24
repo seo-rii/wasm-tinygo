@@ -149,6 +149,27 @@ func main() {
 }
 `,
   }
+  const unsupportedStaticLanguageWorkspaceFiles = {
+    'go.mod': `module example.com/unsupportedstatic
+
+go 1.22
+`,
+    'main.go': `package main
+
+type Task interface {
+\tRun()
+}
+
+type App struct{}
+
+func (App) Run() {}
+
+func main() {
+\tvar task Task = App{}
+\t_ = task
+}
+`,
+  }
   let previewPort
   try {
     previewPort = await new Promise((resolve, reject) => {
@@ -1192,5 +1213,42 @@ func main() {
   assert.match(staticImportedActivity ?? '', /frontend real adapter tinygo frontend prepared real adapter handoff/)
   assert.match(staticImportedActivity ?? '', /frontend real adapter source=analysis/)
   assert.doesNotMatch(staticImportedActivity ?? '', /tinygo host compile ready:/)
+
+  await page.evaluate(() => window.__wasmTinygoTestHooks.reset())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify' }))
+  await page.evaluate(
+    (workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles),
+    unsupportedStaticLanguageWorkspaceFiles,
+  )
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setDriverBridgeManifest(null))
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.plan())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+
+  const unsupportedStaticLanguagePhases = await page.locator('[data-phase]').allTextContents()
+  const unsupportedStaticLanguageActivity = await page.locator('#terminal-output').textContent()
+  assert.match(unsupportedStaticLanguagePhases.join('\n'), /build execution\s+failed/)
+  assert.match(
+    unsupportedStaticLanguageActivity ?? '',
+    /pure-browser execution unsupported features=methods, struct types, interface types/,
+  )
+  assert.match(
+    unsupportedStaticLanguageActivity ?? '',
+    /build execution failed: pure-browser fallback does not support methods, struct types, interface types; use the host-assisted bridge for this program/,
+  )
+  assert.doesNotMatch(unsupportedStaticLanguageActivity ?? '', /attempting browser-side relink to produce a runnable execution artifact/)
+
+  await page.evaluate(() => window.__wasmTinygoTestHooks.reset())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setBuildRequestOverrides({ scheduler: 'asyncify', target: 'bogus-target' }))
+  await page.evaluate((workspaceFiles) => window.__wasmTinygoTestHooks.setWorkspaceFiles(workspaceFiles), staticBrowserWorkspaceFiles)
+  await page.evaluate(() => window.__wasmTinygoTestHooks.setDriverBridgeManifest(null))
+  await page.evaluate(() => window.__wasmTinygoTestHooks.boot())
+  await page.evaluate(() => window.__wasmTinygoTestHooks.execute())
+
+  const unsupportedTargetPhases = await page.locator('[data-phase]').allTextContents()
+  const unsupportedTargetActivity = await page.locator('#terminal-output').textContent()
+  assert.match(unsupportedTargetPhases.join('\n'), /build execution\s+failed/)
+  assert.match(unsupportedTargetPhases.join('\n'), /build driver plan\s+failed/)
+  assert.match(unsupportedTargetActivity ?? '', /build driver failed: unsupported target: "bogus-target"/)
   await page.unroute('**/api/tinygo/compile')
 })

@@ -161,6 +161,7 @@ Currently covered in automated tests:
 - integer/string/boolean constants, arithmetic, comparisons, logical conditions, local variables, simple loops with `break`/`continue`, and conditionals
 - recursive integer and string helper functions in the main package
 - local imported packages that expose integer or string helper functions, including recursive helpers and package-level integer/string/boolean constants
+- explicit browser-side failure surfacing for unsupported bridge-less fallback programs that introduce methods or interface/struct-heavy package shapes, plus explicit invalid-target planner diagnostics in the same smoke path
 
 This remains a compatibility slice, not a full compiler. Unsupported Go syntax or package patterns still fall back to the synthetic bridge-less backend path unless the normalized TinyGo driver bridge provides a real TinyGo `hostArtifact`.
 
@@ -268,6 +269,8 @@ The app may work outside Chromium-family browsers, but this has not been verifie
 - invalid source diagnostics flowing through the generated result file
 - browser-side TinyGo front-end handoff consumption that keeps `frontend` behind the verified real-adapter seam before it writes `tinygo-compile-unit.json`
 - static pure-browser execution for a local imported package helper that computes and prints `imported_total=123` without using the host compile seam
+- browser-side unsupported fallback diagnostics for method/interface/struct-heavy programs before the UI silently degrades into a generic browser failure
+- invalid target override diagnostics flowing through the same browser plan/execute/test-hook surface
 
 The relevant tests live in:
 
