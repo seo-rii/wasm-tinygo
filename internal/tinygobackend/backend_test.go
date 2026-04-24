@@ -581,6 +581,103 @@ func main() {
 	}
 }
 
+func TestBuildLowersSimpleSwitchStatementsForRunnableSubset(t *testing.T) {
+	tempDir := t.TempDir()
+	entryPath := filepath.Join(tempDir, "main.go")
+	if err := os.WriteFile(entryPath, []byte(`package main
+
+import "fmt"
+
+func classify(n int) string {
+	switch n % 4 {
+	case 0, 2:
+		return "even"
+	case 1:
+		return "one"
+	default:
+		return "odd"
+	}
+}
+
+func bonus(n int) int {
+	switch {
+	case n > 10:
+		return 10
+	case n > 0:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func main() {
+	total := 120 + bonus(5)
+	fmt.Printf("%s=%d\n", classify(total), total)
+}
+`), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(main.go): %v", err)
+	}
+
+	result, err := Build(Input{
+		EntryFile: entryPath,
+		CompileJobs: []CompileJob{
+			{
+				ID:                "program-000",
+				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{"fmt"},
+				DepOnly:           false,
+				ModulePath:        "example.com/app",
+				PackageName:       "main",
+				PackageDir:        tempDir,
+				Files:             []string{entryPath},
+				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory", "-mnontrapping-fptoint"},
+				OptimizeFlag:      "-Oz",
+				Standard:          false,
+			},
+		},
+		LinkJob: LinkJob{
+			Linker:             "wasm-ld",
+			LDFlags:            []string{"--stack-first", "--no-demangle"},
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	generatedFilesByPath := map[string]string{}
+	for _, generatedFile := range result.GeneratedFiles {
+		generatedFilesByPath[generatedFile.Path] = generatedFile.Contents
+	}
+	var commandArtifactManifest CommandArtifactManifest
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-command-artifact.json"]), &commandArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(command-artifact): %v", err)
+	}
+	if commandArtifactManifest.ArtifactKind != "execution" || commandArtifactManifest.Entrypoint == nil || *commandArtifactManifest.Entrypoint != "main" || !commandArtifactManifest.Runnable {
+		t.Fatalf("expected runnable command artifact manifest, got %#v", commandArtifactManifest)
+	}
+
+	loweredSourceContents := generatedFilesByPath["/working/tinygo-lowered/program-000.c"]
+	if !strings.Contains(loweredSourceContents, "if (((n % 4) == 0) || ((n % 4) == 2)) {") {
+		t.Fatalf("expected lowered source to lower multi-value switch case, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "else if (((n % 4) == 1)) {") {
+		t.Fatalf("expected lowered source to lower switch else-if case, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "if (((n > 10))) {") {
+		t.Fatalf("expected lowered source to lower expressionless switch case, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "else if (((n > 0))) {") {
+		t.Fatalf("expected lowered source to lower expressionless switch else-if case, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "char *tinygo_printf_arg_000 = classify(total);") {
+		t.Fatalf("expected lowered source to use switch-backed string helper in fmt.Printf, got: %q", loweredSourceContents)
+	}
+}
+
 func TestBuildUsesSourceContentsForLoweredSourceHashWhenFilesExist(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "main.go")

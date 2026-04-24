@@ -61,8 +61,13 @@ const baseLabel = "factorial_plus_bonus"
 const allowBonus = true
 const skipPenalty bool = false
 
-func label() string {
-\treturn baseLabel
+func label(n int) string {
+\tswitch n % 2 {
+\tcase 1:
+\t\treturn baseLabel
+\tdefault:
+\t\treturn "even_input"
+\t}
 }
 
 func factorial(n int) int {
@@ -77,7 +82,7 @@ func main() {
 \tif allowBonus && !skipPenalty {
 \t\ttotal = total + bonus
 \t}
-\tfmt.Printf("%s=%d input=%d\\n", label(), total, 5)
+\tfmt.Printf("%s=%d input=%d\\n", label(5), total, 5)
 }
 `,
   }
@@ -121,8 +126,13 @@ func Report(n int) {
 \tfmt.Printf("%s=%d\\n", InputLabel, n)
 }
 
-func Label() string {
-\treturn OutputLabel
+func Label(n int) string {
+\tswitch {
+\tcase n > 0:
+\t\treturn OutputLabel
+\tdefault:
+\t\treturn "none"
+\t}
 }
 
 func Total(n int) int {
@@ -145,7 +155,7 @@ import (
 )
 
 func main() {
-\tfmt.Printf("%s=%d input=%d\\n", helper.Label(), helper.Total(5), 5)
+\tfmt.Printf("%s=%d input=%d\\n", helper.Label(5), helper.Total(5), 5)
 }
 `,
   }

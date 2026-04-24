@@ -1113,6 +1113,83 @@ func Build(input Input) (Result, error) {
 					return "", false
 				}
 				translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
+			case *ast.SwitchStmt:
+				if typedStatement.Init != nil || typedStatement.Body == nil {
+					return "", false
+				}
+				tagValue := ""
+				tagKind := "int"
+				if typedStatement.Tag != nil {
+					translatedTag, translatedTagKind, _, tagOK := translateRunnableExpression(pkg, typedStatement.Tag, locals)
+					if !tagOK || translatedTagKind != "int" {
+						return "", false
+					}
+					tagValue = translatedTag
+					tagKind = translatedTagKind
+				}
+				type translatedCaseClause struct {
+					condition string
+					body      string
+				}
+				translatedCases := make([]translatedCaseClause, 0, len(typedStatement.Body.List))
+				defaultBody := ""
+				for _, statement := range typedStatement.Body.List {
+					caseClause, ok := statement.(*ast.CaseClause)
+					if !ok {
+						return "", false
+					}
+					caseLocals := map[string]string{}
+					for name, kind := range locals {
+						caseLocals[name] = kind
+					}
+					translatedBody, bodyOK := translateRunnableStatementList(pkg, caseClause.Body, caseLocals, functionReturnKind, loopDepth)
+					if !bodyOK {
+						return "", false
+					}
+					if len(caseClause.List) == 0 {
+						if defaultBody != "" {
+							return "", false
+						}
+						defaultBody = translatedBody
+						continue
+					}
+					conditions := make([]string, 0, len(caseClause.List))
+					for _, caseExpression := range caseClause.List {
+						translatedCase, translatedCaseKind, _, caseOK := translateRunnableExpression(pkg, caseExpression, locals)
+						if !caseOK || translatedCaseKind != tagKind {
+							return "", false
+						}
+						if typedStatement.Tag == nil {
+							if translatedCaseKind != "int" {
+								return "", false
+							}
+							conditions = append(conditions, fmt.Sprintf("(%s)", translatedCase))
+							continue
+						}
+						conditions = append(conditions, fmt.Sprintf("(%s == %s)", tagValue, translatedCase))
+					}
+					if len(conditions) == 0 {
+						return "", false
+					}
+					translatedCases = append(translatedCases, translatedCaseClause{
+						condition: strings.Join(conditions, " || "),
+						body:      translatedBody,
+					})
+				}
+				for caseIndex, translatedCase := range translatedCases {
+					if caseIndex == 0 {
+						translatedStatements.WriteString(fmt.Sprintf("\tif (%s) {\n%s\t}\n", translatedCase.condition, translatedCase.body))
+						continue
+					}
+					translatedStatements.WriteString(fmt.Sprintf("\telse if (%s) {\n%s\t}\n", translatedCase.condition, translatedCase.body))
+				}
+				if defaultBody != "" {
+					if len(translatedCases) == 0 {
+						translatedStatements.WriteString(fmt.Sprintf("\t{\n%s\t}\n", defaultBody))
+					} else {
+						translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", defaultBody))
+					}
+				}
 			case *ast.ReturnStmt:
 				if functionReturnKind != "void" {
 					if len(typedStatement.Results) != 1 {
@@ -4017,6 +4094,83 @@ func Build(input Input) (Result, error) {
 								return "", false
 							}
 							translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
+						case *ast.SwitchStmt:
+							if typedStatement.Init != nil || typedStatement.Body == nil {
+								return "", false
+							}
+							tagValue := ""
+							tagKind := "int"
+							if typedStatement.Tag != nil {
+								translatedTag, translatedTagKind, _, tagOK := translateExpression(typedStatement.Tag, locals)
+								if !tagOK || translatedTagKind != "int" {
+									return "", false
+								}
+								tagValue = translatedTag
+								tagKind = translatedTagKind
+							}
+							type translatedCaseClause struct {
+								condition string
+								body      string
+							}
+							translatedCases := make([]translatedCaseClause, 0, len(typedStatement.Body.List))
+							defaultBody := ""
+							for _, statement := range typedStatement.Body.List {
+								caseClause, ok := statement.(*ast.CaseClause)
+								if !ok {
+									return "", false
+								}
+								caseLocals := map[string]string{}
+								for name, kind := range locals {
+									caseLocals[name] = kind
+								}
+								translatedBody, bodyOK := translateStatementList(caseClause.Body, caseLocals, functionReturnKind, loopDepth)
+								if !bodyOK {
+									return "", false
+								}
+								if len(caseClause.List) == 0 {
+									if defaultBody != "" {
+										return "", false
+									}
+									defaultBody = translatedBody
+									continue
+								}
+								conditions := make([]string, 0, len(caseClause.List))
+								for _, caseExpression := range caseClause.List {
+									translatedCase, translatedCaseKind, _, caseOK := translateExpression(caseExpression, locals)
+									if !caseOK || translatedCaseKind != tagKind {
+										return "", false
+									}
+									if typedStatement.Tag == nil {
+										if translatedCaseKind != "int" {
+											return "", false
+										}
+										conditions = append(conditions, fmt.Sprintf("(%s)", translatedCase))
+										continue
+									}
+									conditions = append(conditions, fmt.Sprintf("(%s == %s)", tagValue, translatedCase))
+								}
+								if len(conditions) == 0 {
+									return "", false
+								}
+								translatedCases = append(translatedCases, translatedCaseClause{
+									condition: strings.Join(conditions, " || "),
+									body:      translatedBody,
+								})
+							}
+							for caseIndex, translatedCase := range translatedCases {
+								if caseIndex == 0 {
+									translatedStatements.WriteString(fmt.Sprintf("\tif (%s) {\n%s\t}\n", translatedCase.condition, translatedCase.body))
+									continue
+								}
+								translatedStatements.WriteString(fmt.Sprintf("\telse if (%s) {\n%s\t}\n", translatedCase.condition, translatedCase.body))
+							}
+							if defaultBody != "" {
+								if len(translatedCases) == 0 {
+									translatedStatements.WriteString(fmt.Sprintf("\t{\n%s\t}\n", defaultBody))
+								} else {
+									translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", defaultBody))
+								}
+							}
 						case *ast.ReturnStmt:
 							if functionReturnKind != "void" {
 								if len(typedStatement.Results) != 1 {
