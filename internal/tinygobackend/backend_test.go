@@ -694,8 +694,10 @@ func main() {
 	allow = true
 	var localBoost int
 	var localLabel = label
-	if allow && localLabel == "package_var_total" {
-		localBoost += len(localLabel) - 14
+	const localExpected = "package_var_total"
+	const localPenalty = 14
+	if allow && localLabel == localExpected {
+		localBoost += len(localLabel) - localPenalty
 		delta += localBoost
 		total += delta
 	}
@@ -766,16 +768,22 @@ func main() {
 	if !strings.Contains(loweredSourceContents, "static int tinygo_runtime_string_equal(const char *left, const char *right)") {
 		t.Fatalf("expected lowered source to embed string equality helper, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "if ((allow && (tinygo_runtime_string_equal(localLabel, \"package_var_total\") != 0))) {") {
-		t.Fatalf("expected lowered source to lower string equality condition, got: %q", loweredSourceContents)
-	}
 	if !strings.Contains(loweredSourceContents, "int localBoost = 0;") {
 		t.Fatalf("expected lowered source to lower local zero int var declaration, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "char *localLabel = label;") {
 		t.Fatalf("expected lowered source to lower inferred local string var declaration, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "localBoost += (tinygo_runtime_string_len(localLabel) - 14);") {
+	if !strings.Contains(loweredSourceContents, "char *localExpected = \"package_var_total\";") {
+		t.Fatalf("expected lowered source to lower local string const declaration, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "const int localPenalty = 14;") {
+		t.Fatalf("expected lowered source to lower local int const declaration, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "if ((allow && (tinygo_runtime_string_equal(localLabel, localExpected) != 0))) {") {
+		t.Fatalf("expected lowered source to lower local string const comparison, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "localBoost += (tinygo_runtime_string_len(localLabel) - localPenalty);") {
 		t.Fatalf("expected lowered source to lower string len into local compound assignment, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "delta += localBoost;") {
@@ -1366,8 +1374,9 @@ func Total(n int) int {
 	}
 	total := Factorial(n) + Sum(2)
 	if ApplyBonus || false {
-		Bonus += len(OutputLabel) - 14
-		var adjustmentBase = 3
+		const labelLen = 14
+		Bonus += len(OutputLabel) - labelLen
+		const adjustmentBase = 3
 		Adjustment += Bonus - adjustmentBase
 		total += Adjustment
 		return total
@@ -1528,11 +1537,14 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "if ((tinygo_imported_000_ApplyBonus || 0)) {") {
 		t.Fatalf("expected imported lowered source to lower logical boolean conditions, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus += (tinygo_runtime_string_len(tinygo_imported_000_OutputLabel) - 14);") {
+	if !strings.Contains(importedLoweredSource, "const int labelLen = 14;") {
+		t.Fatalf("expected imported lowered source to lower local inferred int const declaration, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus += (tinygo_runtime_string_len(tinygo_imported_000_OutputLabel) - labelLen);") {
 		t.Fatalf("expected imported lowered source to compound-assign string len into imported package var, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "int adjustmentBase = 3;") {
-		t.Fatalf("expected imported lowered source to lower local inferred int var declaration, got: %q", importedLoweredSource)
+	if !strings.Contains(importedLoweredSource, "const int adjustmentBase = 3;") {
+		t.Fatalf("expected imported lowered source to lower local inferred int const declaration, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Adjustment += (tinygo_imported_000_Bonus - adjustmentBase);") {
 		t.Fatalf("expected imported lowered source to compound-assign imported package var, got: %q", importedLoweredSource)

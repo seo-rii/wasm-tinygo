@@ -830,15 +830,22 @@ func Build(input Input) (Result, error) {
 		translatedStatements.WriteString(outputs.String())
 		return true
 	}
-	translateRunnableLocalVarDecl := func(statement *ast.DeclStmt, locals map[string]string, translateExpression func(ast.Expr, map[string]string) (string, string, int, bool)) (string, bool) {
+	translateRunnableLocalScalarDecl := func(statement *ast.DeclStmt, locals map[string]string, translateExpression func(ast.Expr, map[string]string) (string, string, int, bool)) (string, bool) {
 		genDecl, ok := statement.Decl.(*ast.GenDecl)
-		if !ok || genDecl.Tok != token.VAR {
+		if !ok || (genDecl.Tok != token.VAR && genDecl.Tok != token.CONST) {
 			return "", false
 		}
+		constDecl := genDecl.Tok == token.CONST
 		var translatedStatements strings.Builder
 		for _, spec := range genDecl.Specs {
 			valueSpec, ok := spec.(*ast.ValueSpec)
-			if !ok || len(valueSpec.Names) == 0 || (len(valueSpec.Values) != 0 && len(valueSpec.Values) != len(valueSpec.Names)) {
+			if !ok || len(valueSpec.Names) == 0 {
+				return "", false
+			}
+			if constDecl && len(valueSpec.Values) != len(valueSpec.Names) {
+				return "", false
+			}
+			if !constDecl && len(valueSpec.Values) != 0 && len(valueSpec.Values) != len(valueSpec.Names) {
 				return "", false
 			}
 			explicitKind := ""
@@ -884,7 +891,11 @@ func Build(input Input) (Result, error) {
 				switch variableKind {
 				case "int":
 					locals[name.Name] = "int"
-					translatedStatements.WriteString(fmt.Sprintf("\tint %s = %s;\n", name.Name, variableInitializer))
+					if constDecl {
+						translatedStatements.WriteString(fmt.Sprintf("\tconst int %s = %s;\n", name.Name, variableInitializer))
+					} else {
+						translatedStatements.WriteString(fmt.Sprintf("\tint %s = %s;\n", name.Name, variableInitializer))
+					}
 				case "string":
 					locals[name.Name] = "string"
 					translatedStatements.WriteString(fmt.Sprintf("\tchar *%s = %s;\n", name.Name, variableInitializer))
@@ -1171,7 +1182,7 @@ func Build(input Input) (Result, error) {
 				}
 				translatedStatements.WriteString(fmt.Sprintf("\t%s(%s);\n", pkg.FunctionSymbols[callIdent.Name], strings.Join(translatedArgs, ", ")))
 			case *ast.DeclStmt:
-				translatedDecl, declOK := translateRunnableLocalVarDecl(typedStatement, locals, func(expression ast.Expr, locals map[string]string) (string, string, int, bool) {
+				translatedDecl, declOK := translateRunnableLocalScalarDecl(typedStatement, locals, func(expression ast.Expr, locals map[string]string) (string, string, int, bool) {
 					return translateRunnableExpression(pkg, expression, locals)
 				})
 				if !declOK {
@@ -4307,7 +4318,7 @@ func Build(input Input) (Result, error) {
 							}
 							translatedStatements.WriteString(fmt.Sprintf("\t%s;\n", translatedCall))
 						case *ast.DeclStmt:
-							translatedDecl, declOK := translateRunnableLocalVarDecl(typedStatement, locals, translateExpression)
+							translatedDecl, declOK := translateRunnableLocalScalarDecl(typedStatement, locals, translateExpression)
 							if !declOK {
 								return "", false
 							}
