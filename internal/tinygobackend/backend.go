@@ -730,6 +730,14 @@ func Build(input Input) (Result, error) {
 			return "", false
 		}
 	}
+	runnableCompoundAssignToken := func(op token.Token) (string, bool) {
+		switch op {
+		case token.ADD_ASSIGN, token.SUB_ASSIGN, token.MUL_ASSIGN, token.QUO_ASSIGN, token.REM_ASSIGN:
+			return op.String(), true
+		default:
+			return "", false
+		}
+	}
 	appendRunnablePrintArgument := func(translatedStatements *strings.Builder, translatedArgument string, argumentKind string, byteLength int, newline int) bool {
 		switch argumentKind {
 		case "string":
@@ -1200,7 +1208,8 @@ func Build(input Input) (Result, error) {
 					}
 					continue
 				}
-				if typedStatement.Tok != token.ASSIGN {
+				compoundAssignToken, compoundAssignOK := runnableCompoundAssignToken(typedStatement.Tok)
+				if typedStatement.Tok != token.ASSIGN && !compoundAssignOK {
 					return "", false
 				}
 				if leftName.Name == "_" {
@@ -1221,6 +1230,13 @@ func Build(input Input) (Result, error) {
 				}
 				if localKind != translatedKind && !(localKind == "error" && translatedKind == "int") {
 					return "", false
+				}
+				if compoundAssignOK {
+					if localKind != "int" || translatedKind != "int" {
+						return "", false
+					}
+					translatedStatements.WriteString(fmt.Sprintf("\t%s %s %s;\n", leftSymbol, compoundAssignToken, translatedValue))
+					continue
 				}
 				translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftSymbol, translatedValue))
 			case *ast.IncDecStmt:
@@ -1362,7 +1378,8 @@ func Build(input Input) (Result, error) {
 							return "", false
 						}
 					case *ast.AssignStmt:
-						if len(postStatement.Lhs) != 1 || len(postStatement.Rhs) != 1 || postStatement.Tok != token.ASSIGN {
+						compoundAssignToken, compoundAssignOK := runnableCompoundAssignToken(postStatement.Tok)
+						if len(postStatement.Lhs) != 1 || len(postStatement.Rhs) != 1 || (postStatement.Tok != token.ASSIGN && !compoundAssignOK) {
 							return "", false
 						}
 						postName, ok := postStatement.Lhs[0].(*ast.Ident)
@@ -1376,6 +1393,10 @@ func Build(input Input) (Result, error) {
 						translatedValue, translatedKind, _, translatedOK := translateRunnableExpression(pkg, postStatement.Rhs[0], loopLocals)
 						if !translatedOK || translatedKind != "int" {
 							return "", false
+						}
+						if compoundAssignOK {
+							postFragment = fmt.Sprintf("%s %s %s", postName.Name, compoundAssignToken, translatedValue)
+							break
 						}
 						postFragment = fmt.Sprintf("%s = %s", postName.Name, translatedValue)
 					default:
@@ -4374,7 +4395,8 @@ func Build(input Input) (Result, error) {
 								}
 								continue
 							}
-							if typedStatement.Tok != token.ASSIGN {
+							compoundAssignToken, compoundAssignOK := runnableCompoundAssignToken(typedStatement.Tok)
+							if typedStatement.Tok != token.ASSIGN && !compoundAssignOK {
 								return "", false
 							}
 							if leftName.Name == "_" {
@@ -4393,6 +4415,13 @@ func Build(input Input) (Result, error) {
 							}
 							if localKind != translatedKind && !(localKind == "error" && translatedKind == "int") {
 								return "", false
+							}
+							if compoundAssignOK {
+								if localKind != "int" || translatedKind != "int" {
+									return "", false
+								}
+								translatedStatements.WriteString(fmt.Sprintf("\t%s %s %s;\n", leftSymbol, compoundAssignToken, translatedValue))
+								continue
 							}
 							translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftSymbol, translatedValue))
 						case *ast.IncDecStmt:
@@ -4532,7 +4561,8 @@ func Build(input Input) (Result, error) {
 										return "", false
 									}
 								case *ast.AssignStmt:
-									if len(postStatement.Lhs) != 1 || len(postStatement.Rhs) != 1 || postStatement.Tok != token.ASSIGN {
+									compoundAssignToken, compoundAssignOK := runnableCompoundAssignToken(postStatement.Tok)
+									if len(postStatement.Lhs) != 1 || len(postStatement.Rhs) != 1 || (postStatement.Tok != token.ASSIGN && !compoundAssignOK) {
 										return "", false
 									}
 									postName, ok := postStatement.Lhs[0].(*ast.Ident)
@@ -4546,6 +4576,10 @@ func Build(input Input) (Result, error) {
 									translatedValue, translatedKind, _, translatedOK := translateExpression(postStatement.Rhs[0], loopLocals)
 									if !translatedOK || translatedKind != "int" {
 										return "", false
+									}
+									if compoundAssignOK {
+										postFragment = fmt.Sprintf("%s %s %s", postName.Name, compoundAssignToken, translatedValue)
+										break
 									}
 									postFragment = fmt.Sprintf("%s = %s", postName.Name, translatedValue)
 								default:

@@ -695,9 +695,9 @@ func main() {
 	var localBoost int
 	var localLabel = label
 	if allow && localLabel == "package_var_total" {
-		localBoost = len(localLabel) - 14
-		delta = localBoost
-		total = total + delta
+		localBoost += len(localLabel) - 14
+		delta += localBoost
+		total += delta
 	}
 	fmt.Printf("%s=%d\n", label, total)
 }
@@ -775,14 +775,14 @@ func main() {
 	if !strings.Contains(loweredSourceContents, "char *localLabel = label;") {
 		t.Fatalf("expected lowered source to lower inferred local string var declaration, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "localBoost = (tinygo_runtime_string_len(localLabel) - 14);") {
-		t.Fatalf("expected lowered source to lower string len into package var assignment, got: %q", loweredSourceContents)
+	if !strings.Contains(loweredSourceContents, "localBoost += (tinygo_runtime_string_len(localLabel) - 14);") {
+		t.Fatalf("expected lowered source to lower string len into local compound assignment, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "delta = localBoost;") {
-		t.Fatalf("expected lowered source to assign local int var into package var, got: %q", loweredSourceContents)
+	if !strings.Contains(loweredSourceContents, "delta += localBoost;") {
+		t.Fatalf("expected lowered source to compound-assign local int var into package var, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "total = (total + delta);") {
-		t.Fatalf("expected lowered source to lower package var update, got: %q", loweredSourceContents)
+	if !strings.Contains(loweredSourceContents, "total += delta;") {
+		t.Fatalf("expected lowered source to lower package var compound assignment, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "char *tinygo_printf_arg_000 = label;") {
 		t.Fatalf("expected lowered source to pass string package var into fmt.Printf, got: %q", loweredSourceContents)
@@ -1332,14 +1332,14 @@ func Factorial(n int) int {
 
 func Sum(n int) int {
 	total := 0
-	for i := 1; ; i++ {
+	for i := 1; ; i += 1 {
 		if i > n {
 			break
 		}
 		if i == 0 {
 			continue
 		}
-		total = total + i
+		total += i
 	}
 	return total
 }
@@ -1366,10 +1366,11 @@ func Total(n int) int {
 	}
 	total := Factorial(n) + Sum(2)
 	if ApplyBonus || false {
-		Bonus = len(OutputLabel) - 11
+		Bonus += len(OutputLabel) - 14
 		var adjustmentBase = 3
-		Adjustment = Bonus - adjustmentBase
-		return total + Adjustment
+		Adjustment += Bonus - adjustmentBase
+		total += Adjustment
+		return total
 	}
 	return Factorial(n)
 }
@@ -1527,17 +1528,20 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "if ((tinygo_imported_000_ApplyBonus || 0)) {") {
 		t.Fatalf("expected imported lowered source to lower logical boolean conditions, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus = (tinygo_runtime_string_len(tinygo_imported_000_OutputLabel) - 11);") {
-		t.Fatalf("expected imported lowered source to assign string len into imported package var, got: %q", importedLoweredSource)
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus += (tinygo_runtime_string_len(tinygo_imported_000_OutputLabel) - 14);") {
+		t.Fatalf("expected imported lowered source to compound-assign string len into imported package var, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "int adjustmentBase = 3;") {
 		t.Fatalf("expected imported lowered source to lower local inferred int var declaration, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Adjustment = (tinygo_imported_000_Bonus - adjustmentBase);") {
-		t.Fatalf("expected imported lowered source to assign imported package var, got: %q", importedLoweredSource)
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Adjustment += (tinygo_imported_000_Bonus - adjustmentBase);") {
+		t.Fatalf("expected imported lowered source to compound-assign imported package var, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "return (total + tinygo_imported_000_Adjustment);") {
-		t.Fatalf("expected imported lowered source to read imported package var, got: %q", importedLoweredSource)
+	if !strings.Contains(importedLoweredSource, "total += tinygo_imported_000_Adjustment;") {
+		t.Fatalf("expected imported lowered source to compound-assign imported package var into local, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "return total;") {
+		t.Fatalf("expected imported lowered source to return compound assignment result, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(programLoweredSource, "int tinygo_runtime_string_equal(const char *left, const char *right)") {
 		t.Fatalf("expected program lowered source to export string equality helper for imported packages, got: %q", programLoweredSource)
@@ -1575,7 +1579,7 @@ func Total(n int) int {
 func TestBuildProducesRunnableExecutionArtifactsForSimpleForLoopSubset(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "main.go")
-	sourceContents := "package main\n\nfunc main() {\n\tsum := 0\n\tfor i := 0; i < 3; i++ {\n\t\tsum = sum + i\n\t}\n\tprintln(sum)\n}\n"
+	sourceContents := "package main\n\nfunc main() {\n\tsum := 0\n\tfor i := 0; i < 3; i += 1 {\n\t\tsum += i\n\t}\n\tprintln(sum)\n}\n"
 	if err := os.WriteFile(sourcePath, []byte(sourceContents), 0o644); err != nil {
 		t.Fatalf("os.WriteFile(source): %v", err)
 	}
@@ -1614,8 +1618,8 @@ func TestBuildProducesRunnableExecutionArtifactsForSimpleForLoopSubset(t *testin
 	if !strings.Contains(loweredSourceContents, "for (int i = 0; (i < 3); i += 1) {") {
 		t.Fatalf("expected lowered source to lower for loop, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "sum = (sum + i);") {
-		t.Fatalf("expected lowered source to lower loop body assignment, got: %q", loweredSourceContents)
+	if !strings.Contains(loweredSourceContents, "sum += i;") {
+		t.Fatalf("expected lowered source to lower loop body compound assignment, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "tinygo_runtime_print_i32(sum, 1);") {
 		t.Fatalf("expected lowered source to lower println(sum), got: %q", loweredSourceContents)

@@ -80,7 +80,7 @@ func factorial(n int) int {
 
 func adjust(total int) int {
 \tswitchOffset = total - total
-\tbonus = len(baseLabel) - 17
+\tbonus += len(baseLabel) - 17
 \treturn switchOffset
 }
 
@@ -88,8 +88,8 @@ func main() {
 \tvar total int
 \ttotal = factorial(5)
 \tif allowBonus && !skipPenalty {
-\t\ttotal = total + adjust(total)
-\t\ttotal = total + bonus
+\t\ttotal += adjust(total)
+\t\ttotal += bonus
 \t}
 \tfmt.Printf("%s=%d input=%d\\n", label(5), total, 5)
 }
@@ -120,14 +120,14 @@ func Factorial(n int) int {
 
 func Sum(n int) int {
 \ttotal := 0
-\tfor i := 1; ; i++ {
+\tfor i := 1; ; i += 1 {
 \t\tif i > n {
 \t\t\tbreak
 \t\t}
 \t\tif i == 0 {
 \t\t\tcontinue
 \t\t}
-\t\ttotal = total + i
+\t\ttotal += i
 \t}
 \treturn total
 }
@@ -154,10 +154,11 @@ func Total(n int) int {
 \t}
 \ttotal := Factorial(n) + Sum(2)
 \tif ApplyBonus || false {
-\t\tBonus = len(OutputLabel) - 11
+\t\tBonus += len(OutputLabel) - 14
 \t\tvar adjustmentBase = 3
-\t\tAdjustment = Bonus - adjustmentBase
-\t\treturn total + Adjustment
+\t\tAdjustment += Bonus - adjustmentBase
+\t\ttotal += Adjustment
+\t\treturn total
 \t}
 \treturn Factorial(n)
 }

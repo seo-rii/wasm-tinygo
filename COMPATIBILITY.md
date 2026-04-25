@@ -158,7 +158,7 @@ When the host compile seam is unavailable, the browser backend can still produce
 Currently covered in automated tests:
 
 - `fmt.Print`, `fmt.Println`, and multi-placeholder `fmt.Printf` for string and integer values (`%s` and `%d`)
-- integer/string/boolean constants, scalar package variables, local scalar `var` declarations, arithmetic, comparisons, string `len(...)`, string equality/inequality, logical conditions, local variables, simple loops with `break`/`continue`, conditionals, and simple integer/string/expressionless `switch` statements
+- integer/string/boolean constants, scalar package variables, local scalar `var` declarations, arithmetic, compound integer assignments, comparisons, string `len(...)`, string equality/inequality, logical conditions, local variables, simple loops with `break`/`continue`, conditionals, and simple integer/string/expressionless `switch` statements
 - recursive integer and string helper functions in the main package
 - local imported packages that expose integer or string helper functions, including recursive helpers and package-level integer/string/boolean constants or scalar variables
 - explicit browser-side failure surfacing for unsupported bridge-less fallback programs that introduce methods or interface/struct-heavy package shapes, plus explicit invalid-target planner diagnostics in the same smoke path
