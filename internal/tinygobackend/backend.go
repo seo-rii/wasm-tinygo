@@ -261,6 +261,10 @@ func Build(input Input) (Result, error) {
 		ConstantDefinitions map[string]string
 		ConstantKinds       map[string]string
 		ConstantSymbols     map[string]string
+		VariableOrder       []string
+		VariableDefinitions map[string]string
+		VariableKinds       map[string]string
+		VariableSymbols     map[string]string
 		FunctionOrder       []string
 		FunctionDecls       map[string]*ast.FuncDecl
 		FunctionReturnsInt  map[string]bool
@@ -309,6 +313,10 @@ func Build(input Input) (Result, error) {
 			ConstantDefinitions: map[string]string{},
 			ConstantKinds:       map[string]string{},
 			ConstantSymbols:     map[string]string{},
+			VariableOrder:       make([]string, 0),
+			VariableDefinitions: map[string]string{},
+			VariableKinds:       map[string]string{},
+			VariableSymbols:     map[string]string{},
 			FunctionOrder:       make([]string, 0),
 			FunctionDecls:       map[string]*ast.FuncDecl{},
 			FunctionReturnsInt:  map[string]bool{},
@@ -399,6 +407,10 @@ func Build(input Input) (Result, error) {
 									runnablePackageFailures[loweredUnit.ID] = true
 									return nil, false
 								}
+								if _, ok := pkg.VariableDefinitions[name.Name]; ok {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
 								constantSymbol := name.Name
 								if loweredUnit.Kind != "program" {
 									constantSymbol = fmt.Sprintf("tinygo_%s_%s", symbolID, name.Name)
@@ -449,6 +461,120 @@ func Build(input Input) (Result, error) {
 									pkg.ConstantKinds[name.Name] = "int"
 									pkg.ConstantSymbols[name.Name] = constantSymbol
 									pkg.ConstantDefinitions[name.Name] = fmt.Sprintf("static const int %s = %s;\n", constantSymbol, boolValue)
+								default:
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+							}
+						}
+					case token.VAR:
+						for _, spec := range typedDecl.Specs {
+							valueSpec, ok := spec.(*ast.ValueSpec)
+							if !ok || len(valueSpec.Names) == 0 || (len(valueSpec.Values) != 0 && len(valueSpec.Values) != len(valueSpec.Names)) {
+								runnablePackageFailures[loweredUnit.ID] = true
+								return nil, false
+							}
+							explicitKind := ""
+							if valueSpec.Type != nil {
+								typeIdent, ok := valueSpec.Type.(*ast.Ident)
+								if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string" && typeIdent.Name != "bool") {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								explicitKind = typeIdent.Name
+								if explicitKind == "bool" {
+									explicitKind = "int"
+								}
+							}
+							for index, name := range valueSpec.Names {
+								if name == nil || name.Name == "" {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								if _, ok := pkg.ConstantDefinitions[name.Name]; ok {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								if _, ok := pkg.VariableDefinitions[name.Name]; ok {
+									runnablePackageFailures[loweredUnit.ID] = true
+									return nil, false
+								}
+								variableSymbol := name.Name
+								if loweredUnit.Kind != "program" {
+									variableSymbol = fmt.Sprintf("tinygo_%s_%s", symbolID, name.Name)
+								}
+								variableKind := explicitKind
+								variableInitializer := ""
+								if len(valueSpec.Values) == 0 {
+									switch variableKind {
+									case "int":
+										variableInitializer = "0"
+									case "string":
+										variableInitializer = strconv.Quote("")
+									default:
+										runnablePackageFailures[loweredUnit.ID] = true
+										return nil, false
+									}
+								} else {
+									switch typedValue := valueSpec.Values[index].(type) {
+									case *ast.BasicLit:
+										switch typedValue.Kind {
+										case token.INT:
+											if variableKind != "" && variableKind != "int" {
+												runnablePackageFailures[loweredUnit.ID] = true
+												return nil, false
+											}
+											variableKind = "int"
+											variableInitializer = typedValue.Value
+										case token.STRING:
+											if variableKind != "" && variableKind != "string" {
+												runnablePackageFailures[loweredUnit.ID] = true
+												return nil, false
+											}
+											unquotedValue, err := strconv.Unquote(typedValue.Value)
+											if err != nil {
+												runnablePackageFailures[loweredUnit.ID] = true
+												return nil, false
+											}
+											variableKind = "string"
+											variableInitializer = strconv.Quote(unquotedValue)
+										default:
+											runnablePackageFailures[loweredUnit.ID] = true
+											return nil, false
+										}
+									case *ast.UnaryExpr:
+										if typedValue.Op != token.SUB || (variableKind != "" && variableKind != "int") {
+											runnablePackageFailures[loweredUnit.ID] = true
+											return nil, false
+										}
+										basicValue, ok := typedValue.X.(*ast.BasicLit)
+										if !ok || basicValue.Kind != token.INT {
+											runnablePackageFailures[loweredUnit.ID] = true
+											return nil, false
+										}
+										variableKind = "int"
+										variableInitializer = "-" + basicValue.Value
+									case *ast.Ident:
+										boolValue, ok := runnableBoolLiteralValue(typedValue.Name)
+										if !ok || (variableKind != "" && variableKind != "int") {
+											runnablePackageFailures[loweredUnit.ID] = true
+											return nil, false
+										}
+										variableKind = "int"
+										variableInitializer = boolValue
+									default:
+										runnablePackageFailures[loweredUnit.ID] = true
+										return nil, false
+									}
+								}
+								pkg.VariableOrder = append(pkg.VariableOrder, name.Name)
+								pkg.VariableKinds[name.Name] = variableKind
+								pkg.VariableSymbols[name.Name] = variableSymbol
+								switch variableKind {
+								case "int":
+									pkg.VariableDefinitions[name.Name] = fmt.Sprintf("static int %s = %s;\n", variableSymbol, variableInitializer)
+								case "string":
+									pkg.VariableDefinitions[name.Name] = fmt.Sprintf("static char *%s = %s;\n", variableSymbol, variableInitializer)
 								default:
 									runnablePackageFailures[loweredUnit.ID] = true
 									return nil, false
@@ -705,6 +831,13 @@ func Build(input Input) (Result, error) {
 				}
 				return constantSymbol, constantKind, 0, true
 			}
+			if variableSymbol, ok := pkg.VariableSymbols[typedExpression.Name]; ok {
+				variableKind, ok := pkg.VariableKinds[typedExpression.Name]
+				if !ok {
+					return "", "", 0, false
+				}
+				return variableSymbol, variableKind, 0, true
+			}
 			if typedExpression.Name == "nil" {
 				return "0", "nil", 0, true
 			}
@@ -954,27 +1087,48 @@ func Build(input Input) (Result, error) {
 					continue
 				}
 				localKind, ok := locals[leftName.Name]
+				leftSymbol := leftName.Name
 				if !ok {
-					return "", false
+					variableSymbol, variableOK := pkg.VariableSymbols[leftName.Name]
+					if !variableOK {
+						return "", false
+					}
+					localKind, ok = pkg.VariableKinds[leftName.Name]
+					if !ok {
+						return "", false
+					}
+					leftSymbol = variableSymbol
 				}
 				if localKind != translatedKind && !(localKind == "error" && translatedKind == "int") {
 					return "", false
 				}
-				translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftName.Name, translatedValue))
+				translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftSymbol, translatedValue))
 			case *ast.IncDecStmt:
 				ident, ok := typedStatement.X.(*ast.Ident)
 				if !ok || ident.Name == "" {
 					return "", false
 				}
 				localKind, ok := locals[ident.Name]
-				if !ok || localKind != "int" {
+				targetSymbol := ident.Name
+				if !ok {
+					variableSymbol, variableOK := pkg.VariableSymbols[ident.Name]
+					if !variableOK {
+						return "", false
+					}
+					localKind, ok = pkg.VariableKinds[ident.Name]
+					if !ok {
+						return "", false
+					}
+					targetSymbol = variableSymbol
+				}
+				if localKind != "int" {
 					return "", false
 				}
 				switch typedStatement.Tok {
 				case token.INC:
-					translatedStatements.WriteString(fmt.Sprintf("\t%s += 1;\n", ident.Name))
+					translatedStatements.WriteString(fmt.Sprintf("\t%s += 1;\n", targetSymbol))
 				case token.DEC:
-					translatedStatements.WriteString(fmt.Sprintf("\t%s -= 1;\n", ident.Name))
+					translatedStatements.WriteString(fmt.Sprintf("\t%s -= 1;\n", targetSymbol))
 				default:
 					return "", false
 				}
@@ -1220,6 +1374,13 @@ func Build(input Input) (Result, error) {
 				return nil, nil, nil, false
 			}
 			generatedDefinitions = append(generatedDefinitions, constantDefinition)
+		}
+		for _, variableName := range pkg.VariableOrder {
+			variableDefinition := pkg.VariableDefinitions[variableName]
+			if variableDefinition == "" {
+				return nil, nil, nil, false
+			}
+			generatedDefinitions = append(generatedDefinitions, variableDefinition)
 		}
 		exportedFunctions := map[string]runnableFunctionInfo{}
 		exportedFunctionOrder := make([]string, 0)
@@ -3418,7 +3579,7 @@ func Build(input Input) (Result, error) {
 				}
 			}
 		}
-		if loweredUnit.Kind == "program" && len(parsedGoFiles) >= 1 && len(types) == 0 && len(variables) == 0 {
+		if loweredUnit.Kind == "program" && len(parsedGoFiles) >= 1 && len(types) == 0 {
 			supportsRunnableProgram := true
 			supportedRunnableImports := map[string]struct{}{
 				"bufio":   {},
@@ -3430,12 +3591,15 @@ func Build(input Input) (Result, error) {
 			aliasToImportPath := map[string]string{}
 			topLevelConstants := map[string]struct{}{}
 			topLevelConstantKinds := map[string]string{}
+			topLevelVariables := map[string]struct{}{}
+			topLevelVariableKinds := map[string]string{}
 			topLevelFunctionReturnKinds := map[string]string{}
 			topLevelFunctionDefinitions := map[string]string{}
 			topLevelFunctionParameters := map[string][]string{}
 			functionDecls := map[string]*ast.FuncDecl{}
 			functionOrder := make([]string, 0)
 			constantOrder := make([]string, 0)
+			variableOrder := make([]string, 0)
 			for _, parsedProgramFile := range parsedGoFiles {
 				for _, decl := range parsedProgramFile.Decls {
 					switch typedDecl := decl.(type) {
@@ -3478,6 +3642,118 @@ func Build(input Input) (Result, error) {
 							}
 							continue
 						}
+						if typedDecl.Tok == token.VAR {
+							for _, spec := range typedDecl.Specs {
+								valueSpec, ok := spec.(*ast.ValueSpec)
+								if !ok || len(valueSpec.Names) == 0 || (len(valueSpec.Values) != 0 && len(valueSpec.Values) != len(valueSpec.Names)) {
+									supportsRunnableProgram = false
+									continue
+								}
+								explicitKind := ""
+								if valueSpec.Type != nil {
+									typeIdent, ok := valueSpec.Type.(*ast.Ident)
+									if !ok || (typeIdent.Name != "int" && typeIdent.Name != "string" && typeIdent.Name != "bool") {
+										supportsRunnableProgram = false
+										continue
+									}
+									explicitKind = typeIdent.Name
+									if explicitKind == "bool" {
+										explicitKind = "int"
+									}
+								}
+								for index, name := range valueSpec.Names {
+									if name == nil || name.Name == "" {
+										supportsRunnableProgram = false
+										continue
+									}
+									if _, exists := topLevelConstants[name.Name]; exists {
+										supportsRunnableProgram = false
+										continue
+									}
+									if _, exists := topLevelVariables[name.Name]; exists {
+										supportsRunnableProgram = false
+										continue
+									}
+									variableKind := explicitKind
+									variableInitializer := ""
+									if len(valueSpec.Values) == 0 {
+										switch variableKind {
+										case "int":
+											variableInitializer = "0"
+										case "string":
+											variableInitializer = strconv.Quote("")
+										default:
+											supportsRunnableProgram = false
+											continue
+										}
+									} else {
+										valueExpression := valueSpec.Values[index]
+										switch typedValue := valueExpression.(type) {
+										case *ast.BasicLit:
+											switch typedValue.Kind {
+											case token.INT:
+												if variableKind != "" && variableKind != "int" {
+													supportsRunnableProgram = false
+													continue
+												}
+												variableKind = "int"
+												variableInitializer = typedValue.Value
+											case token.STRING:
+												if variableKind != "" && variableKind != "string" {
+													supportsRunnableProgram = false
+													continue
+												}
+												unquotedValue, err := strconv.Unquote(typedValue.Value)
+												if err != nil {
+													supportsRunnableProgram = false
+													continue
+												}
+												variableKind = "string"
+												variableInitializer = strconv.Quote(unquotedValue)
+											default:
+												supportsRunnableProgram = false
+												continue
+											}
+										case *ast.UnaryExpr:
+											if typedValue.Op != token.SUB || (variableKind != "" && variableKind != "int") {
+												supportsRunnableProgram = false
+												continue
+											}
+											basicValue, ok := typedValue.X.(*ast.BasicLit)
+											if !ok || basicValue.Kind != token.INT {
+												supportsRunnableProgram = false
+												continue
+											}
+											variableKind = "int"
+											variableInitializer = "-" + basicValue.Value
+										case *ast.Ident:
+											boolValue, ok := runnableBoolLiteralValue(typedValue.Name)
+											if !ok || (variableKind != "" && variableKind != "int") {
+												supportsRunnableProgram = false
+												continue
+											}
+											variableKind = "int"
+											variableInitializer = boolValue
+										default:
+											supportsRunnableProgram = false
+											continue
+										}
+									}
+									topLevelVariables[name.Name] = struct{}{}
+									topLevelVariableKinds[name.Name] = variableKind
+									variableOrder = append(variableOrder, name.Name)
+									switch variableKind {
+									case "int":
+										topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static int %s = %s;\n", name.Name, variableInitializer)
+									case "string":
+										topLevelFunctionDefinitions[name.Name] = fmt.Sprintf("static char *%s = %s;\n", name.Name, variableInitializer)
+									default:
+										supportsRunnableProgram = false
+									}
+								}
+							}
+							continue
+						}
 						if typedDecl.Tok != token.CONST {
 							supportsRunnableProgram = false
 							continue
@@ -3497,6 +3773,10 @@ func Build(input Input) (Result, error) {
 							}
 							for index, name := range valueSpec.Names {
 								if name == nil || name.Name == "" {
+									supportsRunnableProgram = false
+									continue
+								}
+								if _, exists := topLevelVariables[name.Name]; exists {
 									supportsRunnableProgram = false
 									continue
 								}
@@ -3659,6 +3939,13 @@ func Build(input Input) (Result, error) {
 								return "", "", 0, false
 							}
 							return typedExpression.Name, constantKind, 0, true
+						}
+						if _, ok := topLevelVariables[typedExpression.Name]; ok {
+							variableKind, ok := topLevelVariableKinds[typedExpression.Name]
+							if !ok {
+								return "", "", 0, false
+							}
+							return typedExpression.Name, variableKind, 0, true
 						}
 						if typedExpression.Name == "nil" {
 							return "0", "nil", 0, true
@@ -3935,27 +4222,44 @@ func Build(input Input) (Result, error) {
 								continue
 							}
 							localKind, ok := locals[leftName.Name]
+							leftSymbol := leftName.Name
 							if !ok {
-								return "", false
+								if _, variableOK := topLevelVariables[leftName.Name]; !variableOK {
+									return "", false
+								}
+								localKind, ok = topLevelVariableKinds[leftName.Name]
+								if !ok {
+									return "", false
+								}
 							}
 							if localKind != translatedKind && !(localKind == "error" && translatedKind == "int") {
 								return "", false
 							}
-							translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftName.Name, translatedValue))
+							translatedStatements.WriteString(fmt.Sprintf("\t%s = %s;\n", leftSymbol, translatedValue))
 						case *ast.IncDecStmt:
 							ident, ok := typedStatement.X.(*ast.Ident)
 							if !ok || ident.Name == "" {
 								return "", false
 							}
 							localKind, ok := locals[ident.Name]
-							if !ok || localKind != "int" {
+							targetSymbol := ident.Name
+							if !ok {
+								if _, variableOK := topLevelVariables[ident.Name]; !variableOK {
+									return "", false
+								}
+								localKind, ok = topLevelVariableKinds[ident.Name]
+								if !ok {
+									return "", false
+								}
+							}
+							if localKind != "int" {
 								return "", false
 							}
 							switch typedStatement.Tok {
 							case token.INC:
-								translatedStatements.WriteString(fmt.Sprintf("\t%s += 1;\n", ident.Name))
+								translatedStatements.WriteString(fmt.Sprintf("\t%s += 1;\n", targetSymbol))
 							case token.DEC:
-								translatedStatements.WriteString(fmt.Sprintf("\t%s -= 1;\n", ident.Name))
+								translatedStatements.WriteString(fmt.Sprintf("\t%s -= 1;\n", targetSymbol))
 							default:
 								return "", false
 							}
@@ -4197,6 +4501,10 @@ func Build(input Input) (Result, error) {
 				for _, constantName := range constantOrder {
 					generatedConstantDefinitions = append(generatedConstantDefinitions, topLevelFunctionDefinitions[constantName])
 				}
+				generatedVariableDefinitions := make([]string, 0, len(variableOrder))
+				for _, variableName := range variableOrder {
+					generatedVariableDefinitions = append(generatedVariableDefinitions, topLevelFunctionDefinitions[variableName])
+				}
 				generatedFunctionPrototypes := make([]string, 0, len(functionOrder))
 				generatedImportedPrototypes := make([]string, 0)
 				for _, importPath := range aliasToImportPath {
@@ -4407,6 +4715,9 @@ func Build(input Input) (Result, error) {
 					loweredSourceContents.WriteString("}\n")
 					for _, constantDefinition := range generatedConstantDefinitions {
 						loweredSourceContents.WriteString(constantDefinition)
+					}
+					for _, variableDefinition := range generatedVariableDefinitions {
+						loweredSourceContents.WriteString(variableDefinition)
 					}
 					for _, functionPrototype := range generatedFunctionPrototypes {
 						loweredSourceContents.WriteString(functionPrototype)

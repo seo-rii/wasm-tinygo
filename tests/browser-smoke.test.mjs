@@ -56,10 +56,11 @@ go 1.22
 
 import "fmt"
 
-const bonus = 3
+var bonus = 3
 const baseLabel = "factorial_plus_bonus"
 const allowBonus = true
 const skipPenalty bool = false
+var switchOffset int
 
 func label(n int) string {
 \tswitch n % 2 {
@@ -77,10 +78,15 @@ func factorial(n int) int {
 \treturn n * factorial(n-1)
 }
 
+func adjust(total int) int {
+\tswitchOffset = total - total
+\treturn switchOffset
+}
+
 func main() {
 \ttotal := factorial(5)
 \tif allowBonus && !skipPenalty {
-\t\ttotal = total + bonus
+\t\ttotal = total + bonus + adjust(total)
 \t}
 \tfmt.Printf("%s=%d input=%d\\n", label(5), total, 5)
 }
@@ -95,11 +101,12 @@ go 1.22
 
 import "fmt"
 
-const Bonus = 3
+var Bonus = 3
 const InputLabel = "helper_input"
 const OutputLabel = "imported_total"
 const ApplyBonus = true
 const SkipReport bool = false
+var Adjustment int
 
 func Factorial(n int) int {
 \tif n <= 1 {
@@ -141,7 +148,8 @@ func Total(n int) int {
 \t}
 \ttotal := Factorial(n) + Sum(2)
 \tif ApplyBonus || false {
-\t\treturn total
+\t\tAdjustment = Bonus - 3
+\t\treturn total + Adjustment
 \t}
 \treturn Factorial(n)
 }

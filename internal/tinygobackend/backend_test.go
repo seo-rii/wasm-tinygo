@@ -678,6 +678,96 @@ func main() {
 	}
 }
 
+func TestBuildLowersScalarPackageVarsForRunnableSubset(t *testing.T) {
+	tempDir := t.TempDir()
+	entryPath := filepath.Join(tempDir, "main.go")
+	if err := os.WriteFile(entryPath, []byte(`package main
+
+import "fmt"
+
+var total = 120
+var label = "package_var_total"
+var allow bool
+var delta int
+
+func main() {
+	allow = true
+	if allow {
+		delta = 3
+		total = total + delta
+	}
+	fmt.Printf("%s=%d\n", label, total)
+}
+`), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(main.go): %v", err)
+	}
+
+	result, err := Build(Input{
+		EntryFile: entryPath,
+		CompileJobs: []CompileJob{
+			{
+				ID:                "program-000",
+				Kind:              "program",
+				ImportPath:        "command-line-arguments",
+				Imports:           []string{"fmt"},
+				DepOnly:           false,
+				ModulePath:        "example.com/app",
+				PackageName:       "main",
+				PackageDir:        tempDir,
+				Files:             []string{entryPath},
+				BitcodeOutputPath: "/working/tinygo-work/program-000.bc",
+				LLVMTarget:        "wasm32-unknown-wasi",
+				CFlags:            []string{"-mbulk-memory", "-mnontrapping-fptoint"},
+				OptimizeFlag:      "-Oz",
+				Standard:          false,
+			},
+		},
+		LinkJob: LinkJob{
+			Linker:             "wasm-ld",
+			LDFlags:            []string{"--stack-first", "--no-demangle"},
+			ArtifactOutputPath: "/working/out.wasm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	generatedFilesByPath := map[string]string{}
+	for _, generatedFile := range result.GeneratedFiles {
+		generatedFilesByPath[generatedFile.Path] = generatedFile.Contents
+	}
+	var commandArtifactManifest CommandArtifactManifest
+	if err := json.Unmarshal([]byte(generatedFilesByPath["/working/tinygo-command-artifact.json"]), &commandArtifactManifest); err != nil {
+		t.Fatalf("json.Unmarshal(command-artifact): %v", err)
+	}
+	if commandArtifactManifest.ArtifactKind != "execution" || commandArtifactManifest.Entrypoint == nil || *commandArtifactManifest.Entrypoint != "main" || !commandArtifactManifest.Runnable {
+		t.Fatalf("expected runnable command artifact manifest, got %#v", commandArtifactManifest)
+	}
+
+	loweredSourceContents := generatedFilesByPath["/working/tinygo-lowered/program-000.c"]
+	if !strings.Contains(loweredSourceContents, "static int total = 120;") {
+		t.Fatalf("expected lowered source to lower int package var, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static char *label = \"package_var_total\";") {
+		t.Fatalf("expected lowered source to lower string package var, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static int allow = 0;") {
+		t.Fatalf("expected lowered source to lower zero bool package var, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static int delta = 0;") {
+		t.Fatalf("expected lowered source to lower zero int package var, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "allow = 1;") {
+		t.Fatalf("expected lowered source to lower bool package var assignment, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "total = (total + delta);") {
+		t.Fatalf("expected lowered source to lower package var update, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "char *tinygo_printf_arg_000 = label;") {
+		t.Fatalf("expected lowered source to pass string package var into fmt.Printf, got: %q", loweredSourceContents)
+	}
+}
+
 func TestBuildUsesSourceContentsForLoweredSourceHashWhenFilesExist(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "main.go")
@@ -1205,11 +1295,12 @@ func main() {
 
 import "fmt"
 
-const Bonus = 3
+var Bonus = 3
 const InputLabel = "helper_input"
 const OutputLabel = "imported_total"
 const ApplyBonus = true
 const SkipReport bool = false
+var Adjustment int
 
 func Factorial(n int) int {
 	if n <= 1 {
@@ -1246,7 +1337,8 @@ func Total(n int) int {
 	}
 	total := Factorial(n) + Sum(2)
 	if ApplyBonus || false {
-		return total
+		Adjustment = Bonus - 3
+		return total + Adjustment
 	}
 	return Factorial(n)
 }
@@ -1344,8 +1436,11 @@ func Total(n int) int {
 	if !strings.Contains(programLoweredSource, "tinygo_runtime_print_i32(tinygo_printf_arg_") {
 		t.Fatalf("expected program lowered source to print imported helper result, got: %q", programLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "static const int tinygo_imported_000_Bonus = 3;") {
-		t.Fatalf("expected imported lowered source to prefix imported constants, got: %q", importedLoweredSource)
+	if !strings.Contains(importedLoweredSource, "static int tinygo_imported_000_Bonus = 3;") {
+		t.Fatalf("expected imported lowered source to prefix imported int vars, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "static int tinygo_imported_000_Adjustment = 0;") {
+		t.Fatalf("expected imported lowered source to prefix imported zero int vars, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "static char *tinygo_imported_000_InputLabel = \"helper_input\";") {
 		t.Fatalf("expected imported lowered source to prefix imported string constants, got: %q", importedLoweredSource)
@@ -1400,6 +1495,12 @@ func Total(n int) int {
 	}
 	if !strings.Contains(importedLoweredSource, "if ((tinygo_imported_000_ApplyBonus || 0)) {") {
 		t.Fatalf("expected imported lowered source to lower logical boolean conditions, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Adjustment = (tinygo_imported_000_Bonus - 3);") {
+		t.Fatalf("expected imported lowered source to assign imported package var, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "return (total + tinygo_imported_000_Adjustment);") {
+		t.Fatalf("expected imported lowered source to read imported package var, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "char* tinygo_imported_000_Label(void)") {
 		t.Fatalf("expected imported lowered source to lower exported string helper, got: %q", importedLoweredSource)
