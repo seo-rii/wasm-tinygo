@@ -692,8 +692,11 @@ var delta int
 
 func main() {
 	allow = true
-	if allow && label == "package_var_total" {
-		delta = len(label) - 14
+	var localBoost int
+	var localLabel = label
+	if allow && localLabel == "package_var_total" {
+		localBoost = len(localLabel) - 14
+		delta = localBoost
 		total = total + delta
 	}
 	fmt.Printf("%s=%d\n", label, total)
@@ -763,11 +766,20 @@ func main() {
 	if !strings.Contains(loweredSourceContents, "static int tinygo_runtime_string_equal(const char *left, const char *right)") {
 		t.Fatalf("expected lowered source to embed string equality helper, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "if ((allow && (tinygo_runtime_string_equal(label, \"package_var_total\") != 0))) {") {
+	if !strings.Contains(loweredSourceContents, "if ((allow && (tinygo_runtime_string_equal(localLabel, \"package_var_total\") != 0))) {") {
 		t.Fatalf("expected lowered source to lower string equality condition, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "delta = (tinygo_runtime_string_len(label) - 14);") {
+	if !strings.Contains(loweredSourceContents, "int localBoost = 0;") {
+		t.Fatalf("expected lowered source to lower local zero int var declaration, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "char *localLabel = label;") {
+		t.Fatalf("expected lowered source to lower inferred local string var declaration, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "localBoost = (tinygo_runtime_string_len(localLabel) - 14);") {
 		t.Fatalf("expected lowered source to lower string len into package var assignment, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "delta = localBoost;") {
+		t.Fatalf("expected lowered source to assign local int var into package var, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "total = (total + delta);") {
 		t.Fatalf("expected lowered source to lower package var update, got: %q", loweredSourceContents)
@@ -1355,7 +1367,8 @@ func Total(n int) int {
 	total := Factorial(n) + Sum(2)
 	if ApplyBonus || false {
 		Bonus = len(OutputLabel) - 11
-		Adjustment = Bonus - 3
+		var adjustmentBase = 3
+		Adjustment = Bonus - adjustmentBase
 		return total + Adjustment
 	}
 	return Factorial(n)
@@ -1517,7 +1530,10 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus = (tinygo_runtime_string_len(tinygo_imported_000_OutputLabel) - 11);") {
 		t.Fatalf("expected imported lowered source to assign string len into imported package var, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Adjustment = (tinygo_imported_000_Bonus - 3);") {
+	if !strings.Contains(importedLoweredSource, "int adjustmentBase = 3;") {
+		t.Fatalf("expected imported lowered source to lower local inferred int var declaration, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Adjustment = (tinygo_imported_000_Bonus - adjustmentBase);") {
 		t.Fatalf("expected imported lowered source to assign imported package var, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "return (total + tinygo_imported_000_Adjustment);") {

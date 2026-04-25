@@ -85,7 +85,8 @@ func adjust(total int) int {
 }
 
 func main() {
-\ttotal := factorial(5)
+\tvar total int
+\ttotal = factorial(5)
 \tif allowBonus && !skipPenalty {
 \t\ttotal = total + adjust(total)
 \t\ttotal = total + bonus
@@ -154,7 +155,8 @@ func Total(n int) int {
 \ttotal := Factorial(n) + Sum(2)
 \tif ApplyBonus || false {
 \t\tBonus = len(OutputLabel) - 11
-\t\tAdjustment = Bonus - 3
+\t\tvar adjustmentBase = 3
+\t\tAdjustment = Bonus - adjustmentBase
 \t\treturn total + Adjustment
 \t}
 \treturn Factorial(n)
