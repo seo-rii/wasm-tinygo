@@ -696,8 +696,8 @@ func main() {
 	var localLabel = label
 	const localExpected = "package_var_total"
 	const localPenalty = 14
-	if allow && localLabel == localExpected {
-		localBoost += len(localLabel) - localPenalty
+	if localLen := len(localLabel); allow && localLabel == localExpected {
+		localBoost += localLen - localPenalty
 		delta += localBoost
 		total += delta
 	}
@@ -780,10 +780,13 @@ func main() {
 	if !strings.Contains(loweredSourceContents, "const int localPenalty = 14;") {
 		t.Fatalf("expected lowered source to lower local int const declaration, got: %q", loweredSourceContents)
 	}
+	if !strings.Contains(loweredSourceContents, "int localLen = tinygo_runtime_string_len(localLabel);") {
+		t.Fatalf("expected lowered source to lower if init short declaration, got: %q", loweredSourceContents)
+	}
 	if !strings.Contains(loweredSourceContents, "if ((allow && (tinygo_runtime_string_equal(localLabel, localExpected) != 0))) {") {
 		t.Fatalf("expected lowered source to lower local string const comparison, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "localBoost += (tinygo_runtime_string_len(localLabel) - localPenalty);") {
+	if !strings.Contains(loweredSourceContents, "localBoost += (localLen - localPenalty);") {
 		t.Fatalf("expected lowered source to lower string len into local compound assignment, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "delta += localBoost;") {
@@ -1374,8 +1377,9 @@ func Total(n int) int {
 	}
 	total := Factorial(n) + Sum(2)
 	if ApplyBonus || false {
-		const labelLen = 14
-		Bonus += len(OutputLabel) - labelLen
+		if labelLen := len(OutputLabel); labelLen > 0 {
+			Bonus += labelLen - 14
+		}
 		const adjustmentBase = 3
 		Adjustment += Bonus - adjustmentBase
 		total += Adjustment
@@ -1537,10 +1541,13 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "if ((tinygo_imported_000_ApplyBonus || 0)) {") {
 		t.Fatalf("expected imported lowered source to lower logical boolean conditions, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "const int labelLen = 14;") {
-		t.Fatalf("expected imported lowered source to lower local inferred int const declaration, got: %q", importedLoweredSource)
+	if !strings.Contains(importedLoweredSource, "int labelLen = tinygo_runtime_string_len(tinygo_imported_000_OutputLabel);") {
+		t.Fatalf("expected imported lowered source to lower if init short declaration, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus += (tinygo_runtime_string_len(tinygo_imported_000_OutputLabel) - labelLen);") {
+	if !strings.Contains(importedLoweredSource, "if ((labelLen > 0)) {") {
+		t.Fatalf("expected imported lowered source to lower if init condition, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus += (labelLen - 14);") {
 		t.Fatalf("expected imported lowered source to compound-assign string len into imported package var, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "const int adjustmentBase = 3;") {

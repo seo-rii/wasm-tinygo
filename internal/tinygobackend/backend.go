@@ -906,6 +906,45 @@ func Build(input Input) (Result, error) {
 		}
 		return translatedStatements.String(), true
 	}
+	cloneRunnableLocals := func(locals map[string]string) map[string]string {
+		clonedLocals := map[string]string{}
+		for name, kind := range locals {
+			clonedLocals[name] = kind
+		}
+		return clonedLocals
+	}
+	translateRunnableInitStatement := func(statement ast.Stmt, locals map[string]string, translateExpression func(ast.Expr, map[string]string) (string, string, int, bool)) (string, bool) {
+		switch typedStatement := statement.(type) {
+		case *ast.DeclStmt:
+			return translateRunnableLocalScalarDecl(typedStatement, locals, translateExpression)
+		case *ast.AssignStmt:
+			if len(typedStatement.Lhs) != 1 || len(typedStatement.Rhs) != 1 || typedStatement.Tok != token.DEFINE {
+				return "", false
+			}
+			leftName, ok := typedStatement.Lhs[0].(*ast.Ident)
+			if !ok || leftName.Name == "" || leftName.Name == "_" {
+				return "", false
+			}
+			if _, exists := locals[leftName.Name]; exists {
+				return "", false
+			}
+			translatedValue, translatedKind, _, translatedOK := translateExpression(typedStatement.Rhs[0], locals)
+			if !translatedOK || (translatedKind != "int" && translatedKind != "string" && translatedKind != "error") {
+				return "", false
+			}
+			locals[leftName.Name] = translatedKind
+			switch translatedKind {
+			case "int", "error":
+				return fmt.Sprintf("\tint %s = %s;\n", leftName.Name, translatedValue), true
+			case "string":
+				return fmt.Sprintf("\tchar *%s = %s;\n", leftName.Name, translatedValue), true
+			default:
+				return "", false
+			}
+		default:
+			return "", false
+		}
+	}
 	var translateRunnableExpression func(*runnablePackage, ast.Expr, map[string]string) (string, string, int, bool)
 	translateRunnableExpression = func(pkg *runnablePackage, expression ast.Expr, locals map[string]string) (string, string, int, bool) {
 		switch typedExpression := expression.(type) {
@@ -1292,28 +1331,41 @@ func Build(input Input) (Result, error) {
 					return "", false
 				}
 			case *ast.IfStmt:
+				ifLocals := locals
+				translatedInit := ""
 				if typedStatement.Init != nil {
-					return "", false
+					ifLocals = cloneRunnableLocals(locals)
+					var initOK bool
+					translatedInit, initOK = translateRunnableInitStatement(typedStatement.Init, ifLocals, func(expression ast.Expr, locals map[string]string) (string, string, int, bool) {
+						return translateRunnableExpression(pkg, expression, locals)
+					})
+					if !initOK {
+						return "", false
+					}
 				}
-				translatedCondition, conditionKind, _, conditionOK := translateRunnableExpression(pkg, typedStatement.Cond, locals)
+				translatedCondition, conditionKind, _, conditionOK := translateRunnableExpression(pkg, typedStatement.Cond, ifLocals)
 				if !conditionOK || conditionKind != "int" {
 					return "", false
 				}
-				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, locals, functionReturnKind, loopDepth)
+				translatedBody, bodyOK := translateRunnableStatementList(pkg, typedStatement.Body.List, ifLocals, functionReturnKind, loopDepth)
 				if !bodyOK {
 					return "", false
+				}
+				if typedStatement.Init != nil {
+					translatedStatements.WriteString("\t{\n")
+					translatedStatements.WriteString(translatedInit)
 				}
 				translatedStatements.WriteString(fmt.Sprintf("\tif (%s) {\n%s\t}\n", translatedCondition, translatedBody))
 				if typedStatement.Else != nil {
 					switch typedElse := typedStatement.Else.(type) {
 					case *ast.BlockStmt:
-						translatedElse, elseOK := translateRunnableStatementList(pkg, typedElse.List, locals, functionReturnKind, loopDepth)
+						translatedElse, elseOK := translateRunnableStatementList(pkg, typedElse.List, ifLocals, functionReturnKind, loopDepth)
 						if !elseOK {
 							return "", false
 						}
 						translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", translatedElse))
 					case *ast.IfStmt:
-						translatedElse, elseOK := translateRunnableStatementList(pkg, []ast.Stmt{typedElse}, locals, functionReturnKind, loopDepth)
+						translatedElse, elseOK := translateRunnableStatementList(pkg, []ast.Stmt{typedElse}, ifLocals, functionReturnKind, loopDepth)
 						if !elseOK {
 							return "", false
 						}
@@ -1323,6 +1375,9 @@ func Build(input Input) (Result, error) {
 					default:
 						return "", false
 					}
+				}
+				if typedStatement.Init != nil {
+					translatedStatements.WriteString("\t}\n")
 				}
 			case *ast.ForStmt:
 				loopLocals := map[string]string{}
@@ -4475,28 +4530,39 @@ func Build(input Input) (Result, error) {
 								return "", false
 							}
 						case *ast.IfStmt:
+							ifLocals := locals
+							translatedInit := ""
 							if typedStatement.Init != nil {
-								return "", false
+								ifLocals = cloneRunnableLocals(locals)
+								var initOK bool
+								translatedInit, initOK = translateRunnableInitStatement(typedStatement.Init, ifLocals, translateExpression)
+								if !initOK {
+									return "", false
+								}
 							}
-							translatedCondition, conditionKind, _, conditionOK := translateExpression(typedStatement.Cond, locals)
+							translatedCondition, conditionKind, _, conditionOK := translateExpression(typedStatement.Cond, ifLocals)
 							if !conditionOK || conditionKind != "int" {
 								return "", false
 							}
-							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, locals, functionReturnKind, loopDepth)
+							translatedBody, bodyOK := translateStatementList(typedStatement.Body.List, ifLocals, functionReturnKind, loopDepth)
 							if !bodyOK {
 								return "", false
+							}
+							if typedStatement.Init != nil {
+								translatedStatements.WriteString("\t{\n")
+								translatedStatements.WriteString(translatedInit)
 							}
 							translatedStatements.WriteString(fmt.Sprintf("\tif (%s) {\n%s\t}\n", translatedCondition, translatedBody))
 							if typedStatement.Else != nil {
 								switch typedElse := typedStatement.Else.(type) {
 								case *ast.BlockStmt:
-									translatedElse, elseOK := translateStatementList(typedElse.List, locals, functionReturnKind, loopDepth)
+									translatedElse, elseOK := translateStatementList(typedElse.List, ifLocals, functionReturnKind, loopDepth)
 									if !elseOK {
 										return "", false
 									}
 									translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", translatedElse))
 								case *ast.IfStmt:
-									translatedElse, elseOK := translateStatementList([]ast.Stmt{typedElse}, locals, functionReturnKind, loopDepth)
+									translatedElse, elseOK := translateStatementList([]ast.Stmt{typedElse}, ifLocals, functionReturnKind, loopDepth)
 									if !elseOK {
 										return "", false
 									}
@@ -4506,6 +4572,9 @@ func Build(input Input) (Result, error) {
 								default:
 									return "", false
 								}
+							}
+							if typedStatement.Init != nil {
+								translatedStatements.WriteString("\t}\n")
 							}
 						case *ast.ForStmt:
 							loopLocals := map[string]string{}

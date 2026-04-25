@@ -88,7 +88,7 @@ func main() {
 \tvar total int
 \tconst inputValue = 5
 \ttotal = factorial(inputValue)
-\tif allowBonus && !skipPenalty {
+\tif readyTotal := total; allowBonus && !skipPenalty && readyTotal > 0 {
 \t\ttotal += adjust(total)
 \t\ttotal += bonus
 \t}
@@ -155,8 +155,9 @@ func Total(n int) int {
 \t}
 \ttotal := Factorial(n) + Sum(2)
 \tif ApplyBonus || false {
-\t\tconst labelLen = 14
-\t\tBonus += len(OutputLabel) - labelLen
+\t\tif labelLen := len(OutputLabel); labelLen > 0 {
+\t\t\tBonus += labelLen - 14
+\t\t}
 \t\tconst adjustmentBase = 3
 \t\tAdjustment += Bonus - adjustmentBase
 \t\ttotal += Adjustment
