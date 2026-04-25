@@ -1475,13 +1475,25 @@ func Build(input Input) (Result, error) {
 				}
 				translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
 			case *ast.SwitchStmt:
-				if typedStatement.Init != nil || typedStatement.Body == nil {
+				if typedStatement.Body == nil {
 					return "", false
+				}
+				switchLocals := locals
+				translatedInit := ""
+				if typedStatement.Init != nil {
+					switchLocals = cloneRunnableLocals(locals)
+					var initOK bool
+					translatedInit, initOK = translateRunnableInitStatement(typedStatement.Init, switchLocals, func(expression ast.Expr, locals map[string]string) (string, string, int, bool) {
+						return translateRunnableExpression(pkg, expression, locals)
+					})
+					if !initOK {
+						return "", false
+					}
 				}
 				tagValue := ""
 				tagKind := "int"
 				if typedStatement.Tag != nil {
-					translatedTag, translatedTagKind, _, tagOK := translateRunnableExpression(pkg, typedStatement.Tag, locals)
+					translatedTag, translatedTagKind, _, tagOK := translateRunnableExpression(pkg, typedStatement.Tag, switchLocals)
 					if !tagOK || (translatedTagKind != "int" && translatedTagKind != "string") {
 						return "", false
 					}
@@ -1500,7 +1512,7 @@ func Build(input Input) (Result, error) {
 						return "", false
 					}
 					caseLocals := map[string]string{}
-					for name, kind := range locals {
+					for name, kind := range switchLocals {
 						caseLocals[name] = kind
 					}
 					translatedBody, bodyOK := translateRunnableStatementList(pkg, caseClause.Body, caseLocals, functionReturnKind, loopDepth)
@@ -1516,7 +1528,7 @@ func Build(input Input) (Result, error) {
 					}
 					conditions := make([]string, 0, len(caseClause.List))
 					for _, caseExpression := range caseClause.List {
-						translatedCase, translatedCaseKind, _, caseOK := translateRunnableExpression(pkg, caseExpression, locals)
+						translatedCase, translatedCaseKind, _, caseOK := translateRunnableExpression(pkg, caseExpression, switchLocals)
 						if !caseOK || translatedCaseKind != tagKind {
 							return "", false
 						}
@@ -1541,6 +1553,10 @@ func Build(input Input) (Result, error) {
 						body:      translatedBody,
 					})
 				}
+				if typedStatement.Init != nil {
+					translatedStatements.WriteString("\t{\n")
+					translatedStatements.WriteString(translatedInit)
+				}
 				for caseIndex, translatedCase := range translatedCases {
 					if caseIndex == 0 {
 						translatedStatements.WriteString(fmt.Sprintf("\tif (%s) {\n%s\t}\n", translatedCase.condition, translatedCase.body))
@@ -1554,6 +1570,9 @@ func Build(input Input) (Result, error) {
 					} else {
 						translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", defaultBody))
 					}
+				}
+				if typedStatement.Init != nil {
+					translatedStatements.WriteString("\t}\n")
 				}
 			case *ast.ReturnStmt:
 				if functionReturnKind != "void" {
@@ -4672,13 +4691,23 @@ func Build(input Input) (Result, error) {
 							}
 							translatedStatements.WriteString(fmt.Sprintf("\tfor (%s; %s; %s) {\n%s\t}\n", initFragment, conditionFragment, postFragment, translatedBody))
 						case *ast.SwitchStmt:
-							if typedStatement.Init != nil || typedStatement.Body == nil {
+							if typedStatement.Body == nil {
 								return "", false
+							}
+							switchLocals := locals
+							translatedInit := ""
+							if typedStatement.Init != nil {
+								switchLocals = cloneRunnableLocals(locals)
+								var initOK bool
+								translatedInit, initOK = translateRunnableInitStatement(typedStatement.Init, switchLocals, translateExpression)
+								if !initOK {
+									return "", false
+								}
 							}
 							tagValue := ""
 							tagKind := "int"
 							if typedStatement.Tag != nil {
-								translatedTag, translatedTagKind, _, tagOK := translateExpression(typedStatement.Tag, locals)
+								translatedTag, translatedTagKind, _, tagOK := translateExpression(typedStatement.Tag, switchLocals)
 								if !tagOK || (translatedTagKind != "int" && translatedTagKind != "string") {
 									return "", false
 								}
@@ -4697,7 +4726,7 @@ func Build(input Input) (Result, error) {
 									return "", false
 								}
 								caseLocals := map[string]string{}
-								for name, kind := range locals {
+								for name, kind := range switchLocals {
 									caseLocals[name] = kind
 								}
 								translatedBody, bodyOK := translateStatementList(caseClause.Body, caseLocals, functionReturnKind, loopDepth)
@@ -4713,7 +4742,7 @@ func Build(input Input) (Result, error) {
 								}
 								conditions := make([]string, 0, len(caseClause.List))
 								for _, caseExpression := range caseClause.List {
-									translatedCase, translatedCaseKind, _, caseOK := translateExpression(caseExpression, locals)
+									translatedCase, translatedCaseKind, _, caseOK := translateExpression(caseExpression, switchLocals)
 									if !caseOK || translatedCaseKind != tagKind {
 										return "", false
 									}
@@ -4738,6 +4767,10 @@ func Build(input Input) (Result, error) {
 									body:      translatedBody,
 								})
 							}
+							if typedStatement.Init != nil {
+								translatedStatements.WriteString("\t{\n")
+								translatedStatements.WriteString(translatedInit)
+							}
 							for caseIndex, translatedCase := range translatedCases {
 								if caseIndex == 0 {
 									translatedStatements.WriteString(fmt.Sprintf("\tif (%s) {\n%s\t}\n", translatedCase.condition, translatedCase.body))
@@ -4751,6 +4784,9 @@ func Build(input Input) (Result, error) {
 								} else {
 									translatedStatements.WriteString(fmt.Sprintf("\telse {\n%s\t}\n", defaultBody))
 								}
+							}
+							if typedStatement.Init != nil {
+								translatedStatements.WriteString("\t}\n")
 							}
 						case *ast.ReturnStmt:
 							if functionReturnKind != "void" {

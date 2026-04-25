@@ -589,7 +589,7 @@ func TestBuildLowersSimpleSwitchStatementsForRunnableSubset(t *testing.T) {
 import "fmt"
 
 func classify(n int) string {
-	switch n % 4 {
+	switch bucket := n % 4; bucket {
 	case 0, 2:
 		return "even"
 	case 1:
@@ -661,10 +661,13 @@ func main() {
 	}
 
 	loweredSourceContents := generatedFilesByPath["/working/tinygo-lowered/program-000.c"]
-	if !strings.Contains(loweredSourceContents, "if (((n % 4) == 0) || ((n % 4) == 2)) {") {
+	if !strings.Contains(loweredSourceContents, "int bucket = (n % 4);") {
+		t.Fatalf("expected lowered source to lower switch init short declaration, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "if ((bucket == 0) || (bucket == 2)) {") {
 		t.Fatalf("expected lowered source to lower multi-value switch case, got: %q", loweredSourceContents)
 	}
-	if !strings.Contains(loweredSourceContents, "else if (((n % 4) == 1)) {") {
+	if !strings.Contains(loweredSourceContents, "else if ((bucket == 1)) {") {
 		t.Fatalf("expected lowered source to lower switch else-if case, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "if (((n > 10))) {") {
@@ -1360,7 +1363,7 @@ func Report(n int) {
 }
 
 func Label() string {
-	switch OutputLabel {
+	switch labelTag := OutputLabel; labelTag {
 	case "imported_total":
 		return OutputLabel
 	default:
@@ -1574,7 +1577,10 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "char* tinygo_imported_000_Label(void)") {
 		t.Fatalf("expected imported lowered source to lower exported string helper, got: %q", importedLoweredSource)
 	}
-	if !strings.Contains(importedLoweredSource, "if ((tinygo_runtime_string_equal(tinygo_imported_000_OutputLabel, \"imported_total\") != 0)) {") {
+	if !strings.Contains(importedLoweredSource, "char *labelTag = tinygo_imported_000_OutputLabel;") {
+		t.Fatalf("expected imported lowered source to lower switch init short declaration, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "if ((tinygo_runtime_string_equal(labelTag, \"imported_total\") != 0)) {") {
 		t.Fatalf("expected imported lowered source to lower string switch case, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "return tinygo_imported_000_OutputLabel;") {

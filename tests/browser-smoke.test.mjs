@@ -63,7 +63,7 @@ const skipPenalty bool = false
 var switchOffset int
 
 func label(n int) string {
-\tswitch baseLabel {
+\tswitch labelTag := baseLabel; labelTag {
 \tcase "factorial_plus_bonus":
 \t\treturn baseLabel
 \tdefault:
@@ -138,7 +138,7 @@ func Report(n int) {
 }
 
 func Label(n int) string {
-\tswitch OutputLabel {
+\tswitch labelTag := OutputLabel; labelTag {
 \tcase "imported_total":
 \t\treturn OutputLabel
 \tdefault:
