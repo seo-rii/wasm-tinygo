@@ -692,7 +692,7 @@ var delta int
 
 func main() {
 	allow = true
-	if allow {
+	if allow && label == "package_var_total" {
 		delta = len(label) - 14
 		total = total + delta
 	}
@@ -759,6 +759,12 @@ func main() {
 	}
 	if !strings.Contains(loweredSourceContents, "allow = 1;") {
 		t.Fatalf("expected lowered source to lower bool package var assignment, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "static int tinygo_runtime_string_equal(const char *left, const char *right)") {
+		t.Fatalf("expected lowered source to embed string equality helper, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "if ((allow && (tinygo_runtime_string_equal(label, \"package_var_total\") != 0))) {") {
+		t.Fatalf("expected lowered source to lower string equality condition, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "delta = (tinygo_runtime_string_len(label) - 14);") {
 		t.Fatalf("expected lowered source to lower string len into package var assignment, got: %q", loweredSourceContents)
@@ -1331,12 +1337,20 @@ func Report(n int) {
 }
 
 func Label() string {
-	return OutputLabel
+	switch OutputLabel {
+	case "imported_total":
+		return OutputLabel
+	default:
+		return "none"
+	}
 }
 
 func Total(n int) int {
 	if !SkipReport {
 		Report(n)
+	}
+	if OutputLabel != "imported_total" {
+		return 0
 	}
 	total := Factorial(n) + Sum(2)
 	if ApplyBonus || false {
@@ -1509,8 +1523,20 @@ func Total(n int) int {
 	if !strings.Contains(importedLoweredSource, "return (total + tinygo_imported_000_Adjustment);") {
 		t.Fatalf("expected imported lowered source to read imported package var, got: %q", importedLoweredSource)
 	}
+	if !strings.Contains(programLoweredSource, "int tinygo_runtime_string_equal(const char *left, const char *right)") {
+		t.Fatalf("expected program lowered source to export string equality helper for imported packages, got: %q", programLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "extern int tinygo_runtime_string_equal(const char *left, const char *right);") {
+		t.Fatalf("expected imported lowered source to declare string equality helper, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "if ((tinygo_runtime_string_equal(tinygo_imported_000_OutputLabel, \"imported_total\") == 0)) {") {
+		t.Fatalf("expected imported lowered source to lower string inequality condition, got: %q", importedLoweredSource)
+	}
 	if !strings.Contains(importedLoweredSource, "char* tinygo_imported_000_Label(void)") {
 		t.Fatalf("expected imported lowered source to lower exported string helper, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "if ((tinygo_runtime_string_equal(tinygo_imported_000_OutputLabel, \"imported_total\") != 0)) {") {
+		t.Fatalf("expected imported lowered source to lower string switch case, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "return tinygo_imported_000_OutputLabel;") {
 		t.Fatalf("expected imported lowered source to return string constant from helper, got: %q", importedLoweredSource)

@@ -710,6 +710,26 @@ func Build(input Input) (Result, error) {
 			return "", false
 		}
 	}
+	runnableStringCompareExpression := func(leftValue string, rightValue string, op token.Token) (string, bool) {
+		switch op {
+		case token.EQL:
+			return fmt.Sprintf("(tinygo_runtime_string_equal(%s, %s) != 0)", leftValue, rightValue), true
+		case token.NEQ:
+			return fmt.Sprintf("(tinygo_runtime_string_equal(%s, %s) == 0)", leftValue, rightValue), true
+		default:
+			return "", false
+		}
+	}
+	runnableTaggedCaseCondition := func(tagValue string, tagKind string, caseValue string) (string, bool) {
+		switch tagKind {
+		case "int":
+			return fmt.Sprintf("(%s == %s)", tagValue, caseValue), true
+		case "string":
+			return fmt.Sprintf("(tinygo_runtime_string_equal(%s, %s) != 0)", tagValue, caseValue), true
+		default:
+			return "", false
+		}
+	}
 	appendRunnablePrintArgument := func(translatedStatements *strings.Builder, translatedArgument string, argumentKind string, byteLength int, newline int) bool {
 		switch argumentKind {
 		case "string":
@@ -854,7 +874,24 @@ func Build(input Input) (Result, error) {
 					return "", "", 0, false
 				}
 				return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
-			case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ:
+			case token.EQL, token.NEQ:
+				if leftKind == "string" || rightKind == "string" {
+					if leftKind != "string" || rightKind != "string" {
+						return "", "", 0, false
+					}
+					translatedComparison, comparisonOK := runnableStringCompareExpression(leftValue, rightValue, typedExpression.Op)
+					if !comparisonOK {
+						return "", "", 0, false
+					}
+					return translatedComparison, "int", 0, true
+				}
+				leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
+				rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
+				if !leftComparable || !rightComparable {
+					return "", "", 0, false
+				}
+				return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+			case token.LSS, token.GTR, token.LEQ, token.GEQ:
 				leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
 				rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
 				if !leftComparable || !rightComparable {
@@ -1285,7 +1322,7 @@ func Build(input Input) (Result, error) {
 				tagKind := "int"
 				if typedStatement.Tag != nil {
 					translatedTag, translatedTagKind, _, tagOK := translateRunnableExpression(pkg, typedStatement.Tag, locals)
-					if !tagOK || translatedTagKind != "int" {
+					if !tagOK || (translatedTagKind != "int" && translatedTagKind != "string") {
 						return "", false
 					}
 					tagValue = translatedTag
@@ -1330,7 +1367,11 @@ func Build(input Input) (Result, error) {
 							conditions = append(conditions, fmt.Sprintf("(%s)", translatedCase))
 							continue
 						}
-						conditions = append(conditions, fmt.Sprintf("(%s == %s)", tagValue, translatedCase))
+						translatedCondition, conditionOK := runnableTaggedCaseCondition(tagValue, tagKind, translatedCase)
+						if !conditionOK {
+							return "", false
+						}
+						conditions = append(conditions, translatedCondition)
 					}
 					if len(conditions) == 0 {
 						return "", false
@@ -3585,6 +3626,7 @@ func Build(input Input) (Result, error) {
 				loweredSourceContents.WriteString("extern void tinygo_runtime_print_newline(void);\n")
 				loweredSourceContents.WriteString("extern void tinygo_runtime_print_string(const char *value, int newline);\n")
 				loweredSourceContents.WriteString("extern int tinygo_runtime_string_len(char *value);\n")
+				loweredSourceContents.WriteString("extern int tinygo_runtime_string_equal(const char *left, const char *right);\n")
 				for _, body := range bodies {
 					loweredSourceContents.WriteString(body)
 				}
@@ -3974,7 +4016,24 @@ func Build(input Input) (Result, error) {
 								return "", "", 0, false
 							}
 							return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
-						case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ:
+						case token.EQL, token.NEQ:
+							if leftKind == "string" || rightKind == "string" {
+								if leftKind != "string" || rightKind != "string" {
+									return "", "", 0, false
+								}
+								translatedComparison, comparisonOK := runnableStringCompareExpression(leftValue, rightValue, typedExpression.Op)
+								if !comparisonOK {
+									return "", "", 0, false
+								}
+								return translatedComparison, "int", 0, true
+							}
+							leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
+							rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
+							if !leftComparable || !rightComparable {
+								return "", "", 0, false
+							}
+							return fmt.Sprintf("(%s %s %s)", leftValue, typedExpression.Op.String(), rightValue), "int", 0, true
+						case token.LSS, token.GTR, token.LEQ, token.GEQ:
 							leftComparable := leftKind == "int" || leftKind == "error" || leftKind == "nil"
 							rightComparable := rightKind == "int" || rightKind == "error" || rightKind == "nil"
 							if !leftComparable || !rightComparable {
@@ -4427,7 +4486,7 @@ func Build(input Input) (Result, error) {
 							tagKind := "int"
 							if typedStatement.Tag != nil {
 								translatedTag, translatedTagKind, _, tagOK := translateExpression(typedStatement.Tag, locals)
-								if !tagOK || translatedTagKind != "int" {
+								if !tagOK || (translatedTagKind != "int" && translatedTagKind != "string") {
 									return "", false
 								}
 								tagValue = translatedTag
@@ -4472,7 +4531,11 @@ func Build(input Input) (Result, error) {
 										conditions = append(conditions, fmt.Sprintf("(%s)", translatedCase))
 										continue
 									}
-									conditions = append(conditions, fmt.Sprintf("(%s == %s)", tagValue, translatedCase))
+									translatedCondition, conditionOK := runnableTaggedCaseCondition(tagValue, tagKind, translatedCase)
+									if !conditionOK {
+										return "", false
+									}
+									conditions = append(conditions, translatedCondition)
 								}
 								if len(conditions) == 0 {
 									return "", false
@@ -4693,6 +4756,16 @@ func Build(input Input) (Result, error) {
 					loweredSourceContents.WriteString("\t\tlen += 1;\n")
 					loweredSourceContents.WriteString("\t}\n")
 					loweredSourceContents.WriteString("\treturn len;\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_string_equal(const char *left, const char *right) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\tint index = 0;\n")
+					loweredSourceContents.WriteString("\twhile (left[index] != '\\0' && right[index] != '\\0') {\n")
+					loweredSourceContents.WriteString("\t\tif (left[index] != right[index]) {\n")
+					loweredSourceContents.WriteString("\t\t\treturn 0;\n")
+					loweredSourceContents.WriteString("\t\t}\n")
+					loweredSourceContents.WriteString("\t\tindex += 1;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\treturn left[index] == right[index];\n")
 					loweredSourceContents.WriteString("}\n")
 					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_literal(const char *value, tinygo_wasi_size_t len, int newline) {\n", runtimeStorage))
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(value, len);\n")

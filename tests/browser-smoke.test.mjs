@@ -63,8 +63,8 @@ const skipPenalty bool = false
 var switchOffset int
 
 func label(n int) string {
-\tswitch n % 2 {
-\tcase 1:
+\tswitch baseLabel {
+\tcase "factorial_plus_bonus":
 \t\treturn baseLabel
 \tdefault:
 \t\treturn "even_input"
@@ -136,8 +136,8 @@ func Report(n int) {
 }
 
 func Label(n int) string {
-\tswitch {
-\tcase n > 0:
+\tswitch OutputLabel {
+\tcase "imported_total":
 \t\treturn OutputLabel
 \tdefault:
 \t\treturn "none"
@@ -147,6 +147,9 @@ func Label(n int) string {
 func Total(n int) int {
 \tif !SkipReport {
 \t\tReport(n)
+\t}
+\tif OutputLabel != "imported_total" {
+\t\treturn 0
 \t}
 \ttotal := Factorial(n) + Sum(2)
 \tif ApplyBonus || false {
