@@ -693,7 +693,7 @@ var delta int
 func main() {
 	allow = true
 	if allow {
-		delta = 3
+		delta = len(label) - 14
 		total = total + delta
 	}
 	fmt.Printf("%s=%d\n", label, total)
@@ -759,6 +759,9 @@ func main() {
 	}
 	if !strings.Contains(loweredSourceContents, "allow = 1;") {
 		t.Fatalf("expected lowered source to lower bool package var assignment, got: %q", loweredSourceContents)
+	}
+	if !strings.Contains(loweredSourceContents, "delta = (tinygo_runtime_string_len(label) - 14);") {
+		t.Fatalf("expected lowered source to lower string len into package var assignment, got: %q", loweredSourceContents)
 	}
 	if !strings.Contains(loweredSourceContents, "total = (total + delta);") {
 		t.Fatalf("expected lowered source to lower package var update, got: %q", loweredSourceContents)
@@ -1337,6 +1340,7 @@ func Total(n int) int {
 	}
 	total := Factorial(n) + Sum(2)
 	if ApplyBonus || false {
+		Bonus = len(OutputLabel) - 11
 		Adjustment = Bonus - 3
 		return total + Adjustment
 	}
@@ -1495,6 +1499,9 @@ func Total(n int) int {
 	}
 	if !strings.Contains(importedLoweredSource, "if ((tinygo_imported_000_ApplyBonus || 0)) {") {
 		t.Fatalf("expected imported lowered source to lower logical boolean conditions, got: %q", importedLoweredSource)
+	}
+	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Bonus = (tinygo_runtime_string_len(tinygo_imported_000_OutputLabel) - 11);") {
+		t.Fatalf("expected imported lowered source to assign string len into imported package var, got: %q", importedLoweredSource)
 	}
 	if !strings.Contains(importedLoweredSource, "tinygo_imported_000_Adjustment = (tinygo_imported_000_Bonus - 3);") {
 		t.Fatalf("expected imported lowered source to assign imported package var, got: %q", importedLoweredSource)

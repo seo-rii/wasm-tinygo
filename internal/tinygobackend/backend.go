@@ -905,6 +905,16 @@ func Build(input Input) (Result, error) {
 				return "", "", 0, false
 			}
 			functionName := functionIdent.Name
+			if functionName == "len" && len(typedExpression.Args) == 1 {
+				translatedArgument, argumentKind, byteLength, argumentOK := translateRunnableExpression(pkg, typedExpression.Args[0], locals)
+				if !argumentOK || argumentKind != "string" {
+					return "", "", 0, false
+				}
+				if byteLength > 0 {
+					return strconv.Itoa(byteLength), "int", 0, true
+				}
+				return fmt.Sprintf("tinygo_runtime_string_len(%s)", translatedArgument), "int", 0, true
+			}
 			returnKind, ok := pkg.FunctionReturnKinds[functionName]
 			if !ok || (returnKind != "int" && returnKind != "string") {
 				return "", "", 0, false
@@ -3574,6 +3584,7 @@ func Build(input Input) (Result, error) {
 				loweredSourceContents.WriteString("extern void tinygo_runtime_print_i32(int value, int newline);\n")
 				loweredSourceContents.WriteString("extern void tinygo_runtime_print_newline(void);\n")
 				loweredSourceContents.WriteString("extern void tinygo_runtime_print_string(const char *value, int newline);\n")
+				loweredSourceContents.WriteString("extern int tinygo_runtime_string_len(char *value);\n")
 				for _, body := range bodies {
 					loweredSourceContents.WriteString(body)
 				}
@@ -4010,6 +4021,16 @@ func Build(input Input) (Result, error) {
 							return "", "", 0, false
 						}
 						functionName := functionIdent.Name
+						if functionName == "len" && len(typedExpression.Args) == 1 {
+							translatedArgument, argumentKind, byteLength, argumentOK := translateExpression(typedExpression.Args[0], locals)
+							if !argumentOK || argumentKind != "string" {
+								return "", "", 0, false
+							}
+							if byteLength > 0 {
+								return strconv.Itoa(byteLength), "int", 0, true
+							}
+							return fmt.Sprintf("tinygo_runtime_string_len(%s)", translatedArgument), "int", 0, true
+						}
 						returnKind, ok := topLevelFunctionReturnKinds[functionName]
 						if !ok || (returnKind != "int" && returnKind != "string") {
 							return "", "", 0, false
@@ -4665,6 +4686,13 @@ func Build(input Input) (Result, error) {
 					loweredSourceContents.WriteString("}\n")
 					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_newline(void) {\n", runtimeStorage))
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(\"\\n\", 1u);\n")
+					loweredSourceContents.WriteString("}\n")
+					loweredSourceContents.WriteString(fmt.Sprintf("%sint tinygo_runtime_string_len(char *value) {\n", runtimeStorage))
+					loweredSourceContents.WriteString("\tint len = 0;\n")
+					loweredSourceContents.WriteString("\twhile (value[len] != '\\0') {\n")
+					loweredSourceContents.WriteString("\t\tlen += 1;\n")
+					loweredSourceContents.WriteString("\t}\n")
+					loweredSourceContents.WriteString("\treturn len;\n")
 					loweredSourceContents.WriteString("}\n")
 					loweredSourceContents.WriteString(fmt.Sprintf("%svoid tinygo_runtime_print_literal(const char *value, tinygo_wasi_size_t len, int newline) {\n", runtimeStorage))
 					loweredSourceContents.WriteString("\ttinygo_runtime_write(value, len);\n")
