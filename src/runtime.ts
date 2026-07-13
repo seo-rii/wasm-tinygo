@@ -213,8 +213,6 @@ export type TinyGoRuntimeOptions = {
   assetBaseUrl: string
   assetLoader?: TinyGoRuntimeAssetLoader
   assetPacks?: TinyGoRuntimeAssetPackReference[]
-  rustRuntimeBaseUrl?: string
-  rustRuntimeAssetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
   onProgress?: (progress: TinyGoRuntimeAssetProgress) => void
@@ -232,8 +230,6 @@ export type TinyGoBrowserRuntimeOptions = {
   baseUrl: string
   assetLoader?: TinyGoRuntimeAssetLoader
   assetPacks?: TinyGoRuntimeAssetPackReference[]
-  rustRuntimeBaseUrl?: string
-  rustRuntimeAssetPacks?: TinyGoRuntimeAssetPackReference[]
   bootstrapGoEntrySource?: string
   hostCompileUrl?: string
   onProgress?: (progress: TinyGoRuntimeAssetProgress) => void
@@ -340,7 +336,6 @@ const describePureBrowserFallbackFailure = (
 
 export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntime => {
   const assetBaseUrl = normalizeAssetBaseUrl(options.assetBaseUrl)
-  const rustRuntimeBaseUrl = normalizeAssetBaseUrl(options.rustRuntimeBaseUrl ?? assetBaseUrl)
   const textEncoder = new TextEncoder()
   const textDecoder = new TextDecoder()
   const bootstrapGoEntrySource = options.bootstrapGoEntrySource ?? DEFAULT_TINYGO_BOOTSTRAP_GO_ENTRY_SOURCE
@@ -364,7 +359,6 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
   let buildStateVersion = 0
   let activityLog = ''
   let compilerManifestPromise: Promise<TinyGoCompilerManifest | null> | null = null
-  let rustRuntimeManifestLoaded = false
 
   const setControlsLocked = (locked: boolean) => {
     options.onControlsLockedChange?.(locked)
@@ -447,17 +441,6 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
       return await loadAssetBytes('tools/go-probe.wasm', 'go-probe.wasm')
     }
   }
-
-  const loadRustRuntimeAssetBytes = async (assetPath: string, label: string) =>
-    await loadRuntimeAssetBytes({
-      assetPath,
-      assetUrl: new URL(assetPath, rustRuntimeBaseUrl).toString(),
-      label,
-      loader: options.assetLoader,
-      packs: options.rustRuntimeAssetPacks ?? null,
-      assetBaseUrl: rustRuntimeBaseUrl,
-      onProgress: options.onProgress,
-    })
 
   const toArrayBuffer = (bytes: Uint8Array) =>
     bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
@@ -774,8 +757,6 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     return result
   }
 
-  void loadRustRuntimeAssetBytes('runtime-manifest.v3.json', 'wasm-rust runtime manifest')
-
   const instantiateWasiModule = async (
     bytes: Uint8Array,
     imports: WebAssembly.Imports,
@@ -844,25 +825,6 @@ export const createTinyGoRuntime = (options: TinyGoRuntimeOptions): TinyGoRuntim
     bootPromise = (async () => {
       setControlsLocked(true)
       setPhase('toolchain', 'booting', 'running')
-      if (!rustRuntimeManifestLoaded && options.rustRuntimeAssetPacks?.length) {
-        appendLog('Fetching wasm-rust runtime manifest', 'running')
-        const manifestBytes = await loadRustRuntimeAssetBytes(
-          'runtime-manifest.v3.json',
-          'wasm-rust runtime manifest',
-        )
-        const manifestText = textDecoder.decode(manifestBytes)
-        try {
-          const manifest = JSON.parse(manifestText) as { version?: string }
-          appendLog(`wasm-rust runtime manifest loaded${manifest.version ? ` version=${manifest.version}` : ''}`, 'success')
-        } catch (error) {
-          appendLog(
-            `wasm-rust runtime manifest parse failed: ${error instanceof Error ? error.message : String(error)}`,
-            'error',
-          )
-          throw error
-        }
-        rustRuntimeManifestLoaded = true
-      }
       appendLog('Fetching patched emception worker', 'running')
 
       const workerUrl = await resolveWorkerUrl('vendor/emception/emception.worker.js')
@@ -2395,8 +2357,6 @@ export const createTinyGoBrowserRuntime = (options: TinyGoBrowserRuntimeOptions)
     assetBaseUrl: options.baseUrl,
     assetLoader: options.assetLoader,
     assetPacks: options.assetPacks,
-    rustRuntimeBaseUrl: options.rustRuntimeBaseUrl,
-    rustRuntimeAssetPacks: options.rustRuntimeAssetPacks,
     bootstrapGoEntrySource: options.bootstrapGoEntrySource,
     hostCompileUrl: options.hostCompileUrl,
     initialLogMessages: (options.initialLogs ?? []).map((message) => ({ message })),
